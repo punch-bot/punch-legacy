@@ -1,0 +1,21 @@
+{
+  "name": "punch",
+  "version": "1.0.0",
+  "description": "Discord bot that pipes into Pi and remembers things",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test test/*.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "chrono-node": "^2.9.1",
+    "cron-parser": "^5.6.1",
+    "discord.js": "^14.26.4",
+    "dotenv": "^16.6.1"
+  }
+}

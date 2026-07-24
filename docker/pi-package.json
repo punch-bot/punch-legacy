@@ -1,0 +1,9 @@
+{
+  "name": "punch-pi-deps",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Runtime deps for Punch Pi extensions (browser)",
+  "dependencies": {
+    "puppeteer": "^23.11.1"
+  }
+}

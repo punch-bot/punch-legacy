@@ -1,0 +1,57 @@
+# Punch — Pi sandbox stack.
+
+name: punch
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: docker/bot.Dockerfile
+    image: punch-bot
+    env_file: .env
+    environment:
+      PUNCH_STACK_NAME: punch
+      PUNCH_SANDBOX_IMAGE: punch-sandbox:latest
+      OPENCODE_SERVER_URL: ""
+      SANDBOX_MAP: "{}"
+      OPENCODE_REMOTE_DIR: /work
+      OPENCODE_TIMEOUT: "60"
+      OPENCODE_IDLE_TIMEOUT: "90"
+      OPENCODE_MAX: "1800"
+    tmpfs:
+      - /tmp
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1
+    networks:
+      - edge
+    ports:
+      - "4098:4098"
+    volumes:
+      - bot_state:/state
+      - octl_bot:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - "/punch:/punch:ro"
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    networks:
+      - edge
+    volumes:
+      - ./docker/searxng-settings.yml:/etc/searxng/settings.yml
+      - searxng-data:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    restart: unless-stopped
+    pids_limit: 256
+    mem_limit: 256m
+    cpus: 0.5
+
+networks:
+  edge: {}
+
+volumes:
+  octl_bot:
+  bot_state:
+  searxng-data:

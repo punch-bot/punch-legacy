@@ -1,0 +1,9 @@
+{
+  "composio": {
+    "type": "http",
+    "url": "http://punch-bot:4098/composio/mcp",
+    "headers": {
+      "authorization": "Basic ${COMPOSIO_AUTH}"
+    }
+  }
+}
