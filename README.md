@@ -1,6 +1,6 @@
 # Punch
 
-Discord bot + per-user **Pi** sandboxes.
+An AI agent living in Discord, designed to be a personal assistant
 
 - **Path:** `/punch`
 - **Discord:** production app
