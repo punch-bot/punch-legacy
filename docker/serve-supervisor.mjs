@@ -389,6 +389,12 @@ const BUILTIN_CUSTOM_PROVIDERS = {
       },
     ],
   },
+  nim: {
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    api: "openai-completions",
+    apiKey: "$NVIDIA_API_KEY",
+    models: [],
+  },
 };
 
 // Providers we used to override but removed so Pi's native (better) config wins.
@@ -444,6 +450,7 @@ const PROVIDER_ENV_MAP = {
   together: "TOGETHER_API_KEY",
   poolside: "POOLSIDE_API_KEY",
   opencode: "OPENCODE_API_KEY",
+  nim: "NVIDIA_API_KEY",
 };
 
 function loadJSON(file) {

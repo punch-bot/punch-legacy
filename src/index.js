@@ -357,10 +357,12 @@ const MODEL_LIST = [
   { label: "Claude Sonnet 4.5 (default)", value: "anthropic/claude-sonnet-4-5", emoji: "🧠" },
   { label: "Poolside Laguna Medium", value: "poolside/poolside/laguna-m.1", emoji: "🏊" },
   { label: "Poolside Laguna XS", value: "poolside/poolside/laguna-xs-2.1", emoji: "🏊" },
+  { label: "NIM GLM-5.2 (z-ai)", value: "nim/z-ai/glm-5.2", emoji: "💚" },
+  { label: "NIM Nemotron 70B", value: "nim/nvidia/llama-3.1-nemotron-70b-instruct", emoji: "💚" },
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 
-const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode"];
+const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "nim"];
 
 async function ensureUserSandbox(userId) {
   const apiUrl = apiUrlFor(userId);
