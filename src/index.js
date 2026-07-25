@@ -625,20 +625,20 @@ async function handleCommand(message, cmd, rest) {
             return `\`\`${t.pid}\`\` | ${t.stat} | ${t.start} | \`${shortCmd}\``;
           }).join("\n"))
           .setColor(0x00ff99);
-        
+
         const selectOptions = tasks.slice(0, 25).map(t => ({
           label: `PID ${t.pid}`,
           description: `${t.stat} | ${t.cmd.slice(0, 100)}`,
           value: String(t.pid),
         }));
-        
+
         const row = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId("kill_select")
             .setPlaceholder("Select a process to kill...")
             .addOptions(selectOptions)
         );
-        
+
         await message.reply({ embeds: [embed], components: [row] });
       } catch (err) {
         await reply(message, `⚠️ Error: ${err.message}`);
@@ -663,17 +663,17 @@ async function handleCommand(message, cmd, rest) {
     case "task-log": {
       const filename = rest.trim();
       if (!filename) return void (await reply(message, "Usage: \`task-log <filename>\`")), true;
-      
+
       if (filename.includes("/") || filename.includes("..")) {
         return void (await reply(message, "Invalid filename. Logs must be located directly in the workspace.")), true;
       }
-      
+
       try {
         const file = await getFile(filename, uid);
         const logContent = file.buffer.toString("utf8");
         const lines = logContent.trim().split("\n");
         const tail = lines.slice(-20).join("\n");
-        
+
         await reply(message, `📄 **Log Tail for \`${filename}\` (last 20 lines):**\n\`\`\`\n${tail || "(empty)"}\n\`\`\``);
       } catch (err) {
         await reply(message, `⚠️ Error fetching log: ${err.message}`);
@@ -1284,7 +1284,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const uid = opts.userId ?? message.author.id;
   const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox" };
   activeTurns.set(uid, turn);
-  
+
   // Ensure this user has their own sandbox workspace
   const sandboxUrl = await ensureUserSandbox(uid);
   if (!sandboxUrl) {
@@ -1300,7 +1300,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     activeTurns.delete(uid);
     return;
   }
-  
+
   const cid = message.channelId;
   const memoryUserText = text;
 
@@ -2674,14 +2674,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isStringSelectMenu() && interaction.customId === "kill_select") {
     const pid = parseInt(interaction.values[0]);
     const uid = interaction.user.id;
-    
+
     try {
       await killBackgroundTask(pid, uid);
       await interaction.reply({ content: `🛑 Killed process \`${pid}\`.`, flags: MessageFlags.Ephemeral });
-      
+
       const res = await listBackgroundTasks(uid);
       const tasks = res.tasks || [];
-      
+
       if (tasks.length === 0) {
         await interaction.message.edit({
           content: "No active background tasks running in the sandbox.",
@@ -2696,20 +2696,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
             return `\`\`${t.pid}\`\` | ${t.stat} | ${t.start} | \`${shortCmd}\``;
           }).join("\n"))
           .setColor(0x00ff99);
-        
+
         const selectOptions = tasks.slice(0, 25).map(t => ({
           label: `PID ${t.pid}`,
           description: `${t.stat} | ${t.cmd.slice(0, 100)}`,
           value: String(t.pid),
         }));
-        
+
         const row = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId("kill_select")
             .setPlaceholder("Select a process to kill...")
             .addOptions(selectOptions)
         );
-        
+
         await interaction.message.edit({ embeds: [embed], components: [row] });
       }
     } catch (err) {
@@ -3827,7 +3827,7 @@ async function runApprovedAgentPigeon(pending, pendingId = null) {
         pigeonGate.deletePending(activeId);
       }
       await enqueueChat(
-        triggerMsg,
+        text,
         "(agent pigeon task — act on the message above)",
         [],
         pigeonEnqueueOpts(recipientId, from, hopNum, sandboxName),
