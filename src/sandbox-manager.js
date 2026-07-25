@@ -110,6 +110,7 @@ function volumeArgs(name) {
     "--volume", `${vol("sandbox_work_" + name)}:/work`,
     "--volume", `${vol("octl_data_" + name)}:/data`,
     "--volume", `${vol("ts_state_" + name)}:/var/lib/tailscale`,
+    "--volume", `${vol("collab")}:/collab`,
   ];
 }
 
@@ -171,6 +172,7 @@ export function getContainerDiagnostics(name) {
       "/work": vol("sandbox_work_" + name),
       "/data": vol("octl_data_" + name),
       "/var/lib/tailscale": vol("ts_state_" + name),
+      "/collab": vol("collab"),
     },
     devices,
     capabilities,
@@ -215,6 +217,26 @@ export function getContainerLogs(name, tail = 50) {
   throw new Error(message);
 }
 
+// Only collaboration code calls this with fixed Git arguments. This avoids
+// exposing a model-controlled shell endpoint between isolated sandboxes.
+export async function gitInSandbox(name, args, { cwd } = {}) {
+  validateSandboxName(name);
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
+    throw new Error("Git arguments must be strings.");
+  }
+  const container = containerForSandbox(name);
+  if (!container) throw new Error(`Sandbox "${name}" is not running.`);
+  const command = ["exec"];
+  if (cwd) command.push("--workdir", cwd);
+  command.push(container, "git", ...args);
+  try {
+    const { stdout, stderr } = await execFileAsync("docker", command, { timeout: 30000 });
+    return { stdout: stdout.trim(), stderr: stderr.trim() };
+  } catch (error) {
+    throw new Error(error.stderr?.trim() || error.message || "Git command failed.");
+  }
+}
+
 async function removeContainer(name) {
   try {
     return await execFileAsync("docker", ["rm", "--force", CONTAINER_NAME(name)], { timeout: 15000 });
@@ -231,7 +253,7 @@ export async function composeUp(name) {
     validateSandboxName(name);
     await removeContainer(name);
     await execFileAsync("docker", ["build", "--tag", SANDBOX_IMAGE, "--file", "/punch/docker/sandbox.Dockerfile", "/punch"], { timeout: 120000 });
-    const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name];
+    const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
     for (const volumeName of volumeNames) {
       await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
     }

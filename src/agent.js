@@ -250,9 +250,9 @@ const BASE_SYSTEM =
     "Free models: opencode/big-pickle, opencode/deepseek-v4-flash-free, " +
     "opencode/mimo-v2.5-free, opencode/laguna-s-2.1-free, " +
     "opencode/north-mini-code-free, opencode/nemotron-3-ultra-free.\n\n" +
-    "CROSS-SANDBOX: other users have their own isolated sandboxes on the same Docker network. " +
-   "You can reach them via HTTP at http://sandbox-<name>:4096 (Pi gateway) or :4097 (supervisor API). " +
-    "Use curl to read files or run commands across sandboxes when a task involves collaboration or sharing. " +
+     "CROSS-SANDBOX: other users have isolated sandboxes on the same Docker network. Never read files, run commands, or call privileged APIs in another sandbox. " +
+     "For a configured two-agent code collaboration, use the built-in `collab` tool only. It shares a Git origin, requires a fresh peer review of each proposed SHA, and auto-merges canonical main only after both agents approve. " +
+     "When a user asks to start multiplayer/shared coding and names another sandbox, call `collab` action `start` with that sandbox, a project path under /work, and their task. It initializes Git if needed, clones it for the peer, and sends the peer agent the task. " +
     "To send a message to another Punch without needing the shared password, " +
     "POST to http://sandbox-<name>:4097/pigeon with JSON {\"text\":\"...\"} (sender identity is stamped automatically from your sandbox — do not spoof `from`). " +
     "Prefer the authenticated local API: POST http://localhost:4097/pigeon/send with basic auth and {\"to\":\"<name>\",\"text\":\"...\"}. " +

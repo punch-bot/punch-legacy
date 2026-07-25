@@ -53,6 +53,7 @@ COPY docker/worker-manager.mjs /usr/local/lib/worker-manager.mjs
 COPY docker/pi-worker-runner.mjs /usr/local/bin/pi-worker-runner.mjs
 COPY docker/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
 COPY docker/routines_extension.ts /opt/pi/extensions/routines.ts
+COPY docker/collab_extension.ts /opt/pi/extensions/collab.ts
 COPY docker/browser_extension.ts /opt/pi/extensions/browser.ts
 COPY docker/searxng_extension.ts /opt/pi/extensions/searxng.ts
 COPY docker/webfetch_extension.ts /opt/pi/extensions/webfetch.ts

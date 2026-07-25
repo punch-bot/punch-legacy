@@ -38,6 +38,7 @@ import { resolvePeerSandbox, isRegisteredSandboxName } from "./pigeon-peer.js";
 import { setPigeonTrust, setPigeonDeny } from "./settings.js";
 import * as logs from "./logs.js";
 import * as state from "./state.js";
+import * as collabs from "./collabs.js";
 import { renderDoctorReport, runDoctor } from "./doctor/index.js";
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -902,6 +903,23 @@ client.once(Events.ClientReady, async (c) => {
         options: [
           { type: 3, name: "name", description: "User name to remove", required: true },
         ] },
+    ],
+  }, {
+    name: "collab",
+    description: "Create and inspect two-agent code reviews",
+    options: [
+      { type: 1, name: "create", description: "Create a shared Git review flow",
+        options: [
+          { type: 3, name: "reviewer", description: "Other sandbox name", required: true },
+          { type: 3, name: "workspace", description: "Your existing Git repo under /work", required: true },
+        ] },
+      { type: 1, name: "start", description: "Initialize Git and start a two-agent coding task",
+        options: [
+          { type: 3, name: "reviewer", description: "Other sandbox name", required: true },
+          { type: 3, name: "workspace", description: "Project directory under /work", required: true },
+          { type: 3, name: "task", description: "Task sent to other agent", required: true },
+        ] },
+      { type: 1, name: "status", description: "List your collaborations" },
     ],
   }, {
     name: "skills",
@@ -2994,6 +3012,43 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 
+  if (interaction.commandName === "collab") {
+    const sub = interaction.options.getSubcommand();
+    const owner = sandboxNameForUser(interaction.user.id);
+    if (!owner) {
+      await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    try {
+      if (sub === "status") {
+        const records = collabs.listFor(owner);
+        const text = records.length
+          ? records.map((record) => {
+              const proposal = record.proposal;
+              return `**${record.id}** with **${record.participants.find((name) => name !== owner)}**\nmain: \`${record.base.slice(0, 12)}\`${proposal ? ` · ${proposal.status} · ${proposal.head.slice(0, 12)}` : " · no proposal"}`;
+            }).join("\n")
+          : "No collaborations.";
+        await interaction.reply({ content: text, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const reviewer = interaction.options.getString("reviewer", true).toLowerCase();
+      const workspace = interaction.options.getString("workspace", true);
+      const task = sub === "start" ? interaction.options.getString("task", true) : "";
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const collab = await collabs.create({ owner, reviewer, workspace });
+      if (task) {
+        const reviewerId = sandbox.loadUsers().find((user) => user.name === reviewer)?.userId;
+        if (reviewerId) {
+          handleAgentPigeon(reviewerId, owner, `Collaboration ${collab.id} started. Your clone is ${collab.workspaces[reviewer]}. ${task}`, 0).catch(() => {});
+        }
+      }
+      await interaction.editReply({ content: `Collaboration **${collab.id}** ready. **${reviewer}** cloned at \`${collab.workspaces[reviewer]}\`. Both agents must use the \`collab\` tool; matching approvals auto-merge into \`main\`.` });
+    } catch (error) {
+      await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral }).catch(async () => interaction.editReply({ content: `⚠️ ${error.message}` }));
+    }
+    return;
+  }
+
   if (interaction.commandName === "skills") {
     const sub = interaction.options.getSubcommand();
     const uid = interaction.user.id;
@@ -4058,6 +4113,75 @@ const botHttpServer = createServer(async (req, res) => {
     } catch (err) {
       res.writeHead(500, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  if (url.pathname.startsWith("/collabs")) {
+    try {
+      const peer = await resolvePeerSandbox(req);
+      if (peer?.peer !== "sandbox" || !isRegisteredSandboxName(peer.name, sandbox.loadUsers())) {
+        res.writeHead(403, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Collaboration calls require a registered sandbox." }));
+      }
+      const actor = peer.name;
+      if (req.method === "POST" && url.pathname === "/collabs/create") {
+        if (!body?.reviewer || !body?.workspace) {
+          res.writeHead(400, { "content-type": "application/json" });
+          return void res.end(JSON.stringify({ error: "Missing reviewer or workspace." }));
+        }
+        const collab = await collabs.create({ owner: actor, reviewer: String(body.reviewer).toLowerCase(), workspace: body.workspace });
+        const reviewerId = sandbox.loadUsers().find((user) => user.name === collab.participants[1])?.userId;
+        if (reviewerId) {
+          const task = String(body.task || "Review future collaboration proposals carefully, run relevant tests, and request changes until code is good.").slice(0, 3000);
+          handleAgentPigeon(reviewerId, actor, `Collaboration ${collab.id} started. Your clone is ${collab.workspaces[collab.participants[1]]}. ${task}`, 0).catch(() => {});
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ collab }));
+      }
+      if (req.method === "GET" && url.pathname === "/collabs") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ collabs: collabs.listFor(actor) }));
+      }
+      const match = url.pathname.match(/^\/collabs\/(col_[a-f0-9]{12})(?:\/(propose|review))?$/);
+      if (!match) {
+        res.writeHead(404);
+        return void res.end("Not Found");
+      }
+      const [, id, action] = match;
+      if (req.method === "GET" && !action) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ collab: collabs.getFor(id, actor) }));
+      }
+      if (!body) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+      if (req.method === "POST" && action === "propose") {
+        const collab = await collabs.propose({ id, actor, head: body.head });
+        const reviewer = collab.proposal.reviewer;
+        const reviewerId = sandbox.loadUsers().find((user) => user.name === reviewer)?.userId;
+        if (reviewerId) {
+          handleAgentPigeon(reviewerId, actor, `Collaboration ${id} needs review. Fetch branch ${collab.proposal.branch} at ${collab.proposal.head}, inspect diff and tests, then use the collab tool to approve or request changes.`, 0).catch(() => {});
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ collab }));
+      }
+      if (req.method === "POST" && action === "review") {
+        const collab = await collabs.review({ id, actor, approve: body.approve === true, notes: body.notes });
+        if (collab.proposal.status === "merged") {
+          for (const participant of collab.participants) {
+            const userId = sandbox.loadUsers().find((user) => user.name === participant)?.userId;
+            if (userId) notifyPigeonDM(userId, "collab", `Collaboration **${id}** auto-merged \`${collab.base.slice(0, 12)}\` into main.`).catch(() => {});
+          }
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ collab }));
+      }
+      res.writeHead(405);
+      return void res.end("Method Not Allowed");
+    } catch (error) {
+      res.writeHead(400, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: error.message }));
     }
   }
 

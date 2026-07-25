@@ -26,6 +26,9 @@ mkdir -p /work/.pi/extensions /work/.pi/tools /work/screenshots /data/pi/session
 if [ ! -f /work/.pi/extensions/routines.ts ] && [ -f /opt/pi/extensions/routines.ts ]; then
   cp /opt/pi/extensions/routines.ts /work/.pi/extensions/routines.ts
 fi
+if [ -f /opt/pi/extensions/collab.ts ]; then
+  cp /opt/pi/extensions/collab.ts /work/.pi/extensions/collab.ts
+fi
 # Built-in browser tools: always refresh from the image so deploys pick up fixes
 if [ -f /opt/pi/extensions/browser.ts ]; then
   cp /opt/pi/extensions/browser.ts /work/.pi/extensions/browser.ts
