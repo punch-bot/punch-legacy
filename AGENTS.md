@@ -103,3 +103,42 @@ Compose and sandboxes still use `OPENCODE_*` variable names (`OPENCODE_SERVER_PA
 ## Security
 
 Unregistered Discord users cannot reach any sandbox. Bot has Docker socket only for dynamic sandboxes.
+
+## Cursor Cloud specific instructions
+
+Startup automation runs `npm install` only (bot deps for local dev + `npm test`). Everything below is manual/non-obvious.
+
+**Node vs Docker paths.** Editing `src/` and running `npm test` (`node --test test/*.mjs`, 28 tests) needs no Docker. Actually *running* the product needs Docker (bot + per-user sandbox images). Standard commands live in `README.md` / `NIGHTLY.md` / the top of this file — don't duplicate them.
+
+**Docker daemon is not auto-started.** Docker Engine is installed in the VM image but `dockerd` does not run on a fresh pod. Start it and open the socket each session:
+
+```sh
+sudo nohup dockerd > /tmp/dockerd.log 2>&1 &   # wait ~8s
+sudo chmod 666 /var/run/docker.sock            # re-run after any dockerd restart
+```
+
+Daemon config (`/etc/docker/daemon.json`) uses `fuse-overlayfs` with `features.containerd-snapshotter: false` (required for fuse-overlayfs on Docker 29 in this Firecracker VM).
+
+**cgroup v2 threaded-mode caveat (important).** The VM's root cgroup is `domain threaded`, so the memory/io domain controllers can't be delegated. Containers launched the way the bot does it — default (private) cgroup namespace **with** `--memory`/`--cpus`/`--pids-limit` (see `src/sandbox-manager.js` `composeUp`) — fail with:
+`cannot enter cgroupv2 "/sys/fs/cgroup/docker" with domain controllers -- it is in threaded mode`.
+Workaround: run sandbox containers with **`--cgroupns=host`** (resource limits then don't apply). This is a VM infra limitation, not a repo bug — do not "fix" it by editing `sandbox-manager.js`. Consequence: the bot's `/sandbox create` will hit this error in this VM as-is; to demo Pi, run the sandbox image directly with `--cgroupns=host`.
+
+Manually run the sandbox (Pi) stack to verify it end-to-end:
+
+```sh
+docker network create punch-nightly_edge 2>/dev/null || true
+docker run -d --cgroupns=host --name punch-nightly_sandbox-hello_1 \
+  --network punch-nightly_edge --network-alias sandbox-hello \
+  -e OPENCODE_SERVER_PASSWORD=devpassword -e SANDBOX_NAME=hello \
+  -e SANDBOX_USER_ID=000000000000000000 -e PUNCH_DOCTOR_TOKEN=doctortoken \
+  -p 4096:4096 -p 4097:4097 --device /dev/net/tun --cap-add NET_ADMIN \
+  punch-nightly-sandbox:latest
+# gateway health (basic auth opencode:$OPENCODE_SERVER_PASSWORD):
+curl -su opencode:devpassword http://localhost:4096/health   # {"ok":true,"tools":[...]}
+```
+
+**`.env` is gitignored and required** for `docker compose` (`env_file: .env`). Create it from `.env.example` and set `DISCORD_TOKEN`; use Nightly identity (`PUNCH_STACK_NAME=punch-nightly`, `PUNCH_BOT_PORT=4099`, `PUNCH_HOST_SOURCE=/workspace`).
+
+**Secrets needed for full end-to-end (not present in the VM):**
+- `DISCORD_TOKEN` — the bot exits immediately without it (`src/index.js`), so no Discord flow runs.
+- An LLM provider key (e.g. `ANTHROPIC_API_KEY`) — a Pi turn reaches `pi --mode rpc` and fails with `No API key found` until set. Configure via supervisor `/apikey` or `/env` (Discord `/apikey set anthropic <key>`), or seed `ANTHROPIC_API_KEY` into the sandbox env. There is no free bundled provider.
