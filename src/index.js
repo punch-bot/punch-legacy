@@ -3827,8 +3827,8 @@ async function runApprovedAgentPigeon(pending, pendingId = null) {
         pigeonGate.deletePending(activeId);
       }
       await enqueueChat(
-        text,
-        "(agent pigeon task — act on the message above)",
+        triggerMsg,
+        `${text}\n(agent pigeon task — act on the message above)`,
         [],
         pigeonEnqueueOpts(recipientId, from, hopNum, sandboxName),
       );
