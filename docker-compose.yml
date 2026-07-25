@@ -1,17 +1,17 @@
 # Punch — Pi sandbox stack.
 
-name: punch
+name: ${PUNCH_STACK_NAME:-punch}
 
 services:
   bot:
     build:
       context: .
       dockerfile: docker/bot.Dockerfile
-    image: punch-bot
+    image: ${PUNCH_STACK_NAME:-punch}-bot
     env_file: .env
     environment:
-      PUNCH_STACK_NAME: punch
-      PUNCH_SANDBOX_IMAGE: punch-sandbox:latest
+      PUNCH_STACK_NAME: ${PUNCH_STACK_NAME:-punch}
+      PUNCH_SANDBOX_IMAGE: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
       OPENCODE_SERVER_URL: ""
       SANDBOX_MAP: "{}"
       OPENCODE_REMOTE_DIR: /work
@@ -26,12 +26,12 @@ services:
     networks:
       - edge
     ports:
-      - "4098:4098"
+      - "${PUNCH_BOT_PORT:-4098}:4098"
     volumes:
       - bot_state:/state
       - octl_bot:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - "/punch:/punch:ro"
+      - "${PUNCH_HOST_SOURCE:-/punch}:/punch:ro"
     restart: unless-stopped
 
   searxng:
