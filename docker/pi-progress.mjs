@@ -389,7 +389,13 @@ export function reduceProgress(state, event, now) {
   }
 
   if (["agent_error", "error"].includes(type)) {
-    return closeProgress(state, "error", now);
+    if (state.closedAt != null) return { state, progress: [] };
+    const next = {
+      ...withThinkingClosed(state, now),
+      phase: "working",
+      current: "Recovering from a model error",
+    };
+    return { state: next, progress: [snapshot(next, now)] };
   }
 
   return { state, progress: [] };

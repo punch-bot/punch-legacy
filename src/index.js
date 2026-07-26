@@ -1538,8 +1538,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       progressRenderer?.discard();
       if (thinking) await thinking.delete().catch(() => {});
       thinking = null;
-    } else {
-      await finalizeProgress(res.activity, activityStatus);
     }
 
     if (!reactionOnly && (out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0)) {
@@ -1547,6 +1545,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       for (const q of questions) {
         await sendQuestion(message.channel, q, uid);
       }
+    }
+    if (!reactionOnly) {
+      await finalizeProgress(res.activity, activityStatus);
     }
 
     if (useLifecycle) {

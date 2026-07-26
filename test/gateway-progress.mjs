@@ -330,10 +330,9 @@ test("tool SSE part includes sanitized title but omits raw args and output", () 
   }
 });
 
-test("settle, error, and abort close active thinking and total duration", () => {
+test("settle and abort close active thinking and total duration", () => {
   for (const [terminalEvent, expectedStatus] of [
     [{ type: "agent_settled" }, "completed"],
-    [{ type: "agent_error", error: "private stack" }, "error"],
     [{ type: "agent_aborted", reason: "private reason" }, "aborted"],
     [
       {
@@ -359,6 +358,28 @@ test("settle, error, and abort close active thinking and total duration", () => 
   const closed = closeProgress(state, "aborted", 240).state;
   assert.equal(activityFromProgress(closed, 900).durationMs, 40);
   assert.equal(activityFromProgress(closed, 900).thinkingMs, 30);
+});
+
+test("transient model errors remain open for retry and successful settlement", () => {
+  let state = createProgressState(100);
+  state = apply(state, { type: "thinking_start" }, 110).state;
+
+  let result = apply(state, { type: "agent_error", error: "private stack" }, 150);
+  state = result.state;
+  assert.equal(state.status, "running");
+  assert.equal(state.closedAt, null);
+  assert.equal(result.progress[0].current, "Recovering from a model error");
+  assert.equal(JSON.stringify(result.progress).includes("private stack"), false);
+
+  result = apply(state, { type: "auto_retry_start" }, 160);
+  state = result.state;
+  assert.equal(result.progress[0].phase, "retrying");
+
+  result = apply(state, { type: "agent_settled" }, 200);
+  const activity = activityFromProgress(result.state, 999);
+  assert.equal(activity.status, "completed");
+  assert.equal(activity.durationMs, 100);
+  assert.equal(activity.thinkingMs, 40);
 });
 
 test("Docker image and persisted workdir seeding include report_progress extension", () => {
