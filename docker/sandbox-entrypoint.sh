@@ -39,6 +39,9 @@ fi
 if [ -f /opt/pi/extensions/webfetch.ts ]; then
   cp /opt/pi/extensions/webfetch.ts /work/.pi/extensions/webfetch.ts
 fi
+if [ -f /opt/pi/extensions/report_progress.ts ]; then
+  cp /opt/pi/extensions/report_progress.ts /work/.pi/extensions/report_progress.ts
+fi
 # Seed Pi identity addendum (always refresh so persona stays Pi-only)
 if [ -f /opt/pi/SYSTEM.md ]; then
   cp /opt/pi/SYSTEM.md /work/.pi/SYSTEM.md
