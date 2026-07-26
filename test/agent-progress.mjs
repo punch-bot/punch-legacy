@@ -6,6 +6,7 @@ test("runAgent opens SSE before POST, forwards progress, returns activity, and l
   let eventResponse;
   let eventReady = false;
   let postSawReady = false;
+  let postedSystemPrompt = "";
   const sid = "session-progress-test";
   const activity = {
     status: "completed",
@@ -19,6 +20,16 @@ test("runAgent opens SSE before POST, forwards progress, returns activity, and l
 
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "GET" && url.pathname === "/file/content") {
+      assert.equal(url.searchParams.get("path"), "/work/.pi/SYSTEM.md");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        type: "text",
+        content: "# Punch identity\n\nUse report_progress for safe public milestones.",
+      }));
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/event") {
       res.writeHead(200, {
         "content-type": "text/event-stream",
@@ -33,6 +44,9 @@ test("runAgent opens SSE before POST, forwards progress, returns activity, and l
 
     if (req.method === "POST" && url.pathname === `/session/${sid}/message`) {
       postSawReady = eventReady;
+      let rawBody = "";
+      for await (const chunk of req) rawBody += chunk;
+      postedSystemPrompt = JSON.parse(rawBody).system;
       for (const event of [
         {
           type: "session.progress",
@@ -121,6 +135,7 @@ test("runAgent opens SSE before POST, forwards progress, returns activity, and l
     );
 
     assert.equal(postSawReady, true);
+    assert.match(postedSystemPrompt, /report_progress/);
     assert.equal(result.text, "Safe answer");
     assert.deepEqual(result.activity, activity);
     assert.deepEqual(result.attachments, []);

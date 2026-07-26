@@ -394,3 +394,16 @@ test("Docker image and persisted workdir seeding include report_progress extensi
     /cp \/opt\/pi\/extensions\/report_progress\.ts \/work\/\.pi\/extensions\/report_progress\.ts/,
   );
 });
+
+test("gateway keeps tool output private from SSE but available to final fallback", () => {
+  const gateway = readFileSync(new URL("../docker/pi-gateway.mjs", import.meta.url), "utf8");
+  assert.match(
+    gateway,
+    /output: textOutputFromToolResult\(ev\.result \?\? ev\.error \?\? ""\)/,
+  );
+  const sseMapper = gateway.slice(
+    gateway.indexOf("function piEventToOpenCode"),
+    gateway.indexOf("function broadcastSse"),
+  );
+  assert.doesNotMatch(sseMapper, /textOutputFromToolResult|state:\s*\{[^}]*output:/s);
+});

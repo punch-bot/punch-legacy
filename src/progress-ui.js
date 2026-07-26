@@ -381,7 +381,7 @@ export function createProgressRenderer({
     finalize(activity = null, fallbackStatus = "completed") {
       if (finalPromise) return finalPromise;
       state = applyProgressActivity(state, activity);
-      if (state.status === "running" || fallbackStatus === "timeout") {
+      if (state.status === "running" || fallbackStatus !== "completed") {
         state = finishProgressState(state, fallbackStatus, now());
       }
       revision += 1;

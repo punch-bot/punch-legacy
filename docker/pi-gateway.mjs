@@ -462,6 +462,21 @@ function attachmentsFromToolResult(result) {
   return out;
 }
 
+/** Compact private tool output for the final-response fallback; omit image data. */
+function textOutputFromToolResult(result) {
+  if (typeof result === "string") return result;
+  if (Array.isArray(result?.content)) {
+    const texts = result.content
+      .filter((part) => part?.type === "text" && part.text)
+      .map((part) => part.text);
+    const imageCount = result.content.filter((part) => part?.type === "image").length;
+    let text = texts.join("\n");
+    if (imageCount) text += `${text ? "\n" : ""}[${imageCount} image attachment(s)]`;
+    if (text) return text;
+  }
+  return JSON.stringify(result ?? "");
+}
+
 function assistantFromPiMessages(messages) {
   for (let i = (messages || []).length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -538,6 +553,7 @@ function trackMessageCache(logicalId, ev) {
         status: ev.isError ? "error" : "done",
         title: part.state?.title,
         input: part.state?.input,
+        output: textOutputFromToolResult(ev.result ?? ev.error ?? ""),
         ...(attachments.length ? { attachments } : {}),
       };
     }

@@ -275,6 +275,19 @@ test("renderer serializes edits, coalesces state, and queues final recap after i
   assert.equal(clock.nextDelay(), null);
 });
 
+test("renderer failure fallback overrides an earlier completed event", async () => {
+  const edits = [];
+  const renderer = createProgressRenderer({
+    initialState: finishProgressState(createProgressState(0), "completed", 8_000),
+    edit: async (options) => edits.push(options),
+    now: () => 9_000,
+  });
+
+  await renderer.finalize(null, "error");
+  assert.match(edits[0].content, /^⚠️ \*\*Failed\*\*/);
+  assert.equal(renderer.getState().status, "error");
+});
+
 test("renderer discard cancels pending edits", async () => {
   const clock = fakeClock();
   const edits = [];
