@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  HEARTBEAT_MS,
   MAX_ACTIONS,
   MAX_MILESTONES,
   activityFromProgress,
@@ -58,6 +59,25 @@ test("Pi message_update thinking lifecycle accumulates time without exposing tex
   const activity = activityFromProgress(state, 1_060);
   assert.equal(activity.thinkingMs, 30);
   assert.equal(JSON.stringify(activity).includes("hidden"), false);
+});
+
+test("active Pi deltas emit bounded metadata-only heartbeats", () => {
+  let state = createProgressState(0);
+  state = apply(state, { type: "thinking_start" }, 10).state;
+  let result = apply(
+    state,
+    { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "private" } },
+    HEARTBEAT_MS - 1,
+  );
+  assert.deepEqual(result.progress, []);
+
+  result = apply(
+    result.state,
+    { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "private" } },
+    HEARTBEAT_MS,
+  );
+  assert.equal(result.progress[0].heartbeat, true);
+  assert.equal(JSON.stringify(result.progress).includes("private"), false);
 });
 
 test("workspace file actions expose only safe relative paths", () => {

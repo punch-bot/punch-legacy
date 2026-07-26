@@ -5,6 +5,7 @@ const WORKSPACE = resolve(process.env.OPENCODE_REMOTE_DIR || "/work");
 const MAX_ACTIONS = 12;
 const MAX_MILESTONES = 6;
 const MAX_ACTION_LENGTH = 140;
+const HEARTBEAT_MS = 15_000;
 const PUBLIC_FIELD_LIMITS = Object.freeze({
   goal: 200,
   finding: 300,
@@ -195,6 +196,7 @@ export function createProgressState(startedAt) {
     current: "Starting work",
     thinkingStartedAt: null,
     thinkingMs: 0,
+    lastHeartbeatAt: startedAt,
     toolCalls: 0,
     anonymousToolCalls: 0,
     seenToolCalls: new Set(),
@@ -239,6 +241,15 @@ export function progressSnapshot(state, now) {
 
 export function reduceProgress(state, event, now) {
   const type = eventType(event);
+
+  if (
+    state.closedAt == null &&
+    ["thinking_delta", "tool_execution_update"].includes(type) &&
+    now - state.lastHeartbeatAt >= HEARTBEAT_MS
+  ) {
+    const next = { ...state, lastHeartbeatAt: now };
+    return { state: next, progress: [snapshot(next, now, { heartbeat: true })] };
+  }
 
   if (type === "thinking_start") {
     if (state.closedAt != null || state.thinkingStartedAt != null) {
@@ -341,8 +352,13 @@ export function reduceProgress(state, event, now) {
   }
 
   if (type === "text_start" || type === "text_delta") {
-    if (state.closedAt != null || state.phase === "writing") {
+    if (state.closedAt != null) {
       return { state, progress: [] };
+    }
+    if (state.phase === "writing") {
+      if (now - state.lastHeartbeatAt < HEARTBEAT_MS) return { state, progress: [] };
+      const next = { ...state, lastHeartbeatAt: now };
+      return { state: next, progress: [snapshot(next, now, { heartbeat: true })] };
     }
     const next = { ...state, phase: "writing", current: "Writing the response" };
     return { state: next, progress: [snapshot(next, now)] };
@@ -422,4 +438,4 @@ export function activityFromProgress(state, now) {
   };
 }
 
-export { MAX_ACTIONS, MAX_MILESTONES, PUBLIC_FIELD_LIMITS };
+export { HEARTBEAT_MS, MAX_ACTIONS, MAX_MILESTONES, PUBLIC_FIELD_LIMITS };

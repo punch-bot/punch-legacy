@@ -144,16 +144,6 @@ const sessions = new Map();
 const turnProgress = new Map();
 let activeLogicalId = null;
 
-const progressHeartbeat = setInterval(() => {
-  const now = Date.now();
-  for (const [sessionID, state] of turnProgress) {
-    if (state.closedAt == null) {
-      broadcastSse(progressEvent(sessionID, progressSnapshot(state, now)));
-    }
-  }
-}, 15_000);
-progressHeartbeat.unref();
-
 function progressEvent(sessionID, properties) {
   return {
     type: "session.progress",
