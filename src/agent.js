@@ -792,13 +792,14 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
 
       const cost = Number(msg.info?.cost) || 0;
       const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`);
+      const tokenUsage = msg.info?.tokens || null;
       let mediaAttachments = [];
       try {
         mediaAttachments = await collectTurnMedia(sid, userId);
       } catch (err) {
         console.error(`[pi] attachment collect failed:`, err.message);
       }
-      return { text: out, sessionId: sid, cost, usage, attachments: mediaAttachments };
+      return { text: out, sessionId: sid, cost, usage, tokenUsage, attachments: mediaAttachments };
     } catch (err) {
       if (attempt === 0 && sessionId && /session not found/i.test(err.message)) {
         console.log(`[pi] session ${sid} not found, creating new one`);

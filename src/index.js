@@ -38,6 +38,7 @@ import { resolvePeerSandbox, isRegisteredSandboxName } from "./pigeon-peer.js";
 import { setPigeonTrust, setPigeonDeny } from "./settings.js";
 import * as logs from "./logs.js";
 import * as state from "./state.js";
+import * as statistics from "./statistics.js";
 import * as collabs from "./collabs.js";
 import { renderDoctorReport, runDoctor } from "./doctor/index.js";
 
@@ -445,6 +446,13 @@ function routineContextFromInteraction(interaction) {
     channelId: interaction.channelId,
     guildId: interaction.guild?.id || null,
   };
+}
+
+function statisticsExtrasForUser(userId) {
+  const sandboxName = sandbox.loadUsers().find((entry) => entry.userId === userId)?.name || null;
+  const activeRoutines = routines.listRoutines(userId).filter((routine) => routine.enabled !== false).length;
+  const memoryRecords = store.list("user", userId).length;
+  return { sandboxName, activeRoutines, memoryRecords };
 }
 
 async function createRoutineReply(message, opts) {
@@ -1132,6 +1140,9 @@ client.once(Events.ClientReady, async (c) => {
       { type: 1, name: "history", description: "View recent autonomous activity" },
     ],
   }, {
+    name: "statistics",
+    description: "View your Punch usage analytics (messages, tokens, and more)",
+  }, {
     name: "tailscale",
     description: "Manage your sandbox's Tailscale connection",
     options: [
@@ -1578,6 +1589,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       sessionId: res.sessionId,
       status: "success",
       duration: Date.now() - startedAt,
+      ...statistics.tokenFieldsFromAgent(res),
     });
 
     if (opts.pigeonFrom) {
@@ -2277,6 +2289,7 @@ async function fireRoutine(routine) {
         userId: uid, type: "heartbeat", prompt: routine.payload.slice(0, 500),
         response: (out || "").slice(0, 2000), sessionId: res.sessionId, status: "success",
         duration: Date.now() - start, routineId: routine.id,
+        ...statistics.tokenFieldsFromAgent(res),
       });
     } catch (err) {
       console.error(`[heartbeat] routine ${routine.id} failed:`, err.message);
@@ -2410,6 +2423,7 @@ async function fireRoutine(routine) {
     prompt: routine.payload.slice(0, 500),
     response: (out || "").slice(0, 2000), sessionId: res.sessionId, status: "success",
     duration: Date.now() - start, routineId: routine.id,
+    ...statistics.tokenFieldsFromAgent(res),
   });
 }
 
@@ -2576,6 +2590,11 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton() && interaction.customId.startsWith("stats:")) {
+    await statistics.handleStatisticsInteraction(interaction, statisticsExtrasForUser);
+    return;
+  }
+
   if (interaction.isButton() && (interaction.customId.startsWith("docfix:") || interaction.customId.startsWith("docconfirm:"))) {
     const [kind, token] = interaction.customId.split(":");
     const repair = doctorRepairTokens.get(token);
@@ -3570,6 +3589,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.commandName === "statistics") {
+    await statistics.handleStatisticsCommand(interaction, statisticsExtrasForUser);
+    return;
+  }
+
   if (interaction.commandName === "tailscale") {
     const uid = interaction.user.id;
     const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
@@ -4212,6 +4236,22 @@ const botHttpServer = createServer(async (req, res) => {
         const stats = state.getActivityStats(userId);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify(stats));
+      }
+
+      if (req.method === "GET" && url.pathname === "/state/statistics") {
+        const userId = url.searchParams.get("userId");
+        if (!userId) {
+          res.writeHead(400, { "content-type": "application/json" });
+          return void res.end(JSON.stringify({ error: "Missing userId" }));
+        }
+        const period = url.searchParams.get("period") || "week";
+        if (!statistics.STATISTICS_PERIODS.includes(period)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          return void res.end(JSON.stringify({ error: "Invalid period" }));
+        }
+        const usage = state.getUsageStatistics(userId, period);
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify(usage));
       }
 
       res.writeHead(404);
