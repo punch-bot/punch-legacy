@@ -41,6 +41,12 @@ import * as state from "./state.js";
 import * as statistics from "./statistics.js";
 import * as collabs from "./collabs.js";
 import { renderDoctorReport, runDoctor } from "./doctor/index.js";
+import {
+  createProgressRenderer,
+  createProgressState,
+  reduceProgressEvent,
+  renderProgressLive,
+} from "./progress-ui.js";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const PREFIX = process.env.PREFIX || "!";
@@ -80,42 +86,6 @@ const recentReactionKeys = new Map();
 const REACTION_DEDUP_MS = 5000;
 
 const LIFECYCLE_PROGRESS_EMOJI = "👀";
-const THINKING_PHRASES = [
-  "skerbooshing",
-  "noodling furiously",
-  "rummaging the sandbox",
-  "brewing punch juice",
-  "shuffling punch cards",
-  "tickling the tokens",
-  "consulting the void",
-  "herding wild thoughts",
-  "shaking the bug jar",
-  "summoning a rubber duck",
-  "polishing pixel goblins",
-  "warming the logic laser",
-  "taming code gremlins",
-  "dusting off the debugger",
-  "whispering to semicolons",
-  "snacking with the compiler",
-  "aligning the bits",
-  "chasing a loose thread",
-  "putting on the debug monocle",
-  "checking behind the cache",
-  "juggling edge cases",
-  "excavating old code",
-  "tuning the thought engine",
-  "unspooling the spaghetti",
-  "rattling the keyboard",
-  "calling in the byte sprites",
-  "assembling the puzzle",
-];
-const THINKING_ROTATE_MS = 3500;
-
-function formatThinkingPhrase(phrase, startedAt, toolSteps = 0) {
-  const secs = Math.round((Date.now() - startedAt) / 1000);
-  const stepTag = toolSteps > 0 ? ` · step ${toolSteps}` : "";
-  return `🤔 ${phrase}… (${secs}s${stepTag})`;
-}
 
 function progressBar(pct, width = 16) {
   const clamped = Math.max(0, Math.min(100, pct));
@@ -577,7 +547,10 @@ async function handleCommand(message, cmd, rest) {
       for (let i = 1; i < queue.length; i++) {
         const task = queue[i];
         if (task.thinking) {
-          await task.thinking.edit("❌ Request cancelled.").catch(() => {});
+          await task.thinking.edit({
+            content: "❌ Request cancelled.",
+            allowedMentions: { parse: [] },
+          }).catch(() => {});
         }
         task.resolve();
       }
@@ -1227,7 +1200,10 @@ async function enqueueChat(message, text, contextMessages = [], opts = {}) {
     // N = how many requests are ahead (in-flight + earlier queued).
     const ahead = depth - 1;
     task.thinking = await message
-      .reply({ content: `⏳ queued (${ahead})`, allowedMentions: { repliedUser: false } })
+      .reply({
+        content: `⏳ queued (${ahead})`,
+        allowedMentions: { parse: [], repliedUser: false },
+      })
       .catch(() => null);
   }
 
@@ -1306,7 +1282,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       ? "Your sandbox is unreachable. It might be restarting — try again in a few seconds."
       : "You don't have a sandbox yet. Ask an admin to set one up with `/sandbox create <name>` and `/sandbox map @you <name>`.";
     if (existingThinking) {
-      await existingThinking.edit(msg).catch(() => {});
+      await existingThinking.edit({ content: msg, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
       await reply(message, msg);
     }
@@ -1359,7 +1335,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
   if (!text.trim() && agentAttachments.length === 0) {
     if (existingThinking) {
-      await existingThinking.edit("Say something after the mention.").catch(() => {});
+      await existingThinking.edit({
+        content: "Say something after the mention.",
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
     } else {
       await reply(message, "Say something after the mention.");
     }
@@ -1420,34 +1399,31 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   let thinking = existingThinking;
   const allowThinking = useThinking && !store.getUserSettings(uid).noThinking;
   const startedAt = Date.now();
-  let phraseIdx = Math.floor(Math.random() * THINKING_PHRASES.length);
-  let thinkingRotate = null;
-  let lastEdit = 0;
-  let lastLabel = "";
-  let toolSteps = 0;
-  const seenTools = new Set();
+  let progressState = createProgressState(startedAt);
+  let progressRenderer = null;
 
   if (allowThinking) {
-    const initial = formatThinkingPhrase(THINKING_PHRASES[phraseIdx], startedAt, 0);
+    const initial = renderProgressLive(progressState, startedAt);
     if (thinking) {
-      await thinking.edit(initial).catch(() => {});
+      await thinking.edit({ content: initial, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
       thinking = await message
-        .reply({ content: initial, allowedMentions: { repliedUser: false } })
+        .reply({
+          content: initial,
+          allowedMentions: { parse: [], repliedUser: false },
+        })
         .catch(() => null);
     }
     if (thinking) {
-      thinkingRotate = setInterval(() => {
-        if (!thinking) return;
-        phraseIdx = (phraseIdx + 1) % THINKING_PHRASES.length;
-        const content = formatThinkingPhrase(
-          THINKING_PHRASES[phraseIdx],
-          startedAt,
-          toolSteps,
-        );
-        thinking.edit(content).catch(() => {});
-      }, THINKING_ROTATE_MS);
+      progressRenderer = createProgressRenderer({
+        initialState: progressState,
+        edit: (options) => thinking.edit(options),
+        finalSuffix: labelLineFor(uid),
+      });
     }
+  } else if (thinking) {
+    await thinking.delete().catch(() => {});
+    thinking = null;
   }
 
   if (useLifecycle) {
@@ -1457,31 +1433,21 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
 
   const onProgress = (ev) => {
-    const label = progressLabel(ev);
-    if (label) {
-      turn.phase = label;
-      turn.detail = label;
+    progressState = progressRenderer
+      ? progressRenderer.update(ev)
+      : reduceProgressEvent(progressState, ev, Date.now());
+    turn.phase = progressState.phase;
+    turn.detail = progressState.current;
+  };
+
+  const finalizeProgress = async (activity, fallbackStatus) => {
+    if (progressRenderer) {
+      await progressRenderer.finalize(activity, fallbackStatus);
+      progressState = progressRenderer.getState();
+    } else if (thinking) {
+      await thinking.delete().catch(() => {});
+      thinking = null;
     }
-    if (!allowThinking) return;
-    // Count distinct tool invocations so the user sees forward motion even on
-    // long, multi-step turns (addresses "no idea what it's doing").
-    const p = ev?.properties || {};
-    if (ev?.type === "message.part.updated" && p.part?.type === "tool") {
-      const key = p.part?.id || p.part?.callID;
-      if (key && !seenTools.has(key) && p.part?.state?.status === "running") {
-        seenTools.add(key);
-        toolSteps += 1;
-      }
-    }
-    if (!label || !thinking) return;
-    const now = Date.now();
-    if (label === lastLabel && now - lastEdit < 8000) return;
-    if (now - lastEdit < 3000) return;
-    lastEdit = now;
-    lastLabel = label;
-    const secs = Math.round((now - startedAt) / 1000);
-    const stepTag = toolSteps > 0 ? ` · step ${toolSteps}` : "";
-    thinking.edit(`🤔 ${label} (${secs}s${stepTag})`).catch(() => {});
   };
 
   try {
@@ -1555,11 +1521,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (embedErrors.length) notes.push(embedErrors.join("; "));
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
-    // Attribution label at the very bottom of the reply (skipped on reaction-only
-    // turns, which send no text). Survives chunking since it's part of `out`.
-    const label = labelLineFor(uid);
-    if (label) out += label;
-
     const sendable = filesToSend.filter((f) => !f.oversize);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
@@ -1567,19 +1528,30 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       !hasText && !hasNotes && sendable.length === 0 &&
       reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0;
 
+    // Attribution label at the very bottom of textual replies. Progress recaps
+    // carry their own footer so context collection can skip this sandbox's UI.
+    const label = labelLineFor(uid);
+    if (!reactionOnly && label) out += label;
+
+    const activityStatus = res.activity?.status || "completed";
     if (reactionOnly) {
+      progressRenderer?.discard();
       if (thinking) await thinking.delete().catch(() => {});
-    } else if (!out.trim() && sendable.length === 0 && embeds.length === 0 && questions.length === 0) {
-      if (thinking) await thinking.delete().catch(() => {});
+      thinking = null;
     } else {
-      await settle(message, thinking, out, sendable, { embeds });
+      await finalizeProgress(res.activity, activityStatus);
+    }
+
+    if (!reactionOnly && (out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0)) {
+      await settle(message, out, sendable, { embeds });
       for (const q of questions) {
         await sendQuestion(message.channel, q, uid);
       }
     }
 
     if (useLifecycle) {
-      await finishLifecycleReact(message, "✅");
+      const endEmoji = activityStatus === "completed" ? "✅" : activityStatus === "aborted" ? "🛑" : "⚠️";
+      await finishLifecycleReact(message, endEmoji);
     }
 
     state.recordActivity({
@@ -1587,7 +1559,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       prompt: text.slice(0, 500),
       response: (out || "").slice(0, 2000),
       sessionId: res.sessionId,
-      status: "success",
+      status: activityStatus === "completed" ? "success" : "error",
       duration: Date.now() - startedAt,
       ...statistics.tokenFieldsFromAgent(res),
     });
@@ -1598,22 +1570,24 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         pigeonFrom: opts.pigeonFrom,
         pigeonHop: opts.pigeonHop ?? 0,
         sandboxName: opts.sandboxName || sandbox.loadUsers().find((u) => u.userId === uid)?.name,
-        status: "done",
+        status: activityStatus === "completed" ? "done" : "failed",
         summary: out,
+        error: activityStatus === "completed" ? "" : out,
         notifyPigeonDM,
       });
     }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
+    const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
+    const timedOut = /timed out|timeout|stalled|ceiling/i.test(err?.message || "");
+    await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
     if (useLifecycle) {
-      const endEmoji = err.name === "AbortError" || /aborted|cancel/i.test(err.message) ? "🛑" : "⚠️";
+      const endEmoji = aborted ? "🛑" : "⚠️";
       await finishLifecycleReact(message, endEmoji);
     }
-    if (err.name === "AbortError" || /aborted|cancel/i.test(err.message)) {
+    if (aborted) {
       if (useThinking) {
-        await settle(message, thinking, "❌ Request cancelled.").catch(() => {});
-      } else if (thinking) {
-        await thinking.delete().catch(() => {});
+        await settle(message, "❌ Request cancelled.").catch(() => {});
       }
       if (opts.pigeonFrom) {
         await notifyPigeonDone({
@@ -1625,10 +1599,20 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
           notifyPigeonDM,
         });
       }
+      state.recordActivity({
+        userId: uid,
+        channelId: cid,
+        type: "reactive",
+        prompt: text.slice(0, 500),
+        response: String(err?.message || err).slice(0, 2000),
+        sessionId: store.getSession(cid),
+        status: "cancelled",
+        duration: Date.now() - startedAt,
+      });
       return;
     }
     let note = "";
-    if (/timed out|stalled|ceiling/i.test(err?.message || "")) {
+    if (timedOut) {
       store.clearSession(cid);
       note = " (session was stuck — reset it, try again)";
     }
@@ -1640,10 +1624,8 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       note = " (cleared a session with unsupported file parts — try again)";
     }
     if (useThinking) {
-      await settle(message, thinking, `⚠️ ${err.message}${note}`).catch((e2) =>
+      await settle(message, `⚠️ ${err.message}${note}`).catch((e2) =>
         console.error(`[chat] cid=${cid} reply also failed:`, e2?.message || e2));
-    } else if (thinking) {
-      await thinking.delete().catch(() => {});
     }
 
     if (opts.pigeonFrom) {
@@ -1657,57 +1639,20 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         notifyPigeonDM,
       });
     }
+    state.recordActivity({
+      userId: uid,
+      channelId: cid,
+      type: "reactive",
+      prompt: text.slice(0, 500),
+      response: String(err?.message || err).slice(0, 2000),
+      sessionId: store.getSession(cid),
+      status: "error",
+      duration: Date.now() - startedAt,
+    });
   } finally {
     activeTurns.delete(uid);
-    if (thinkingRotate) clearInterval(thinkingRotate);
     clearInterval(typing);
   }
-}
-
-function progressLabel(ev) {
-  const p = ev?.properties || {};
-  switch (ev?.type) {
-    case "message.part.updated": {
-      const part = p.part || {};
-      if (part.type === "tool") {
-        const name =
-          part.tool || part.state?.title || part.state?.metadata?.title;
-        // Any built-in question/AskUserQuestion tool waits for a terminal
-        // prompt that doesn't exist over the Discord bridge — calling it hangs the
-        // turn. Flag it so the user knows why nothing is rendering.
-        if (/^(askuser)?question$/i.test(name || "")) {
-          return "asking a question (native tool won't work here — ask me to use a <question> tag)";
-        }
-        if (!name) return "running a tool…";
-        const detail = toolDetail(name, part.state?.input || part.state?.arguments);
-        return detail ? `running ${name}: ${detail}` : `running ${name}…`;
-      }
-      if (part.type === "text") return "writing…";
-      return null;
-    }
-    case "message.part.delta":
-      return "writing…";
-    default:
-      return null;
-  }
-}
-
-// Pull a short, human-readable hint of WHAT a tool is doing from its args so the
-// thinking message reads like "running bash: python3 -m http.server…" instead of
-// an opaque "running bash…". Kept tiny and safe (no secrets, truncated).
-function toolDetail(name, args) {
-  if (!args || typeof args !== "object") return "";
-  const pick =
-    args.command ||
-    args.filePath ||
-    args.path ||
-    args.pattern ||
-    args.query ||
-    args.url ||
-    args.description;
-  if (!pick || typeof pick !== "string") return "";
-  const one = pick.replace(/\s+/g, " ").trim();
-  return one.length > 60 ? one.slice(0, 57) + "…" : one;
 }
 
 const MAX_UPLOAD = Number(process.env.DISCORD_MAX_UPLOAD) || 8 * 1024 * 1024;
@@ -1794,16 +1739,23 @@ function extractAttachments(textIn) {
   return { clean, attachments: paths };
 }
 
-async function settle(message, placeholder, text, files = [], rich = {}) {
+async function settle(message, text, files = [], rich = {}) {
   const embeds = rich.embeds || [];
   const parts = chunk(text);
   if (parts.length === 0) {
     if (files.length > 0 || embeds.length > 0) {
-      await message.reply({ files, embeds });
+      await message.reply({
+        files,
+        embeds,
+        allowedMentions: { parse: [], repliedUser: false },
+      });
     }
   } else {
     for (let i = 0; i < parts.length; i++) {
-      const options = { content: parts[i] };
+      const options = {
+        content: parts[i],
+        allowedMentions: { parse: [], repliedUser: false },
+      };
       if (i === 0) {
         if (files.length > 0) options.files = files;
         if (embeds.length > 0) options.embeds = embeds;
@@ -1811,7 +1763,6 @@ async function settle(message, placeholder, text, files = [], rich = {}) {
       await message.reply(options);
     }
   }
-  if (placeholder) await placeholder.delete().catch(() => {});
 }
 
 const REMEMBER_RE =
@@ -2015,7 +1966,10 @@ async function sendQuestion(channel, q, fromUserId) {
   if (q.title) embed.setTitle(q.title.slice(0, 256));
   if (q.description) embed.setDescription(q.description.slice(0, 4096));
   embed.setColor(0x5865f2);
-  const qmsg = await channel.send({ embeds: [embed] }).catch(() => null);
+  const qmsg = await channel.send({
+    embeds: [embed],
+    allowedMentions: { parse: [] },
+  }).catch(() => null);
   if (!qmsg) return;
   const components = buildQuestionComponents(q, qmsg.id);
   await qmsg.edit({ components }).catch(() => {});
@@ -2274,7 +2228,7 @@ async function fireRoutine(routine) {
       const dm = await client.users.createDM(uid);
       const parts = chunk(header + out);
       for (let i = 0; i < parts.length; i++) {
-        const options = { content: parts[i] };
+        const options = { content: parts[i], allowedMentions: { parse: [] } };
         if (i === 0) {
           if (sendable.length > 0) options.files = sendable;
           if (embeds.length > 0) options.embeds = embeds;
@@ -2407,7 +2361,7 @@ async function fireRoutine(routine) {
   for (let i = 0; i < parts.length; i++) {
     const options = {
       content: parts[i],
-      allowedMentions: { users: [routine.userId] },
+      allowedMentions: { parse: [], users: [routine.userId] },
     };
     if (i === 0) {
       if (sendable.length > 0) options.files = sendable;
@@ -3780,7 +3734,10 @@ async function notifyPigeonDM(recipientId, from, text) {
   try {
     const user = await client.users.fetch(recipientId);
     const dm = await user.createDM();
-    await dm.send(`📬 **Pigeon message from ${from}**\n\n${text}`);
+    await dm.send({
+      content: `📬 **Pigeon message from ${from}**\n\n${text}`,
+      allowedMentions: { parse: [] },
+    });
     console.log(`[pigeon] notified ${recipientId} (${from}): ${text.slice(0, 80)}`);
   } catch (err) {
     console.error(`[pigeon] failed to DM ${recipientId}:`, err.message);

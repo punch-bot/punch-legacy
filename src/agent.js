@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { getUserSettings } from "./memory.js";
+import { sanitizeProgressText } from "./progress-ui.js";
 
 // Talks to the sandbox's Pi gateway (HTTP on :4096 over `pi --mode rpc`).
 // All tool execution (bash/read/write/edit) happens SERVER-SIDE in the sandbox
@@ -427,30 +428,30 @@ function idleThresholdMs(userId) {
   return IDLE_MS;
 }
 
-const textBuffers = new Map();
-
-function flushTextBuffer(sid, userId) {
-  if (textBuffers.has(sid)) {
-     const text = textBuffers.get(sid).trim();
-     if (text) {
-        const msg = `[pi:${sid.slice(0, 8)}] model: ${text}`;
-        console.log(msg);
-        if (userId) appendActivityLog(userId, msg);
-     }
-     textBuffers.delete(sid);
+async function consumeEvents(sid, signal, onEvent, baseUrl, userId, onReady = null) {
+  let readinessReported = false;
+  const ready = (connected) => {
+    if (readinessReported) return;
+    readinessReported = true;
+    onReady?.(connected);
+  };
+  if (!baseUrl) {
+    ready(false);
+    return;
   }
-}
-
-async function consumeEvents(sid, signal, onEvent, baseUrl, userId) {
-  if (!baseUrl) return;
   const srv = baseUrl;
   let res;
   try {
      res = await fetch(`${srv}/event`, { headers: headers(), signal });
   } catch {
+     ready(false);
      return;
   }
-  if (!res.ok || !res.body) return;
+  if (!res.ok || !res.body) {
+     ready(false);
+     return;
+  }
+  ready(true);
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -476,40 +477,43 @@ async function consumeEvents(sid, signal, onEvent, baseUrl, userId) {
             const p = ev.properties || {};
             const part = p.part || {};
             const shortSid = sid.slice(0, 8);
-            if (type === "message.part.delta") {
-              const text = p.delta?.text || (typeof p.delta === "string" ? p.delta : "");
-              if (text) {
-                textBuffers.set(sid, (textBuffers.get(sid) || "") + text);
-              }
-            } else if (type === "message.part.updated") {
+            if (type === "message.part.updated") {
               if (part.type === "tool") {
-                flushTextBuffer(sid, userId);
-                const name = part.tool || part.state?.title || part.state?.metadata?.title || "tool";
-                const status = part.state?.status || "";
-                const args = part.state?.input || part.state?.arguments || part.arguments;
-                const output = part.state?.output;
-                const toolMsg = `[pi:${shortSid}] tool ${name} is ${status}`;
+                const name = /^[a-z][a-z0-9_-]{0,63}$/i.test(part.tool || "") ? part.tool : "tool";
+                const status = /^(running|done|error)$/i.test(part.state?.status || "")
+                  ? part.state.status
+                  : "updated";
+                const title = sanitizeProgressText(part.state?.title, 140);
+                const toolMsg = `[pi:${shortSid}] tool ${name} is ${status}${title ? `: ${title}` : ""}`;
                 console.log(toolMsg);
                 if (userId) appendActivityLog(userId, toolMsg);
-                if (args && status === "running") {
-                  const inputMsg = `[pi:${shortSid}] tool input: ${typeof args === "string" ? args : JSON.stringify(args)}`;
-                  console.log(inputMsg);
-                  if (userId) appendActivityLog(userId, inputMsg);
-                }
-                if (output && status === "done") {
-                  const outputMsg = `[pi:${shortSid}] tool output: ${typeof output === "string" ? output : JSON.stringify(output)}`;
-                  console.log(outputMsg);
-                  if (userId) appendActivityLog(userId, outputMsg);
-                }
               }
             }
+            // Includes authoritative session.progress snapshots. Never inspect
+            // or log text deltas, tool arguments, or tool outputs here.
             onEvent(ev);
           }
         }
      }
   } catch (err) {
      // stream aborted or errored — fine, we're done
+  } finally {
+     ready(false);
   }
+}
+
+export function progressEventFingerprint(event) {
+  if (event?.type !== "session.progress" || event.properties?.heartbeat === true) return null;
+  const p = event.properties || {};
+  return JSON.stringify([
+    p.phase,
+    p.status,
+    p.current,
+    p.toolCalls,
+    p.goal,
+    p.finding,
+    p.next,
+  ]);
 }
 
 async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
@@ -520,22 +524,40 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   const sseAC = new AbortController();
 
   if (signal) {
-     if (signal.aborted) {
+    if (signal.aborted) {
+      postAC.abort();
+      sseAC.abort();
+    } else {
+      signal.addEventListener("abort", () => {
         postAC.abort();
-     } else {
-        signal.addEventListener("abort", () => postAC.abort());
-     }
+        sseAC.abort();
+      }, { once: true });
+    }
   }
   const start = Date.now();
   let last = Date.now();
+  let lastProgressFingerprint = "";
   const bump = () => { last = Date.now(); };
 
-  consumeEvents(sid, sseAC.signal, (ev) => {
-     bump();
-     if (onProgress) {
-        try { onProgress(ev); } catch {}
-     }
-  }, srv, userId);
+  let resolveSseReady;
+  const sseReady = new Promise((resolve) => { resolveSseReady = resolve; });
+  const sseReadyTimer = setTimeout(() => {
+    resolveSseReady(false);
+    sseAC.abort();
+  }, 5000);
+  void consumeEvents(sid, sseAC.signal, (ev) => {
+    const fingerprint = progressEventFingerprint(ev);
+    if (fingerprint == null || fingerprint !== lastProgressFingerprint) {
+      bump();
+      if (fingerprint != null) lastProgressFingerprint = fingerprint;
+    }
+    if (onProgress) {
+      try { onProgress(ev); } catch {}
+    }
+  }, srv, userId, (connected) => {
+    clearTimeout(sseReadyTimer);
+    resolveSseReady(connected);
+  });
 
   let idleIv;
   let hardTimer;
@@ -562,48 +584,51 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   });
 
   const doPost = (async () => {
-     let lastCode;
-     for (let attempt = 0; attempt < 4; attempt++) {
-        let res;
-        try {
-          res = await fetch(url, {
-            method: "POST",
-            headers: headers(),
-            body: JSON.stringify(body ?? {}),
-            signal: postAC.signal,
-          });
-        } catch (err) {
-          if (postAC.signal.aborted) throw err;
-          lastCode = err.cause?.code || err.code || err.message;
+    // The gateway immediately emits server.connected. Waiting for its headers
+    // prevents fast turns from completing before their progress stream exists.
+    await sseReady;
+    let lastCode;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(body ?? {}),
+          signal: postAC.signal,
+        });
+      } catch (err) {
+        if (postAC.signal.aborted) throw err;
+        lastCode = err.cause?.code || err.code || err.message;
+        bump();
+        await abortableSleep(2000, postAC.signal);
+        if (postAC.signal.aborted) throw new Error("aborted");
+        continue;
+      }
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        if (res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t) && attempt < 3) {
           bump();
-          await abortableSleep(2000, postAC.signal);
+          await abortableSleep(1500, postAC.signal);
           if (postAC.signal.aborted) throw new Error("aborted");
           continue;
         }
-        if (!res.ok) {
-           const t = await res.text().catch(() => "");
-           if (res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t) && attempt < 3) {
-             bump();
-             await abortableSleep(1500, postAC.signal);
-             if (postAC.signal.aborted) throw new Error("aborted");
-             continue;
-           }
-           throw new Error(`pi API ${res.status}: ${t.slice(0, 200)}`);
-        }
-        return res.json();
-     }
-  throw new Error(`cannot reach pi server at ${srv} (${lastCode})`);
+        throw new Error(`pi API ${res.status}: ${t.slice(0, 200)}`);
+      }
+      return res.json();
+    }
+    throw new Error(`cannot reach pi server at ${srv} (${lastCode})`);
   })();
   doPost.catch(() => {});
 
   try {
-     return await Promise.race([doPost, idle, hardDeadline]);
+    return await Promise.race([doPost, idle, hardDeadline]);
   } finally {
-     clearInterval(idleIv);
-     clearTimeout(hardTimer);
-     sseAC.abort();
-     postAC.abort();
-     flushTextBuffer(sid, userId);
+    clearInterval(idleIv);
+    clearTimeout(hardTimer);
+    clearTimeout(sseReadyTimer);
+    sseAC.abort();
+    postAC.abort();
   }
 }
 
@@ -799,7 +824,15 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       } catch (err) {
         console.error(`[pi] attachment collect failed:`, err.message);
       }
-      return { text: out, sessionId: sid, cost, usage, tokenUsage, attachments: mediaAttachments };
+      return {
+        text: out,
+        sessionId: sid,
+        cost,
+        usage,
+        tokenUsage,
+        activity: msg.info?.activity || null,
+        attachments: mediaAttachments,
+      };
     } catch (err) {
       if (attempt === 0 && sessionId && /session not found/i.test(err.message)) {
         console.log(`[pi] session ${sid} not found, creating new one`);
