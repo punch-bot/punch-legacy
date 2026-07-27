@@ -1626,9 +1626,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     store.setSession(cid, res.sessionId);
 
     const filesToSend = [];
-    for (const m of res.attachments || []) {
-      pushFile(filesToSend, m.buffer, m.name);
-    }
 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
@@ -1686,6 +1683,13 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
     const sendable = filesToSend.filter((f) => !f.oversize);
+    if (sendable.length > 1) console.log(`[attach-debug] WARNING: ${sendable.length} files in sendable: ${sendable.map((f) => `${f.name}(${f.attachment?.length})`).join(", ")}`);
+    const hasText = Boolean(out.trim());
+    const hasNotes = notes.length > 0;
+    const reactionOnly =
+      !hasText && !hasNotes && sendable.length === 0 &&
+      reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0;
+
     const label = labelLineFor(uid);
     const activityStatus = res.activity?.status || "completed";
 
@@ -1889,7 +1893,7 @@ async function uploadToSandbox(userId, filename, buffer) {
 function extractAttachments(textIn) {
   const paths = [];
   const text = String(textIn || "");
-  const ATTACHMENT_RE = /<attachment\s+path="([^"]+)"\s*\/?>|<attachment\s*>([\s\S]*?)<\/attachment>/gi;
+  const ATTACHMENT_RE = /<attachment\s+path="([^"]+)"\s*\/?>?\s*(?:<\/attachment\s*>)?|<attachment\s*>([\s\S]*?)<\/attachment>/gi;
   const clean = text.replace(ATTACHMENT_RE, (match, p1, p2) => {
     const p = (p1 || p2 || "").trim();
     if (p) paths.push(p);
@@ -2357,9 +2361,6 @@ async function fireRoutine(routine) {
       const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
 
       const filesToSend = [];
-      for (const m of res.attachments || []) {
-        pushFile(filesToSend, m.buffer, m.name);
-      }
       for (const relPath of attachments) {
         try {
           const f = await getFile(relPath, uid);
@@ -2480,9 +2481,6 @@ async function fireRoutine(routine) {
   if (!routine.isolatedSession) store.setSession(cid, res.sessionId);
 
   const filesToSend = [];
-  for (const m of res.attachments || []) {
-    pushFile(filesToSend, m.buffer, m.name);
-  }
 
   const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
   const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
