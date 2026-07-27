@@ -1065,12 +1065,18 @@ const apiServer = createServer((req, res) => {
     req.on("data", chunk => { body += chunk; if (body.length > 25_000) req.destroy(); });
     req.on("end", () => {
       try {
-        const worker = startWorker({ ...JSON.parse(body || "{}"), notifyProgress: async (progress) => {
+        const payload = JSON.parse(body || "{}");
+        const delivery = {
+          channelId: payload.channelId || null,
+          messageId: payload.messageId || null,
+          source: payload.source || null,
+        };
+        const worker = startWorker({ ...payload, notifyProgress: async (progress) => {
           const authorization = "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-          await fetch("http://bot:4098/workers/progress", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: progress }) });
+          await fetch("http://bot:4098/workers/progress", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...progress, ...delivery } }) });
         }, notify: async (completed) => {
           const authorization = "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-          await fetch("http://bot:4098/workers/complete", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: completed }) });
+          await fetch("http://bot:4098/workers/complete", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...completed, ...delivery } }) });
         } });
         res.writeHead(202, { "content-type": "application/json" }); res.end(JSON.stringify({ worker }));
       } catch (error) { res.writeHead(400); res.end(JSON.stringify({ error: error.message })); }
