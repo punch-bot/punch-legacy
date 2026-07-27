@@ -2186,6 +2186,7 @@ async function handleQuestionInteraction(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo,
+    forceQueue: true,
   });
 }
 
@@ -2253,6 +2254,7 @@ async function handleQuestionModalSubmit(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo,
+    forceQueue: true,
   });
 }
 
@@ -2321,6 +2323,7 @@ async function handleQuestionCheckboxSubmit(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo: answered,
+    forceQueue: true,
   });
 }
 
