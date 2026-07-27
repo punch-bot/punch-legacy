@@ -389,6 +389,58 @@ const BUILTIN_CUSTOM_PROVIDERS = {
       },
     ],
   },
+  nim: {
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    api: "openai-completions",
+    apiKey: "$NVIDIA_API_KEY",
+    models: [
+      {
+        id: "z-ai/glm-5.2",
+        name: "GLM 5.2",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1048576,
+        maxTokens: 131072,
+      },
+      {
+        id: "nvidia/llama-3.1-nemotron-70b-instruct",
+        name: "Nemotron 70B",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+      {
+        id: "meta/llama-3.3-70b-instruct",
+        name: "Llama 3.3 70B",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+      {
+        id: "nvidia/llama-3.1-405b-instruct",
+        name: "Llama 3.1 405B",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+      {
+        id: "deepseek/deepseek-r1",
+        name: "DeepSeek R1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+    ],
+  },
 };
 
 // Providers we used to override but removed so Pi's native (better) config wins.
@@ -444,6 +496,7 @@ const PROVIDER_ENV_MAP = {
   together: "TOGETHER_API_KEY",
   poolside: "POOLSIDE_API_KEY",
   opencode: "OPENCODE_API_KEY",
+  nim: "NVIDIA_API_KEY",
 };
 
 function loadJSON(file) {
@@ -1030,12 +1083,18 @@ const apiServer = createServer((req, res) => {
     req.on("data", chunk => { body += chunk; if (body.length > 25_000) req.destroy(); });
     req.on("end", () => {
       try {
-        const worker = startWorker({ ...JSON.parse(body || "{}"), notifyProgress: async (progress) => {
+        const payload = JSON.parse(body || "{}");
+        const delivery = {
+          channelId: payload.channelId || null,
+          messageId: payload.messageId || null,
+          source: payload.source || null,
+        };
+        const worker = startWorker({ ...payload, notifyProgress: async (progress) => {
           const authorization = "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-          await fetch("http://bot:4098/workers/progress", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: progress }) });
+          await fetch("http://bot:4098/workers/progress", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...progress, ...delivery } }) });
         }, notify: async (completed) => {
           const authorization = "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-          await fetch("http://bot:4098/workers/complete", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: completed }) });
+          await fetch("http://bot:4098/workers/complete", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...completed, ...delivery } }) });
         } });
         res.writeHead(202, { "content-type": "application/json" }); res.end(JSON.stringify({ worker }));
       } catch (error) { res.writeHead(400); res.end(JSON.stringify({ error: error.message })); }

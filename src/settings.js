@@ -26,6 +26,7 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
   const us = store.getUserSettings(userId);
   lines.push("**Personal:**");
   lines.push(trigger ? `- Trigger word: \`${trigger}\`` : "- Trigger word: none");
+  lines.push(`- Multitask: ${us.multitaskEnabled ? "on" : "off"}`);
   lines.push(`- Working pigeons: ${us.workingPigeonsEnabled ? "on" : "off"}`);
   const doneParts = [];
   if (us.pigeonDonePigeon) doneParts.push("pigeon");
@@ -116,6 +117,13 @@ export function setProgressMode(guildId, mode) {
   }
   store.patchGuildSettings(guildId, { reactionProgressMode: mode });
   return `Progress mode set to **${mode}**.`;
+}
+
+export function setMultitaskEnabled(userId, enabled) {
+  store.patchUserSettings(userId, { multitaskEnabled: enabled });
+  return enabled
+    ? "Multitask **enabled** — new messages while I'm busy spawn parallel subtasks instead of queuing."
+    : "Multitask **disabled** — messages queue until the current turn finishes.";
 }
 
 export function setWorkingPigeonsEnabled(userId, enabled) {
@@ -344,6 +352,12 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
     );
   }
 
+  if (sub === "multitask") {
+    if (sub2 === "on" || sub2 === "enable") return setMultitaskEnabled(uid, true);
+    if (sub2 === "off" || sub2 === "disable") return setMultitaskEnabled(uid, false);
+    throw new Error(`Usage: \`${prefix}settings multitask on|off|enable|disable\``);
+  }
+
   if (sub === "secret" || sub === "secrets") {
     if (!isDM) throw new Error("DM me to manage secrets — use `/settings secret` in DMs.");
     if (sub === "secrets" || tokens.length === 1) {
@@ -490,6 +504,15 @@ export async function handleSettingsSlash(interaction, { prefix, botUsername, se
       const count = interaction.options.getInteger("count", true);
       const minutes = interaction.options.getInteger("minutes") ?? 10;
       await interaction.reply({ content: setPigeonRateLimit(uid, count, minutes) });
+    }
+    return;
+  }
+
+  if (sub === "multitask") {
+    if (cmd === "enable") {
+      await interaction.reply({ content: setMultitaskEnabled(uid, true) });
+    } else if (cmd === "disable") {
+      await interaction.reply({ content: setMultitaskEnabled(uid, false) });
     }
     return;
   }
@@ -688,6 +711,15 @@ export function getSlashCommandDefinition() {
               { type: 4, name: "minutes", description: "Window in minutes (default 10)", min_value: 1, max_value: 60 },
             ],
           },
+        ],
+      },
+      {
+        type: 2,
+        name: "multitask",
+        description: "Parallel subtasks while main chat is busy (personal)",
+        options: [
+          { type: 1, name: "enable", description: "Spawn workers instead of queuing when busy" },
+          { type: 1, name: "disable", description: "Queue messages until the current turn finishes" },
         ],
       },
       {
