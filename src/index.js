@@ -3210,6 +3210,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await syncMultitaskWorkerCap(uid);
         const settings = await getMultitaskWorkerSettings(uid);
         const stored = store.getUserSettings(uid).multitaskWorkersCap;
+        if (!settings) {
+          await interaction.reply({ content: `Stored multitask worker cap: **${stored}**. This sandbox does not support worker settings yet.`, flags: MessageFlags.Ephemeral });
+          return;
+        }
         await interaction.reply({
           content: `**Multitask workers:** ${settings.active}/${settings.cap} active (${settings.available} slots free). Stored cap: **${stored}**.`,
           flags: MessageFlags.Ephemeral,
