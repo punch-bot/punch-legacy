@@ -16,6 +16,15 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import {
+  activityFromProgress,
+  closeProgress,
+  createProgressState,
+  isReportProgressTool,
+  progressSnapshot,
+  reduceProgress,
+  safeToolSsePart,
+} from "/usr/local/lib/pi-progress.mjs";
 
 const HOST = process.env.PI_GATEWAY_HOST || "0.0.0.0";
 const PORT = Number(process.env.PI_GATEWAY_PORT || 4096);
@@ -119,6 +128,7 @@ let reqSeq = 0;
 const pending = new Map();
 const sseClients = new Set();
 const eventWaiters = new Set();
+const reportProgressCalls = new Set();
 // Pi RPC has one active agent. Hold session switching and complete prompt lifecycles
 // in a FIFO so a second Discord turn cannot collide with an in-flight Pi turn.
 let turnChain = Promise.resolve();
@@ -131,7 +141,48 @@ function enqueueTurn(work) {
 }
 /** @type {Map<string, { id: string, sessionFile: string|null, systemHash: string|null, messages: any[] }>} */
 const sessions = new Map();
+const turnProgress = new Map();
 let activeLogicalId = null;
+
+function progressEvent(sessionID, properties) {
+  return {
+    type: "session.progress",
+    properties: { sessionID, ...properties },
+  };
+}
+
+function beginTurnProgress(sessionID) {
+  const now = Date.now();
+  const state = createProgressState(now);
+  reportProgressCalls.clear();
+  turnProgress.set(sessionID, state);
+  broadcastSse(progressEvent(sessionID, progressSnapshot(state, now)));
+}
+
+function trackTurnProgress(sessionID, event) {
+  const state = turnProgress.get(sessionID);
+  if (!state) return;
+  const result = reduceProgress(state, event, Date.now());
+  turnProgress.set(sessionID, result.state);
+  for (const properties of result.progress) {
+    broadcastSse(progressEvent(sessionID, properties));
+  }
+}
+
+function finishTurnProgress(sessionID, status) {
+  const state = turnProgress.get(sessionID);
+  if (!state) return;
+  const result = closeProgress(state, status, Date.now());
+  turnProgress.set(sessionID, result.state);
+  for (const properties of result.progress) {
+    broadcastSse(progressEvent(sessionID, properties));
+  }
+}
+
+function turnActivity(sessionID) {
+  const state = turnProgress.get(sessionID);
+  return state ? activityFromProgress(state, Date.now()) : null;
+}
 
 function loadSessionMap() {
   try {
@@ -224,6 +275,7 @@ function startPi() {
     child = null;
     for (const [, p] of pending) p.reject(new Error("pi exited"));
     pending.clear();
+    if (activeLogicalId) finishTurnProgress(activeLogicalId, "error");
     // Unknown / bad provider exits immediately — fall back so health/session work.
     if (
       code &&
@@ -276,6 +328,7 @@ function dispatchPi(msg) {
       p.resolve(msg);
     }
   } else {
+    if (activeLogicalId) trackTurnProgress(activeLogicalId, msg);
     broadcastSse(piEventToOpenCode(msg));
     if (activeLogicalId && sessions.has(activeLogicalId)) {
       trackMessageCache(activeLogicalId, msg);
@@ -409,40 +462,19 @@ function attachmentsFromToolResult(result) {
   return out;
 }
 
-/** Compact tool output for session stubs — omit raw image base64. */
+/** Compact private tool output for the final-response fallback; omit image data. */
 function textOutputFromToolResult(result) {
   if (typeof result === "string") return result;
   if (Array.isArray(result?.content)) {
     const texts = result.content
-      .filter((p) => p && p.type === "text" && p.text)
-      .map((p) => p.text);
-    const nImg = result.content.filter((p) => p && p.type === "image").length;
+      .filter((part) => part?.type === "text" && part.text)
+      .map((part) => part.text);
+    const imageCount = result.content.filter((part) => part?.type === "image").length;
     let text = texts.join("\n");
-    if (nImg) text += (text ? "\n" : "") + `[${nImg} image attachment(s)]`;
+    if (imageCount) text += `${text ? "\n" : ""}[${imageCount} image attachment(s)]`;
     if (text) return text;
   }
-  try {
-    const slim =
-      result && typeof result === "object"
-        ? {
-            ...result,
-            content: Array.isArray(result.content)
-              ? result.content.map((p) =>
-                  p?.type === "image"
-                    ? {
-                        type: "image",
-                        mimeType: p.mimeType || p.mime,
-                        data: `[base64 ${String(p.data || "").length} chars]`,
-                      }
-                    : p,
-                )
-              : result.content,
-          }
-        : result;
-    return JSON.stringify(slim ?? "");
-  } catch {
-    return String(result ?? "");
-  }
+  return JSON.stringify(result ?? "");
 }
 
 function assistantFromPiMessages(messages) {
@@ -502,21 +534,15 @@ function trackMessageCache(logicalId, ev) {
   const s = sessions.get(logicalId);
   if (!s) return;
   if (ev?.type === "tool_execution_start") {
+    if (isReportProgressTool(ev)) return;
     const callID = ev.toolCallId || randomUUID();
     s.messages.push({
       info: { role: "assistant" },
-      parts: [
-        {
-          type: "tool",
-          id: callID,
-          callID,
-          tool: ev.toolName || "tool",
-          state: { status: "running", input: ev.args || ev.arguments || {} },
-        },
-      ],
+      parts: [safeToolSsePart(ev, callID, "running")],
     });
     trimToolStubs(s);
   } else if (ev?.type === "tool_execution_end") {
+    if (isReportProgressTool(ev)) return;
     const last = s.messages[s.messages.length - 1];
     const part = last?.parts?.find(
       (p) => p.type === "tool" && p.callID === ev.toolCallId,
@@ -525,6 +551,7 @@ function trackMessageCache(logicalId, ev) {
       const attachments = attachmentsFromToolResult(ev.result);
       part.state = {
         status: ev.isError ? "error" : "done",
+        title: part.state?.title,
         input: part.state?.input,
         output: textOutputFromToolResult(ev.result ?? ev.error ?? ""),
         ...(attachments.length ? { attachments } : {}),
@@ -550,39 +577,31 @@ function piEventToOpenCode(ev) {
 
   if (ev.type === "tool_execution_start") {
     const callID = ev.toolCallId || randomUUID();
+    if (isReportProgressTool(ev)) {
+      reportProgressCalls.add(callID);
+      return null;
+    }
     return {
       type: "message.part.updated",
       properties: {
         sessionID: sid,
-        part: {
-          type: "tool",
-          id: callID,
-          callID,
-          tool: ev.toolName || "tool",
-          state: { status: "running", input: ev.args || ev.arguments || {} },
-        },
+        part: safeToolSsePart(ev, callID, "running"),
       },
     };
   }
 
   if (ev.type === "tool_execution_end") {
     const callID = ev.toolCallId || randomUUID();
-    const attachments = attachmentsFromToolResult(ev.result);
+    if (isReportProgressTool(ev) || reportProgressCalls.delete(callID)) return null;
     return {
       type: "message.part.updated",
       properties: {
         sessionID: sid,
-        part: {
-          type: "tool",
-          id: callID,
+        part: safeToolSsePart(
+          ev,
           callID,
-          tool: ev.toolName || "tool",
-          state: {
-            status: ev.isError ? "error" : "done",
-            output: textOutputFromToolResult(ev.result ?? ""),
-            ...(attachments.length ? { attachments } : {}),
-          },
-        },
+          ev.isError ? "error" : "done",
+        ),
       },
     };
   }
@@ -755,6 +774,7 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/abort") {
       // Fire-and-forget: don't await Pi RPC response — it may hang if Pi is stuck.
       rpc("abort", {}, 5000).catch(() => {});
+      if (activeLogicalId) finishTurnProgress(activeLogicalId, "aborted");
       json(res, 200, { ok: true });
       return;
     }
@@ -810,6 +830,7 @@ const server = createServer(async (req, res) => {
 
       if (req.method === "POST" && action === "abort") {
         await rpc("abort").catch(() => {});
+        finishTurnProgress(sid, "aborted");
         json(res, 200, { ok: true });
         return;
       }
@@ -864,29 +885,42 @@ const server = createServer(async (req, res) => {
         try {
           await enqueueTurn(async () => {
             const session = await ensureSession(sid);
-          if (model?.providerID && model?.modelID) {
-            await rpc("set_model", {
-              provider: model.providerID,
-              modelId: model.modelID,
-            }).catch((e) => log("set_model:", e.message));
-          }
+            beginTurnProgress(sid);
+            try {
+              if (model?.providerID && model?.modelID) {
+                await rpc("set_model", {
+                  provider: model.providerID,
+                  modelId: model.modelID,
+                }).catch((e) => log("set_model:", e.message));
+              }
 
-          const promptText = buildUserPrompt(session, userText, system);
-          session.messages.push({
-            info: { role: "user" },
-            parts: [{ type: "text", text: userText }],
-          });
+              const promptText = buildUserPrompt(session, userText, system);
+              session.messages.push({
+                info: { role: "user" },
+                parts: [{ type: "text", text: userText }],
+              });
 
-          await promptAndWait(promptText, ac.signal);
+              await promptAndWait(promptText, ac.signal);
 
-          const gm = await rpc("get_messages");
-          const assistant = assistantFromPiMessages(gm.data?.messages || []);
-          session.messages.push(assistant);
-          // Keep recent tool stubs for post-turn media scrape; bound growth
-          trimToolStubs(session);
+              const gm = await rpc("get_messages");
+              const assistant = assistantFromPiMessages(gm.data?.messages || []);
+              finishTurnProgress(sid, assistant.info.error ? "error" : "completed");
+              assistant.info.activity = turnActivity(sid);
+              session.messages.push(assistant);
+              // Keep recent tool stubs for post-turn media scrape; bound growth
+              trimToolStubs(session);
 
-            if (action === "prompt_async") json(res, 200, { ok: true });
-            else json(res, 200, assistant);
+              if (action === "prompt_async") json(res, 200, { ok: true });
+              else json(res, 200, assistant);
+            } catch (e) {
+              finishTurnProgress(
+                sid,
+                e.name === "AbortError" || ac.signal.aborted ? "aborted" : "error",
+              );
+              throw e;
+            } finally {
+              turnProgress.delete(sid);
+            }
           });
         } catch (e) {
           if (e.name === "AbortError" || ac.signal.aborted) {

@@ -47,6 +47,7 @@ COPY docker/serve-supervisor.mjs /usr/local/bin/serve-supervisor.mjs
 COPY docker/doctor.mjs /usr/local/lib/doctor.mjs
 COPY docker/pi-gateway.mjs /usr/local/bin/pi-gateway.mjs
 COPY docker/pi-turn-completion.mjs /usr/local/lib/pi-turn-completion.mjs
+COPY docker/pi-progress.mjs /usr/local/lib/pi-progress.mjs
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js
 COPY docker/skills-manager.mjs /usr/local/lib/skills-manager.mjs
 COPY docker/worker-manager.mjs /usr/local/lib/worker-manager.mjs
@@ -57,6 +58,7 @@ COPY docker/collab_extension.ts /opt/pi/extensions/collab.ts
 COPY docker/browser_extension.ts /opt/pi/extensions/browser.ts
 COPY docker/searxng_extension.ts /opt/pi/extensions/searxng.ts
 COPY docker/webfetch_extension.ts /opt/pi/extensions/webfetch.ts
+COPY docker/report_progress_extension.ts /opt/pi/extensions/report_progress.ts
 COPY docker/pi-SYSTEM.md /opt/pi/SYSTEM.md
 # API keys for Pi come from supervisor /env and /apikey (provider env vars).
 RUN echo '{}' > /opt/picfg/seed-auth.json
