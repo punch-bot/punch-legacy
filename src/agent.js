@@ -490,6 +490,13 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
     throw new Error(`Could not load Pi system prompt from ${systemPath}: ${err.message}`);
   }
 
+  if (userId) {
+    const settings = getUserSettings(userId);
+    if (settings.gitCoAuthor) {
+      sysPrompt += `\n\n## Git conventions\n\n- when committing code, always append a \`Co-Authored-By\` trailer to the commit message:\n\n\`\`\`text\nCo-Authored-By: Punch <punch@orb.gay>\n\`\`\`\n\n- use \`git commit -m "message\\n\\nCo-Authored-By: Punch <punch@orb.gay>"\` or equivalent so the trailer appears on its own line at the end of the message body.\n- do not add the trailer if the commit message already contains a \`Co-Authored-By: Punch\` line.`;
+    }
+  }
+
   let activeProvider = PROVIDER_ID;
   let activeModel = MODEL_ID;
   const apiUrl = apiUrlFor(userId);
