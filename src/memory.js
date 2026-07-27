@@ -75,6 +75,7 @@ export const USER_SETTINGS_DEFAULTS = {
   allowBots: false,
   noThinking: false,
   showContext: false,
+  gitCoAuthor: true,
   multitaskEnabled: false,
 };
 
