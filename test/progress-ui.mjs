@@ -177,6 +177,16 @@ test("authoritative activity replaces counts, actions, milestones, and terminal 
   assert.ok(recap.length <= 1900);
 });
 
+test("completed recap identifies an empty response", () => {
+  const state = applyProgressActivity(createProgressState(0), {
+    status: "completed",
+    durationMs: 4_000,
+    toolCalls: 2,
+  });
+
+  assert.equal(renderProgressRecap(state), "-# 🔨 2 tools used · 💭 4s\n\n-# no response");
+});
+
 test("recap omits zero thinking and distinguishes abort, error, and timeout", () => {
   for (const [status, expected] of [
     ["aborted", "🛑 **Stopped**"],
