@@ -42,7 +42,7 @@ Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/pi-gateway.mjs
 | Discord chat turns via Pi gateway | Migrating old non-Pi session DBs (use Pi session files under `/data/pi/sessions`) |
 | Abort / `!stop` (client disconnect → Pi `abort`) | |
 | `/reset` (new session), `/compress` (Pi `compact`) | MCP into Pi — Discord `/mcp` refuses with **not supported yet** (supervisor may still keep an unused registry) |
-| `/models`, `/env`, `/apikey`, `/secrets`, `/tailscale`, `/doctor`, `/memory`, `/skills`, `/workers` | Legacy `/work/.opencode/tools` (not loaded; only `/work/.pi/extensions` reload) |
+| `/models`, `/env`, `/apikey`, `/secrets`, `/tailscale`, `/doctor`, `/memory`, `/skills`, `/workers`, `/multitask` | Legacy `/work/.opencode/tools` (not loaded; only `/work/.pi/extensions` reload) |
 | Built-in Pi tools: bash, read, write, edit; isolated worker Pi processes | Full multi-session concurrency for main chat gateway (it switches logical sessions) |
 | **Browser** via Pi extension `browser.ts` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
 | Progress SSE → Discord thinking UI | |
@@ -87,7 +87,7 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 
 ## Supervisor API (sandbox `:4097`)
 
-Includes `/skills`, `/workers`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (unused registry; Discord `/mcp` says not supported yet), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
+Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (unused registry; Discord `/mcp` says not supported yet), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
 
 ## Known quirks
 

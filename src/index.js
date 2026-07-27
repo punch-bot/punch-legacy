@@ -25,7 +25,7 @@ import {
 } from "discord.js";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgroundTask, execCommand, setSecret, getSecrets, setEnv, getEnv, reloadSandboxMap, apiUrlFor, abortSession, sandboxNameForUser, summarizeSession } from "./agent.js";
+import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgroundTask, execCommand, setSecret, getSecrets, setEnv, getEnv, reloadSandboxMap, apiUrlFor, abortSession, sandboxNameForUser, summarizeSession, syncMultitaskWorkerCap, getMultitaskWorkerSettings } from "./agent.js";
 import { filterThreadSubtree } from "./thread-context.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
@@ -962,6 +962,25 @@ client.once(Events.ClientReady, async (c) => {
       { type: 1, name: "list", description: "List worker runs" },
       { type: 1, name: "stop", description: "Stop a worker", options: [{ type: 3, name: "id", description: "Worker id", required: true }] },
       { type: 1, name: "logs", description: "View worker log", options: [{ type: 3, name: "id", description: "Worker id", required: true }] },
+    ],
+  }, {
+    name: "multitask",
+    description: "Configure isolated Pi worker multitasking limits",
+    options: [
+      {
+        type: 2,
+        name: "settings",
+        description: "Worker concurrency settings",
+        options: [
+          { type: 1, name: "view", description: "Show worker cap and active count" },
+          {
+            type: 1,
+            name: "cap-set",
+            description: "Set max concurrent workers (1-10)",
+            options: [{ type: 4, name: "cap", description: "Max concurrent workers", required: true, min_value: 1, max_value: 10 }],
+          },
+        ],
+      },
     ],
   }, {
     name: "models",
@@ -3148,11 +3167,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (!url) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
     const sub = interaction.options.getSubcommand();
     try {
+      await syncMultitaskWorkerCap(uid);
       if (sub === "list") {
         const res = await fetch(`${url}/workers`, { headers: { authorization: auth } });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         const { workers } = await res.json();
-        const body = workers?.length ? `**Workers:**\n${workers.slice(0, 15).map((worker) => `\`${worker.id.slice(0, 8)}\` ${worker.kind} **${worker.status}** — ${new Date(worker.createdAt).toLocaleString()}`).join("\n")}` : "No workers.";
+        const settings = await getMultitaskWorkerSettings(uid);
+        const header = settings ? `**Workers** (${settings.active}/${settings.cap} active):\n` : "**Workers:**\n";
+        const body = workers?.length ? `${header}${workers.slice(0, 15).map((worker) => `\`${worker.id.slice(0, 8)}\` ${worker.kind} **${worker.status}** — ${new Date(worker.createdAt).toLocaleString()}`).join("\n")}` : `${header.trim()} No workers.`;
         await interaction.reply({ content: body, flags: MessageFlags.Ephemeral });
         return;
       }
@@ -3175,6 +3197,39 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (!res.ok) throw new Error(`supervisor API ${res.status}`);
       const { worker } = await res.json();
       await interaction.reply({ content: `Started isolated ${worker.kind} worker \`${worker.id}\`. Result will arrive in DM.`, flags: MessageFlags.Ephemeral });
+    } catch (error) { await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral }); }
+    return;
+  }
+
+  if (interaction.commandName === "multitask") {
+    const uid = interaction.user.id;
+    if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
+    const sub = interaction.options.getSubcommand();
+    try {
+      if (sub === "view") {
+        await syncMultitaskWorkerCap(uid);
+        const settings = await getMultitaskWorkerSettings(uid);
+        const stored = store.getUserSettings(uid).multitaskWorkersCap;
+        if (!settings) {
+          await interaction.reply({ content: `Stored multitask worker cap: **${stored}**. This sandbox does not support worker settings yet.`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+        await interaction.reply({
+          content: `**Multitask workers:** ${settings.active}/${settings.cap} active (${settings.available} slots free). Stored cap: **${stored}**.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (sub === "cap-set") {
+        const cap = interaction.options.getInteger("cap", true);
+        store.patchUserSettings(uid, { multitaskWorkersCap: cap });
+        const settings = await syncMultitaskWorkerCap(uid);
+        await interaction.reply({
+          content: `Multitask worker cap set to **${settings.cap}** (${settings.active} active, ${settings.available} slots free).`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
     } catch (error) { await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral }); }
     return;
   }
