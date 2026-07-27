@@ -18,7 +18,7 @@ Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi w
 
 - `/routine history [id]` shows execution history and delivery errors. Failed delivery uses capped exponential retry backoff. One-shots remove after success but retain history.
 - `/routine add` supports IANA timezone, active-hour window, and isolated-session option for LLM automations.
-- `/workers start` runs research, coding, or browser work in separate Pi process/session with tool allowlist, 1–30 minute cap, optional model, and DM completion. `/workers list|stop|logs` manages it.
+- `/workers start` runs research, coding, or browser work in separate Pi process/session with tool allowlist, 1–30 minute cap, optional model, and DM completion. `/workers list|stop|logs` manages it. `/multitask settings` configures the concurrent worker cap (default 3, max 10).
 - Instruction skills live at `/work/.pi/skills/<name>/SKILL.md`. `/skills list|inspect|enable|disable` manages them. Generated skills require proposal then `/skills approve`; Markdown changes apply next turn without Pi restart. Executable tools remain Pi extensions.
 - Say “start multiplayer coding with `<sandbox>` in `<workspace>`” to an agent and it uses `collab start`: Git initializes if needed, peer clone is created, and peer agent receives the task. Discord also provides `/collab start <reviewer> <workspace> <task>`. Each proposal is tied to an exact SHA; peer review must inspect and test it. Any new proposal requires a new review. Matching approvals auto-advance canonical `main`.
 

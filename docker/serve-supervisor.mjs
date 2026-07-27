@@ -17,7 +17,7 @@ import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
-import { listWorkers, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
+import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
 // Pi-only extension dirs (watched for reload / listed by /tools).
 const TOOL_DIRS = [
@@ -1056,6 +1056,24 @@ const apiServer = createServer((req, res) => {
   }
 
   // --- Isolated workers. Each process has its own Pi RPC session and timeout. ---
+  if (req.method === "GET" && url.pathname === "/workers/settings") {
+    res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ settings: getWorkerSettings() })); return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/workers/settings") {
+    let body = "";
+    req.on("data", chunk => { body += chunk; if (body.length > 1024) req.destroy(); });
+    req.on("end", () => {
+      try {
+        const { cap } = JSON.parse(body || "{}");
+        if (cap === undefined || cap === null) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing cap" })); return; }
+        const settings = setWorkerCap(cap);
+        res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ settings }));
+      } catch (error) { res.writeHead(400); res.end(JSON.stringify({ error: error.message })); }
+    });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/workers") {
     res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ workers: listWorkers() })); return;
   }
