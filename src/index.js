@@ -1471,13 +1471,18 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
+    console.log(`[attach-debug] raw res.text (first 500): ${JSON.stringify(res.text.slice(0, 500))}`);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
+    console.log(`[attach-debug] extractAttachments found ${attachments.length} refs: ${attachments.join(", ")}`);
+    console.log(`[attach-debug] textAfterAttachments (first 500): ${JSON.stringify(textAfterAttachments.slice(0, 500))}`);
     const { clean: textAfterReacts, emojis: reactEmojis } = extractReactTags(textAfterAttachments);
 
     for (const relPath of attachments) {
       try {
         const f = await getFile(relPath, uid);
-        pushFile(filesToSend, f.buffer, f.name);
+        const dup = filesToSend.some((existing) => existing.attachment?.length === f.buffer.length && existing.attachment?.equals(f.buffer));
+        if (!dup) pushFile(filesToSend, f.buffer, f.name);
+        else console.log(`[attach-debug] skipped duplicate attachment: ${relPath}`);
       } catch (err) {
         console.error(`[attachments] fetch "${relPath}" failed:`, err.message);
       }
@@ -1527,6 +1532,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
     const sendable = filesToSend.filter((f) => !f.oversize);
     console.log(`[attach-debug] sendable=${sendable.length} (filtered from ${filesToSend.length})`);
+    for (const f of sendable) {
+      console.log(`[attach-debug]   sendable file=${f.name} size=${f.attachment?.length}`);
+    }
+    console.log(`[attach-debug] final out (first 500): ${JSON.stringify(out.slice(0, 500))}`);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
     const reactionOnly =
@@ -1741,7 +1750,7 @@ async function uploadToSandbox(userId, filename, buffer) {
 function extractAttachments(textIn) {
   const paths = [];
   const text = String(textIn || "");
-  const ATTACHMENT_RE = /<attachment\s+path="([^"]+)"\s*\/?>|<attachment\s*>([\s\S]*?)<\/attachment>/gi;
+  const ATTACHMENT_RE = /<attachment\s+path="([^"]+)"\s*\/?>?\s*(?:<\/attachment\s*>)?|<attachment\s*>([\s\S]*?)<\/attachment>/gi;
   const clean = text.replace(ATTACHMENT_RE, (match, p1, p2) => {
     const p = (p1 || p2 || "").trim();
     if (p) paths.push(p);
