@@ -400,7 +400,6 @@ function isMainChatBusy(uid) {
 
 function shouldUseMultitaskWorker(uid, opts = {}) {
   if (opts.forceQueue || opts.pigeonFrom) return false;
-  if (opts.spawnWorker) return true;
   if (!store.getUserSettings(uid).multitaskEnabled) return false;
   return isMainChatBusy(uid);
 }
@@ -3286,17 +3285,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const uid = interaction.user.id;
     const sub = interaction.options.getSubcommand();
     if (sub === "on") {
-      store.patchUserSettings(uid, { multitaskEnabled: true });
       await interaction.reply({
-        content: "Multitask **enabled** — new messages while I'm busy spawn parallel subtasks instead of queuing.",
+        content: settings.setMultitaskEnabled(uid, true),
         flags: MessageFlags.Ephemeral,
       });
       return;
     }
     if (sub === "off") {
-      store.patchUserSettings(uid, { multitaskEnabled: false });
       await interaction.reply({
-        content: "Multitask **disabled** — messages queue until the current turn finishes.",
+        content: settings.setMultitaskEnabled(uid, false),
         flags: MessageFlags.Ephemeral,
       });
       return;

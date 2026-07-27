@@ -355,7 +355,7 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
   if (sub === "multitask") {
     if (sub2 === "on" || sub2 === "enable") return setMultitaskEnabled(uid, true);
     if (sub2 === "off" || sub2 === "disable") return setMultitaskEnabled(uid, false);
-    throw new Error(`Usage: \`${prefix}settings multitask on|off\``);
+    throw new Error(`Usage: \`${prefix}settings multitask on|off|enable|disable\``);
   }
 
   if (sub === "secret" || sub === "secrets") {
