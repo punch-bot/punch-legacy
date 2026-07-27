@@ -1522,22 +1522,11 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
     const sendable = filesToSend.filter((f) => !f.oversize);
-    const hasText = Boolean(out.trim());
-    const hasNotes = notes.length > 0;
-    const reactionOnly =
-      !hasText && !hasNotes && sendable.length === 0 &&
-      reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0;
-
     const label = labelLineFor(uid);
     const activityStatus = res.activity?.status || "completed";
-    if (reactionOnly) {
-      progressRenderer?.discard();
-      if (thinking) await thinking.delete().catch(() => {});
-      thinking = null;
-    }
 
     const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0;
-    if (!reactionOnly && hasResult) {
+    if (hasResult) {
       if (progressRenderer) {
         // Keep the answer and activity count in the original status message.
         // Discord's content limit still requires overflow replies for long answers.
@@ -1551,7 +1540,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         await sendQuestion(message.channel, q, uid);
       }
     }
-    if (!reactionOnly && (!hasResult || !progressRenderer)) {
+    if (!hasResult || !progressRenderer) {
       await finalizeProgress(res.activity, activityStatus);
     }
 

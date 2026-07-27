@@ -272,7 +272,7 @@ export function renderProgressRecap(state, result = "") {
   const resultText = String(result || "").trim();
 
   if (status === "completed") {
-    return [`-# ${stats.join(" · ")}`, resultText].filter(Boolean).join("\n\n");
+    return [`-# ${stats.join(" · ")}`, resultText || "-# no response"].join("\n\n");
   }
 
   const icon = STATUS_ICONS[status];
