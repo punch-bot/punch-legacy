@@ -31,7 +31,7 @@ export function stopWorker(id) {
   return update(id, { status: "stopping", phase: "stopping", detail: "Stopping worker", lastUpdateAt: Date.now() });
 }
 
-export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, notify, notifyProgress }) {
+export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, channelId = null, messageId = null, source = null, notify, notifyProgress }) {
   if (active.size >= MAX_WORKERS) throw new Error(`Worker limit reached (${MAX_WORKERS})`);
   if (!["research", "coding", "browser"].includes(kind)) throw new Error("kind must be research, coding, or browser");
   if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 20_000) throw new Error("prompt must be 1-20000 characters");
@@ -42,7 +42,7 @@ export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_
   const logFile = join(workdir, "worker.log");
   const sessionDir = join(workdir, "sessions");
   mkdirSync(sessionDir, { recursive: true });
-  const record = { id, kind, model: safeModel, status: "queued", phase: "queued", detail: "Queued", lastTool: null, lastUpdateAt: Date.now(), createdAt: Date.now(), startedAt: null, finishedAt: null, timeoutMs: Math.max(1_000, Math.min(MAX_TIMEOUT_MS, Number(timeoutMs) || 600_000)), maxTokens: Math.max(128, Math.min(16_000, Number(maxTokens) || 2_000)), logFile, error: null, result: null };
+  const record = { id, kind, model: safeModel, status: "queued", phase: "queued", detail: "Queued", lastTool: null, lastUpdateAt: Date.now(), createdAt: Date.now(), startedAt: null, finishedAt: null, timeoutMs: Math.max(1_000, Math.min(MAX_TIMEOUT_MS, Number(timeoutMs) || 600_000)), maxTokens: Math.max(128, Math.min(16_000, Number(maxTokens) || 2_000)), logFile, channelId: channelId || null, messageId: messageId || null, source: source || null, error: null, result: null };
   const all = records(); all.push(record); save(all);
   const [provider, modelId] = modelParts(safeModel);
   const toolList = kind === "research" ? "read,grep,find,ls" : kind === "browser" ? "puppeteer_navigate,puppeteer_screenshot,puppeteer_click,puppeteer_fill,puppeteer_select,puppeteer_hover" : "bash,read,write,edit";

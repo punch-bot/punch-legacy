@@ -75,6 +75,7 @@ export const USER_SETTINGS_DEFAULTS = {
   allowBots: false,
   noThinking: false,
   showContext: false,
+  multitaskEnabled: false,
 };
 
 let seq = 0;

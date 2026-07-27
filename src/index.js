@@ -378,10 +378,149 @@ async function reply(message, text) {
 
 function activeTurnText(uid) {
   const turn = activeTurns.get(uid);
-  if (!turn) return "No active turn.";
-  const elapsed = Math.round((Date.now() - turn.startedAt) / 1000);
-  const detail = turn.detail ? ` — ${turn.detail}` : "";
-  return `Active turn: **${turn.phase}** (${elapsed}s)${detail}`;
+  const lines = [];
+  if (turn) {
+    const elapsed = Math.round((Date.now() - turn.startedAt) / 1000);
+    const detail = turn.detail ? ` — ${turn.detail}` : "";
+    lines.push(`Main turn: **${turn.phase}** (${elapsed}s)${detail}`);
+  } else {
+    const queue = userQueues.get(uid);
+    if (queue?.length) lines.push(`Queue: ${queue.length} request(s) waiting`);
+  }
+  return lines.length ? lines.join("\n") : "No active turn.";
+}
+
+function supervisorAuth() {
+  return "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+}
+
+function isMainChatBusy(uid) {
+  return activeTurns.has(uid) || (userQueues.get(uid)?.length > 0);
+}
+
+function shouldUseMultitaskWorker(uid, opts = {}) {
+  if (opts.forceQueue || opts.pigeonFrom) return false;
+  if (!store.getUserSettings(uid).multitaskEnabled) return false;
+  return isMainChatBusy(uid);
+}
+
+function buildMultitaskPrompt(text, contextMessages = []) {
+  let prompt = String(text || "").trim();
+  if (contextMessages.length > 0) {
+    const ctxLines = contextMessages.map((ctx) => `[${ctx.author}] ${ctx.content}`);
+    prompt = `--- Channel context ---\n${ctxLines.join("\n")}\n--- End context ---\n\n${prompt}`;
+  }
+  return (
+    "--- Multitask subtask ---\n" +
+    "You are running in parallel to the main Punch chat turn. Work independently; report concise results.\n\n" +
+    prompt
+  );
+}
+
+async function deliverWorkerToChannel(worker, content) {
+  if (!worker?.channelId) return false;
+  try {
+    const channel = await client.channels.fetch(worker.channelId);
+    const payload = { content, allowedMentions: { parse: [] } };
+    if (worker.messageId) {
+      await channel.send({
+        ...payload,
+        reply: { messageReference: worker.messageId, failIfNotExists: false },
+      });
+    } else {
+      await channel.send(payload);
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[workers] channel delivery failed:`, err.message);
+    return false;
+  }
+}
+
+async function startMultitaskWorker(uid, { channelId, messageId, text, contextMessages = [], opts = {} }) {
+  const url = apiUrlFor(uid);
+  if (!url) return { ok: false, error: "No sandbox assigned." };
+
+  const kind = opts.workerKind || "coding";
+  const timeoutMinutes = Math.max(1, Math.min(30, opts.timeoutMinutes || 10));
+  const prompt = buildMultitaskPrompt(text, contextMessages);
+
+  try {
+    const res = await fetch(`${url}/workers`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: supervisorAuth() },
+      body: JSON.stringify({
+        kind,
+        prompt,
+        channelId,
+        messageId,
+        source: "multitask",
+        model: opts.model || undefined,
+        timeoutMs: timeoutMinutes * 60_000,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(body.slice(0, 200) || `worker API ${res.status}`);
+    }
+    const { worker } = await res.json();
+    return { ok: true, worker };
+  } catch (err) {
+    if (/Worker limit reached/i.test(err.message)) {
+      console.log(`[multitask] uid=${uid} worker limit — falling back to queue`);
+      return { ok: false, fallbackQueue: true, error: err.message };
+    }
+    return { ok: false, error: err.message };
+  }
+}
+
+async function trySpawnMultitaskWorker(message, text, contextMessages = [], opts = {}) {
+  const uid = opts.userId ?? message.author.id;
+  const result = await startMultitaskWorker(uid, {
+    channelId: message.channelId,
+    messageId: message.id,
+    text,
+    contextMessages,
+    opts,
+  });
+  if (result.ok) {
+    await reply(
+      message,
+      `🧵 Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — I'll reply here when done.`,
+    );
+    return true;
+  }
+  if (result.fallbackQueue) return false;
+  await reply(message, `⚠️ Could not start subtask: ${result.error}`);
+  return true;
+}
+
+async function listActiveWorkers(uid) {
+  const url = apiUrlFor(uid);
+  if (!url) return [];
+  try {
+    const res = await fetch(`${url}/workers`, { headers: { authorization: supervisorAuth() } });
+    if (!res.ok) return [];
+    const { workers } = await res.json();
+    return (workers || []).filter((worker) => worker.active || ["queued", "running"].includes(worker.status));
+  } catch {
+    return [];
+  }
+}
+
+async function activeStatusText(uid) {
+  const lines = [activeTurnText(uid)];
+  const workers = await listActiveWorkers(uid);
+  if (workers.length) {
+    lines.push(
+      `Workers: ${workers
+        .slice(0, 5)
+        .map((worker) => `\`${worker.id.slice(0, 8)}\` ${worker.kind} **${worker.status}**`)
+        .join(", ")}`,
+    );
+  }
+  if (lines.length === 1 && lines[0] === "No active turn.") return lines[0];
+  return lines.join("\n");
 }
 
 function splitWhenAndText(rest) {
@@ -457,7 +596,7 @@ async function handleCommand(message, cmd, rest) {
 
   switch (cmd) {
     case "status": {
-      await reply(message, activeTurnText(uid));
+      await reply(message, await activeStatusText(uid));
       return true;
     }
     case "help": {
@@ -468,7 +607,7 @@ async function handleCommand(message, cmd, rest) {
           { name: "Memory", value: `\`\`${PREFIX}remember <text>\`\` — save a fact about you\n\`\`${PREFIX}remember-channel <text>\`\` — save a fact for this channel\n\`\`${PREFIX}memories\`\` — list your + channel memories\n\`\`${PREFIX}forget <id>\`\` — delete a memory by id`, inline: true },
           { name: "Session", value: `\`\`${PREFIX}reset\`\` — start a fresh Pi session here`, inline: true },
           { name: "\u200B", value: "\u200B" },
-          { name: "Background Tasks", value: `\`\`${PREFIX}status\`\` — show active turn state\n\`\`${PREFIX}stop\`\` — cancel all queued/in-flight requests\n\`\`${PREFIX}exec <command>\`\` — run a command and get output\n\`\`${PREFIX}bg <command>\`\` — run a command in background\n\`\`${PREFIX}tasks\`\` — list processes (dropdown to kill)\n\`\`${PREFIX}task-log <filename>\`\` — view task log (last 20 lines)\n\`\`${PREFIX}logs [source] [lines]\`\` — sandbox / Pi gateway logs`, inline: true },
+          { name: "Background Tasks", value: `\`\`${PREFIX}status\`\` — show active turn + workers\n\`\`${PREFIX}stop\`\` — cancel all queued/in-flight requests\n\`/multitask\` — parallel subtasks while busy\n\`\`${PREFIX}exec <command>\`\` — run a command and get output\n\`\`${PREFIX}bg <command>\`\` — run a command in background\n\`\`${PREFIX}tasks\`\` — list processes (dropdown to kill)\n\`\`${PREFIX}task-log <filename>\`\` — view task log (last 20 lines)\n\`\`${PREFIX}logs [source] [lines]\`\` — sandbox / Pi gateway logs`, inline: true },
           { name: "\u200B", value: "\u200B" },
           { name: "Channel Settings", value: "`/settings` — summon word, channel lock, reaction summon, progress mode\n`/settings view` to see current values\n`!setup` / `!forget-channel` — channel lock aliases", inline: true },
           { name: "Routines", value: `\`\`${PREFIX}remind <when> <text>\`\` — one-shot reminder\n\`\`${PREFIX}routine list\`\` — list your routines\n\`\`${PREFIX}routine history [id]\`\` — recent runs and errors\n\`\`${PREFIX}routine remove <id>\`\` — delete a routine\n\`\`${PREFIX}routine pause/resume <id>\`\` — toggle a routine\n\`\`${PREFIX}routine daily <time> <text>\`\` — daily reminder\n\`\`${PREFIX}routine auto <when> <prompt>\`\` — LLM automation`, inline: true },
@@ -932,6 +1071,22 @@ client.once(Events.ClientReady, async (c) => {
         options: [{ type: 3, name: "name", description: "Extension filename", required: true }] },
     ],
   }, {
+    name: "multitask",
+    description: "Run parallel subtasks while main chat is busy",
+    options: [
+      { type: 1, name: "on", description: "Enable automatic multitasking" },
+      { type: 1, name: "off", description: "Disable automatic multitasking (queue messages)" },
+      { type: 1, name: "status", description: "Show multitask setting and active workers" },
+      { type: 1, name: "start", description: "Start a background subtask now",
+        options: [
+          { type: 3, name: "prompt", description: "Task for the subagent", required: true },
+          { type: 3, name: "kind", description: "Worker capability",
+            choices: [{ name: "research", value: "research" }, { name: "coding", value: "coding" }, { name: "browser", value: "browser" }] },
+          { type: 3, name: "model", description: "Optional model override" },
+          { type: 4, name: "timeout_minutes", description: "1-30; default 10" },
+        ] },
+    ],
+  }, {
     name: "workers",
     description: "Manage isolated Pi background workers",
     options: [
@@ -1170,6 +1325,12 @@ async function withUserRunLock(uid, fn) {
 
 async function enqueueChat(message, text, contextMessages = [], opts = {}) {
   const uid = opts.userId ?? message.author.id;
+
+  if (shouldUseMultitaskWorker(uid, opts)) {
+    const spawned = await trySpawnMultitaskWorker(message, text, contextMessages, opts);
+    if (spawned) return;
+  }
+
   if (!userQueues.has(uid)) {
     userQueues.set(uid, []);
   }
@@ -2029,6 +2190,7 @@ async function handleQuestionInteraction(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo,
+    forceQueue: true,
   });
 }
 
@@ -2096,6 +2258,7 @@ async function handleQuestionModalSubmit(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo,
+    forceQueue: true,
   });
 }
 
@@ -2164,6 +2327,7 @@ async function handleQuestionCheckboxSubmit(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo: answered,
+    forceQueue: true,
   });
 }
 
@@ -3122,6 +3286,62 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.commandName === "multitask") {
+    const uid = interaction.user.id;
+    const sub = interaction.options.getSubcommand();
+    if (sub === "on") {
+      await interaction.reply({
+        content: settings.setMultitaskEnabled(uid, true),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (sub === "off") {
+      await interaction.reply({
+        content: settings.setMultitaskEnabled(uid, false),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (sub === "status") {
+      const enabled = store.getUserSettings(uid).multitaskEnabled;
+      const body = await activeStatusText(uid);
+      await interaction.reply({
+        content: `Multitask: **${enabled ? "on" : "off"}**\n${body}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (sub === "start") {
+      const prompt = interaction.options.getString("prompt", true);
+      const kind = interaction.options.getString("kind") || "coding";
+      const model = interaction.options.getString("model") || undefined;
+      const timeoutMinutes = Math.max(1, Math.min(30, interaction.options.getInteger("timeout_minutes") || 10));
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const result = await startMultitaskWorker(uid, {
+        channelId: interaction.channelId,
+        messageId: null,
+        text: prompt,
+        contextMessages: [],
+        opts: { workerKind: kind, model, timeoutMinutes },
+      });
+      if (result.ok) {
+        await interaction.editReply({
+          content: `Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — watch this channel for the result.`,
+        });
+        await interaction.channel.send({
+          content: `🧵 Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — I'll reply here when done.`,
+          allowedMentions: { parse: [] },
+        });
+      } else {
+        await interaction.editReply({
+          content: `⚠️ Could not start subtask: ${result.error || "unknown error"}`,
+        });
+      }
+      return;
+    }
+  }
+
   if (interaction.commandName === "workers") {
     const uid = interaction.user.id;
     const url = apiUrlFor(uid);
@@ -3777,6 +3997,7 @@ function pigeonEnqueueOpts(recipientId, from, hop, sandboxName) {
     pigeonFrom: from,
     pigeonHop: hop,
     sandboxName,
+    forceQueue: true,
   };
 }
 
@@ -3967,6 +4188,10 @@ const botHttpServer = createServer(async (req, res) => {
     }
     workerProgressSent.set(key, now);
     try {
+      if (worker.channelId) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ success: true, skipped: true }));
+      }
       const icon = phase === "tool" ? "🛠️" : phase === "finalizing" ? "📦" : phase === "failed" || phase === "timed_out" ? "⚠️" : "⏳";
       const detail = String(worker.detail || "Working").replace(/[\r\n`]/g, " ").slice(0, 180);
       const dm = await client.users.createDM(userId);
@@ -3988,10 +4213,16 @@ const botHttpServer = createServer(async (req, res) => {
     }
     workerProgressSent.delete(`${userId}:${worker.id}`);
     try {
-      const dm = await client.users.createDM(userId);
+      const isSubtask = worker.source === "multitask" || worker.channelId;
+      const label = isSubtask ? "subtask" : "worker";
       const icon = worker.status === "succeeded" ? "✅" : worker.status === "stopped" ? "🛑" : "⚠️";
       const detail = worker.status === "succeeded" ? (worker.result || "_(no output)_") : (worker.error || worker.result || "Worker stopped without output.");
-      await dm.send(`${icon} **${worker.kind} worker complete** \`${worker.id}\` (${worker.status})\n${detail.slice(-1_700)}`);
+      const content = `${icon} **${worker.kind} ${label} complete** \`${String(worker.id).slice(0, 8)}\` (${worker.status})\n${detail.slice(-1_700)}`;
+      const delivered = await deliverWorkerToChannel(worker, content);
+      if (!delivered) {
+        const dm = await client.users.createDM(userId);
+        await dm.send(content);
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ success: true }));
     } catch (error) {
