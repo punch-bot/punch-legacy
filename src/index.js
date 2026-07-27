@@ -41,6 +41,12 @@ import * as state from "./state.js";
 import * as statistics from "./statistics.js";
 import * as collabs from "./collabs.js";
 import { renderDoctorReport, runDoctor } from "./doctor/index.js";
+import {
+  createProgressRenderer,
+  createProgressState,
+  reduceProgressEvent,
+  renderProgressLive,
+} from "./progress-ui.js";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const PREFIX = process.env.PREFIX || "!";
@@ -80,42 +86,6 @@ const recentReactionKeys = new Map();
 const REACTION_DEDUP_MS = 5000;
 
 const LIFECYCLE_PROGRESS_EMOJI = "👀";
-const THINKING_PHRASES = [
-  "skerbooshing",
-  "noodling furiously",
-  "rummaging the sandbox",
-  "brewing punch juice",
-  "shuffling punch cards",
-  "tickling the tokens",
-  "consulting the void",
-  "herding wild thoughts",
-  "shaking the bug jar",
-  "summoning a rubber duck",
-  "polishing pixel goblins",
-  "warming the logic laser",
-  "taming code gremlins",
-  "dusting off the debugger",
-  "whispering to semicolons",
-  "snacking with the compiler",
-  "aligning the bits",
-  "chasing a loose thread",
-  "putting on the debug monocle",
-  "checking behind the cache",
-  "juggling edge cases",
-  "excavating old code",
-  "tuning the thought engine",
-  "unspooling the spaghetti",
-  "rattling the keyboard",
-  "calling in the byte sprites",
-  "assembling the puzzle",
-];
-const THINKING_ROTATE_MS = 3500;
-
-function formatThinkingPhrase(phrase, startedAt, toolSteps = 0) {
-  const secs = Math.round((Date.now() - startedAt) / 1000);
-  const stepTag = toolSteps > 0 ? ` · step ${toolSteps}` : "";
-  return `🤔 ${phrase}… (${secs}s${stepTag})`;
-}
 
 function progressBar(pct, width = 16) {
   const clamped = Math.max(0, Math.min(100, pct));
@@ -408,10 +378,149 @@ async function reply(message, text) {
 
 function activeTurnText(uid) {
   const turn = activeTurns.get(uid);
-  if (!turn) return "No active turn.";
-  const elapsed = Math.round((Date.now() - turn.startedAt) / 1000);
-  const detail = turn.detail ? ` — ${turn.detail}` : "";
-  return `Active turn: **${turn.phase}** (${elapsed}s)${detail}`;
+  const lines = [];
+  if (turn) {
+    const elapsed = Math.round((Date.now() - turn.startedAt) / 1000);
+    const detail = turn.detail ? ` — ${turn.detail}` : "";
+    lines.push(`Main turn: **${turn.phase}** (${elapsed}s)${detail}`);
+  } else {
+    const queue = userQueues.get(uid);
+    if (queue?.length) lines.push(`Queue: ${queue.length} request(s) waiting`);
+  }
+  return lines.length ? lines.join("\n") : "No active turn.";
+}
+
+function supervisorAuth() {
+  return "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+}
+
+function isMainChatBusy(uid) {
+  return activeTurns.has(uid) || (userQueues.get(uid)?.length > 0);
+}
+
+function shouldUseMultitaskWorker(uid, opts = {}) {
+  if (opts.forceQueue || opts.pigeonFrom) return false;
+  if (!store.getUserSettings(uid).multitaskEnabled) return false;
+  return isMainChatBusy(uid);
+}
+
+function buildMultitaskPrompt(text, contextMessages = []) {
+  let prompt = String(text || "").trim();
+  if (contextMessages.length > 0) {
+    const ctxLines = contextMessages.map((ctx) => `[${ctx.author}] ${ctx.content}`);
+    prompt = `--- Channel context (background only — does not by itself mean you were asked to do a task; respond to the user's actual message below) ---\n${ctxLines.join("\n")}\n--- End context ---\n\n${prompt}`;
+  }
+  return (
+    "--- Multitask subtask ---\n" +
+    "You are running in parallel to the main Punch chat turn. Work independently; report concise results.\n\n" +
+    prompt
+  );
+}
+
+async function deliverWorkerToChannel(worker, content) {
+  if (!worker?.channelId) return false;
+  try {
+    const channel = await client.channels.fetch(worker.channelId);
+    const payload = { content, allowedMentions: { parse: [] } };
+    if (worker.messageId) {
+      await channel.send({
+        ...payload,
+        reply: { messageReference: worker.messageId, failIfNotExists: false },
+      });
+    } else {
+      await channel.send(payload);
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[workers] channel delivery failed:`, err.message);
+    return false;
+  }
+}
+
+async function startMultitaskWorker(uid, { channelId, messageId, text, contextMessages = [], opts = {} }) {
+  const url = apiUrlFor(uid);
+  if (!url) return { ok: false, error: "No sandbox assigned." };
+
+  const kind = opts.workerKind || "coding";
+  const timeoutMinutes = Math.max(1, Math.min(30, opts.timeoutMinutes || 10));
+  const prompt = buildMultitaskPrompt(text, contextMessages);
+
+  try {
+    const res = await fetch(`${url}/workers`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: supervisorAuth() },
+      body: JSON.stringify({
+        kind,
+        prompt,
+        channelId,
+        messageId,
+        source: "multitask",
+        model: opts.model || undefined,
+        timeoutMs: timeoutMinutes * 60_000,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(body.slice(0, 200) || `worker API ${res.status}`);
+    }
+    const { worker } = await res.json();
+    return { ok: true, worker };
+  } catch (err) {
+    if (/Worker limit reached/i.test(err.message)) {
+      console.log(`[multitask] uid=${uid} worker limit — falling back to queue`);
+      return { ok: false, fallbackQueue: true, error: err.message };
+    }
+    return { ok: false, error: err.message };
+  }
+}
+
+async function trySpawnMultitaskWorker(message, text, contextMessages = [], opts = {}) {
+  const uid = opts.userId ?? message.author.id;
+  const result = await startMultitaskWorker(uid, {
+    channelId: message.channelId,
+    messageId: message.id,
+    text,
+    contextMessages,
+    opts,
+  });
+  if (result.ok) {
+    await reply(
+      message,
+      `🧵 Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — I'll reply here when done.`,
+    );
+    return true;
+  }
+  if (result.fallbackQueue) return false;
+  await reply(message, `⚠️ Could not start subtask: ${result.error}`);
+  return true;
+}
+
+async function listActiveWorkers(uid) {
+  const url = apiUrlFor(uid);
+  if (!url) return [];
+  try {
+    const res = await fetch(`${url}/workers`, { headers: { authorization: supervisorAuth() } });
+    if (!res.ok) return [];
+    const { workers } = await res.json();
+    return (workers || []).filter((worker) => worker.active || ["queued", "running"].includes(worker.status));
+  } catch {
+    return [];
+  }
+}
+
+async function activeStatusText(uid) {
+  const lines = [activeTurnText(uid)];
+  const workers = await listActiveWorkers(uid);
+  if (workers.length) {
+    lines.push(
+      `Workers: ${workers
+        .slice(0, 5)
+        .map((worker) => `\`${worker.id.slice(0, 8)}\` ${worker.kind} **${worker.status}**`)
+        .join(", ")}`,
+    );
+  }
+  if (lines.length === 1 && lines[0] === "No active turn.") return lines[0];
+  return lines.join("\n");
 }
 
 function splitWhenAndText(rest) {
@@ -487,7 +596,7 @@ async function handleCommand(message, cmd, rest) {
 
   switch (cmd) {
     case "status": {
-      await reply(message, activeTurnText(uid));
+      await reply(message, await activeStatusText(uid));
       return true;
     }
     case "help": {
@@ -498,7 +607,7 @@ async function handleCommand(message, cmd, rest) {
           { name: "Memory", value: `\`\`${PREFIX}remember <text>\`\` — save a fact about you\n\`\`${PREFIX}remember-channel <text>\`\` — save a fact for this channel\n\`\`${PREFIX}memories\`\` — list your + channel memories\n\`\`${PREFIX}forget <id>\`\` — delete a memory by id`, inline: true },
           { name: "Session", value: `\`\`${PREFIX}reset\`\` — start a fresh Pi session here`, inline: true },
           { name: "\u200B", value: "\u200B" },
-          { name: "Background Tasks", value: `\`\`${PREFIX}status\`\` — show active turn state\n\`\`${PREFIX}stop\`\` — cancel all queued/in-flight requests\n\`\`${PREFIX}exec <command>\`\` — run a command and get output\n\`\`${PREFIX}bg <command>\`\` — run a command in background\n\`\`${PREFIX}tasks\`\` — list processes (dropdown to kill)\n\`\`${PREFIX}task-log <filename>\`\` — view task log (last 20 lines)\n\`\`${PREFIX}logs [source] [lines]\`\` — sandbox / Pi gateway logs`, inline: true },
+          { name: "Background Tasks", value: `\`\`${PREFIX}status\`\` — show active turn + workers\n\`\`${PREFIX}stop\`\` — cancel all queued/in-flight requests\n\`/multitask\` — parallel subtasks while busy\n\`\`${PREFIX}exec <command>\`\` — run a command and get output\n\`\`${PREFIX}bg <command>\`\` — run a command in background\n\`\`${PREFIX}tasks\`\` — list processes (dropdown to kill)\n\`\`${PREFIX}task-log <filename>\`\` — view task log (last 20 lines)\n\`\`${PREFIX}logs [source] [lines]\`\` — sandbox / Pi gateway logs`, inline: true },
           { name: "\u200B", value: "\u200B" },
           { name: "Channel Settings", value: "`/settings` — summon word, channel lock, reaction summon, progress mode\n`/settings view` to see current values\n`!setup` / `!forget-channel` — channel lock aliases", inline: true },
           { name: "Routines", value: `\`\`${PREFIX}remind <when> <text>\`\` — one-shot reminder\n\`\`${PREFIX}routine list\`\` — list your routines\n\`\`${PREFIX}routine history [id]\`\` — recent runs and errors\n\`\`${PREFIX}routine remove <id>\`\` — delete a routine\n\`\`${PREFIX}routine pause/resume <id>\`\` — toggle a routine\n\`\`${PREFIX}routine daily <time> <text>\`\` — daily reminder\n\`\`${PREFIX}routine auto <when> <prompt>\`\` — LLM automation`, inline: true },
@@ -577,7 +686,10 @@ async function handleCommand(message, cmd, rest) {
       for (let i = 1; i < queue.length; i++) {
         const task = queue[i];
         if (task.thinking) {
-          await task.thinking.edit("❌ Request cancelled.").catch(() => {});
+          await task.thinking.edit({
+            content: "❌ Request cancelled.",
+            allowedMentions: { parse: [] },
+          }).catch(() => {});
         }
         task.resolve();
       }
@@ -959,6 +1071,22 @@ client.once(Events.ClientReady, async (c) => {
         options: [{ type: 3, name: "name", description: "Extension filename", required: true }] },
     ],
   }, {
+    name: "multitask",
+    description: "Run parallel subtasks while main chat is busy",
+    options: [
+      { type: 1, name: "on", description: "Enable automatic multitasking" },
+      { type: 1, name: "off", description: "Disable automatic multitasking (queue messages)" },
+      { type: 1, name: "status", description: "Show multitask setting and active workers" },
+      { type: 1, name: "start", description: "Start a background subtask now",
+        options: [
+          { type: 3, name: "prompt", description: "Task for the subagent", required: true },
+          { type: 3, name: "kind", description: "Worker capability",
+            choices: [{ name: "research", value: "research" }, { name: "coding", value: "coding" }, { name: "browser", value: "browser" }] },
+          { type: 3, name: "model", description: "Optional model override" },
+          { type: 4, name: "timeout_minutes", description: "1-30; default 10" },
+        ] },
+    ],
+  }, {
     name: "workers",
     description: "Manage isolated Pi background workers",
     options: [
@@ -1202,6 +1330,12 @@ async function withUserRunLock(uid, fn) {
 
 async function enqueueChat(message, text, contextMessages = [], opts = {}) {
   const uid = opts.userId ?? message.author.id;
+
+  if (shouldUseMultitaskWorker(uid, opts)) {
+    const spawned = await trySpawnMultitaskWorker(message, text, contextMessages, opts);
+    if (spawned) return;
+  }
+
   if (!userQueues.has(uid)) {
     userQueues.set(uid, []);
   }
@@ -1232,7 +1366,10 @@ async function enqueueChat(message, text, contextMessages = [], opts = {}) {
     // N = how many requests are ahead (in-flight + earlier queued).
     const ahead = depth - 1;
     task.thinking = await message
-      .reply({ content: `⏳ queued (${ahead})`, allowedMentions: { repliedUser: false } })
+      .reply({
+        content: `⏳ queued (${ahead})`,
+        allowedMentions: { parse: [], repliedUser: false },
+      })
       .catch(() => null);
   }
 
@@ -1311,7 +1448,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       ? "Your sandbox is unreachable. It might be restarting — try again in a few seconds."
       : "You don't have a sandbox yet. Ask an admin to set one up with `/sandbox create <name>` and `/sandbox map @you <name>`.";
     if (existingThinking) {
-      await existingThinking.edit(msg).catch(() => {});
+      await existingThinking.edit({ content: msg, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
       await reply(message, msg);
     }
@@ -1364,7 +1501,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
   if (!text.trim() && agentAttachments.length === 0) {
     if (existingThinking) {
-      await existingThinking.edit("Say something after the mention.").catch(() => {});
+      await existingThinking.edit({
+        content: "Say something after the mention.",
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
     } else {
       await reply(message, "Say something after the mention.");
     }
@@ -1387,7 +1527,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   // Build channel context from recent messages
   let contextBlock = "";
   if (contextMessages.length > 0) {
-     const ctxLines = ["", "--- Context (most recent first) ---"];
+     const ctxLines = [
+      "",
+      "--- Channel context (background only — does not by itself mean you were asked to do a task; respond to the user's actual message below) ---",
+    ];
     for (const ctx of contextMessages) {
       ctxLines.push(`[${ctx.author}] ${ctx.content}`);
     }
@@ -1425,34 +1568,31 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   let thinking = existingThinking;
   const allowThinking = useThinking && !store.getUserSettings(uid).noThinking;
   const startedAt = Date.now();
-  let phraseIdx = Math.floor(Math.random() * THINKING_PHRASES.length);
-  let thinkingRotate = null;
-  let lastEdit = 0;
-  let lastLabel = "";
-  let toolSteps = 0;
-  const seenTools = new Set();
+  let progressState = createProgressState(startedAt);
+  let progressRenderer = null;
 
   if (allowThinking) {
-    const initial = formatThinkingPhrase(THINKING_PHRASES[phraseIdx], startedAt, 0);
+    const initial = renderProgressLive(progressState, startedAt);
     if (thinking) {
-      await thinking.edit(initial).catch(() => {});
+      await thinking.edit({ content: initial, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
       thinking = await message
-        .reply({ content: initial, allowedMentions: { repliedUser: false } })
+        .reply({
+          content: initial,
+          allowedMentions: { parse: [], repliedUser: false },
+        })
         .catch(() => null);
     }
     if (thinking) {
-      thinkingRotate = setInterval(() => {
-        if (!thinking) return;
-        phraseIdx = (phraseIdx + 1) % THINKING_PHRASES.length;
-        const content = formatThinkingPhrase(
-          THINKING_PHRASES[phraseIdx],
-          startedAt,
-          toolSteps,
-        );
-        thinking.edit(content).catch(() => {});
-      }, THINKING_ROTATE_MS);
+      progressRenderer = createProgressRenderer({
+        initialState: progressState,
+        edit: (options) => thinking.edit(options),
+        finalSuffix: labelLineFor(uid),
+      });
     }
+  } else if (thinking) {
+    await thinking.delete().catch(() => {});
+    thinking = null;
   }
 
   if (useLifecycle) {
@@ -1462,31 +1602,21 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
 
   const onProgress = (ev) => {
-    const label = progressLabel(ev);
-    if (label) {
-      turn.phase = label;
-      turn.detail = label;
+    progressState = progressRenderer
+      ? progressRenderer.update(ev)
+      : reduceProgressEvent(progressState, ev, Date.now());
+    turn.phase = progressState.phase;
+    turn.detail = progressState.current;
+  };
+
+  const finalizeProgress = async (activity, fallbackStatus, result = "", rich = {}) => {
+    if (progressRenderer) {
+      await progressRenderer.finalize(activity, fallbackStatus, result, rich);
+      progressState = progressRenderer.getState();
+    } else if (thinking) {
+      await thinking.delete().catch(() => {});
+      thinking = null;
     }
-    if (!allowThinking) return;
-    // Count distinct tool invocations so the user sees forward motion even on
-    // long, multi-step turns (addresses "no idea what it's doing").
-    const p = ev?.properties || {};
-    if (ev?.type === "message.part.updated" && p.part?.type === "tool") {
-      const key = p.part?.id || p.part?.callID;
-      if (key && !seenTools.has(key) && p.part?.state?.status === "running") {
-        seenTools.add(key);
-        toolSteps += 1;
-      }
-    }
-    if (!label || !thinking) return;
-    const now = Date.now();
-    if (label === lastLabel && now - lastEdit < 8000) return;
-    if (now - lastEdit < 3000) return;
-    lastEdit = now;
-    lastLabel = label;
-    const secs = Math.round((now - startedAt) / 1000);
-    const stepTag = toolSteps > 0 ? ` · step ${toolSteps}` : "";
-    thinking.edit(`🤔 ${label} (${secs}s${stepTag})`).catch(() => {});
   };
 
   try {
@@ -1560,11 +1690,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (embedErrors.length) notes.push(embedErrors.join("; "));
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
-    // Attribution label at the very bottom of the reply (skipped on reaction-only
-    // turns, which send no text). Survives chunking since it's part of `out`.
-    const label = labelLineFor(uid);
-    if (label) out += label;
-
     const sendable = filesToSend.filter((f) => !f.oversize);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
@@ -1572,19 +1697,36 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       !hasText && !hasNotes && sendable.length === 0 &&
       reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0;
 
+    const label = labelLineFor(uid);
+    const activityStatus = res.activity?.status || "completed";
     if (reactionOnly) {
+      progressRenderer?.discard();
       if (thinking) await thinking.delete().catch(() => {});
-    } else if (!out.trim() && sendable.length === 0 && embeds.length === 0 && questions.length === 0) {
-      if (thinking) await thinking.delete().catch(() => {});
-    } else {
-      await settle(message, thinking, out, sendable, { embeds });
+      thinking = null;
+    }
+
+    const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0;
+    if (!reactionOnly && hasResult) {
+      if (progressRenderer) {
+        // Keep the answer and activity count in the original status message.
+        // Discord's content limit still requires overflow replies for long answers.
+        const [primary = "", ...overflow] = chunk(out, 1_650);
+        await finalizeProgress(res.activity, activityStatus, primary, { files: sendable, embeds });
+        if (overflow.length) await settle(message, overflow.join("") + label);
+      } else {
+        await settle(message, out + label, sendable, { embeds });
+      }
       for (const q of questions) {
         await sendQuestion(message.channel, q, uid);
       }
     }
+    if (!reactionOnly && (!hasResult || !progressRenderer)) {
+      await finalizeProgress(res.activity, activityStatus);
+    }
 
     if (useLifecycle) {
-      await finishLifecycleReact(message, "✅");
+      const endEmoji = activityStatus === "completed" ? "✅" : activityStatus === "aborted" ? "🛑" : "⚠️";
+      await finishLifecycleReact(message, endEmoji);
     }
 
     state.recordActivity({
@@ -1592,7 +1734,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       prompt: text.slice(0, 500),
       response: (out || "").slice(0, 2000),
       sessionId: res.sessionId,
-      status: "success",
+      status: activityStatus === "completed" ? "success" : "error",
       duration: Date.now() - startedAt,
       ...statistics.tokenFieldsFromAgent(res),
     });
@@ -1603,22 +1745,24 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         pigeonFrom: opts.pigeonFrom,
         pigeonHop: opts.pigeonHop ?? 0,
         sandboxName: opts.sandboxName || sandbox.loadUsers().find((u) => u.userId === uid)?.name,
-        status: "done",
+        status: activityStatus === "completed" ? "done" : "failed",
         summary: out,
+        error: activityStatus === "completed" ? "" : out,
         notifyPigeonDM,
       });
     }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
+    const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
+    const timedOut = /timed out|timeout|stalled|ceiling/i.test(err?.message || "");
+    await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
     if (useLifecycle) {
-      const endEmoji = err.name === "AbortError" || /aborted|cancel/i.test(err.message) ? "🛑" : "⚠️";
+      const endEmoji = aborted ? "🛑" : "⚠️";
       await finishLifecycleReact(message, endEmoji);
     }
-    if (err.name === "AbortError" || /aborted|cancel/i.test(err.message)) {
+    if (aborted) {
       if (useThinking) {
-        await settle(message, thinking, "❌ Request cancelled.").catch(() => {});
-      } else if (thinking) {
-        await thinking.delete().catch(() => {});
+        await settle(message, "❌ Request cancelled.").catch(() => {});
       }
       if (opts.pigeonFrom) {
         await notifyPigeonDone({
@@ -1630,10 +1774,20 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
           notifyPigeonDM,
         });
       }
+      state.recordActivity({
+        userId: uid,
+        channelId: cid,
+        type: "reactive",
+        prompt: text.slice(0, 500),
+        response: String(err?.message || err).slice(0, 2000),
+        sessionId: store.getSession(cid),
+        status: "cancelled",
+        duration: Date.now() - startedAt,
+      });
       return;
     }
     let note = "";
-    if (/timed out|stalled|ceiling/i.test(err?.message || "")) {
+    if (timedOut) {
       store.clearSession(cid);
       note = " (session was stuck — reset it, try again)";
     }
@@ -1645,10 +1799,8 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       note = " (cleared a session with unsupported file parts — try again)";
     }
     if (useThinking) {
-      await settle(message, thinking, `⚠️ ${err.message}${note}`).catch((e2) =>
+      await settle(message, `⚠️ ${err.message}${note}`).catch((e2) =>
         console.error(`[chat] cid=${cid} reply also failed:`, e2?.message || e2));
-    } else if (thinking) {
-      await thinking.delete().catch(() => {});
     }
 
     if (opts.pigeonFrom) {
@@ -1662,57 +1814,20 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         notifyPigeonDM,
       });
     }
+    state.recordActivity({
+      userId: uid,
+      channelId: cid,
+      type: "reactive",
+      prompt: text.slice(0, 500),
+      response: String(err?.message || err).slice(0, 2000),
+      sessionId: store.getSession(cid),
+      status: "error",
+      duration: Date.now() - startedAt,
+    });
   } finally {
     activeTurns.delete(uid);
-    if (thinkingRotate) clearInterval(thinkingRotate);
     clearInterval(typing);
   }
-}
-
-function progressLabel(ev) {
-  const p = ev?.properties || {};
-  switch (ev?.type) {
-    case "message.part.updated": {
-      const part = p.part || {};
-      if (part.type === "tool") {
-        const name =
-          part.tool || part.state?.title || part.state?.metadata?.title;
-        // Any built-in question/AskUserQuestion tool waits for a terminal
-        // prompt that doesn't exist over the Discord bridge — calling it hangs the
-        // turn. Flag it so the user knows why nothing is rendering.
-        if (/^(askuser)?question$/i.test(name || "")) {
-          return "asking a question (native tool won't work here — ask me to use a <question> tag)";
-        }
-        if (!name) return "running a tool…";
-        const detail = toolDetail(name, part.state?.input || part.state?.arguments);
-        return detail ? `running ${name}: ${detail}` : `running ${name}…`;
-      }
-      if (part.type === "text") return "writing…";
-      return null;
-    }
-    case "message.part.delta":
-      return "writing…";
-    default:
-      return null;
-  }
-}
-
-// Pull a short, human-readable hint of WHAT a tool is doing from its args so the
-// thinking message reads like "running bash: python3 -m http.server…" instead of
-// an opaque "running bash…". Kept tiny and safe (no secrets, truncated).
-function toolDetail(name, args) {
-  if (!args || typeof args !== "object") return "";
-  const pick =
-    args.command ||
-    args.filePath ||
-    args.path ||
-    args.pattern ||
-    args.query ||
-    args.url ||
-    args.description;
-  if (!pick || typeof pick !== "string") return "";
-  const one = pick.replace(/\s+/g, " ").trim();
-  return one.length > 60 ? one.slice(0, 57) + "…" : one;
 }
 
 const MAX_UPLOAD = Number(process.env.DISCORD_MAX_UPLOAD) || 8 * 1024 * 1024;
@@ -1799,16 +1914,23 @@ function extractAttachments(textIn) {
   return { clean, attachments: paths };
 }
 
-async function settle(message, placeholder, text, files = [], rich = {}) {
+async function settle(message, text, files = [], rich = {}) {
   const embeds = rich.embeds || [];
   const parts = chunk(text);
   if (parts.length === 0) {
     if (files.length > 0 || embeds.length > 0) {
-      await message.reply({ files, embeds });
+      await message.reply({
+        files,
+        embeds,
+        allowedMentions: { parse: [], repliedUser: false },
+      });
     }
   } else {
     for (let i = 0; i < parts.length; i++) {
-      const options = { content: parts[i] };
+      const options = {
+        content: parts[i],
+        allowedMentions: { parse: [], repliedUser: false },
+      };
       if (i === 0) {
         if (files.length > 0) options.files = files;
         if (embeds.length > 0) options.embeds = embeds;
@@ -1816,7 +1938,6 @@ async function settle(message, placeholder, text, files = [], rich = {}) {
       await message.reply(options);
     }
   }
-  if (placeholder) await placeholder.delete().catch(() => {});
 }
 
 const REMEMBER_RE =
@@ -2020,7 +2141,10 @@ async function sendQuestion(channel, q, fromUserId) {
   if (q.title) embed.setTitle(q.title.slice(0, 256));
   if (q.description) embed.setDescription(q.description.slice(0, 4096));
   embed.setColor(0x5865f2);
-  const qmsg = await channel.send({ embeds: [embed] }).catch(() => null);
+  const qmsg = await channel.send({
+    embeds: [embed],
+    allowedMentions: { parse: [] },
+  }).catch(() => null);
   if (!qmsg) return;
   const components = buildQuestionComponents(q, qmsg.id);
   await qmsg.edit({ components }).catch(() => {});
@@ -2074,6 +2198,7 @@ async function handleQuestionInteraction(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo,
+    forceQueue: true,
   });
 }
 
@@ -2141,6 +2266,7 @@ async function handleQuestionModalSubmit(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo,
+    forceQueue: true,
   });
 }
 
@@ -2209,6 +2335,7 @@ async function handleQuestionCheckboxSubmit(interaction) {
     displayName: label,
     speakerUsername: clicker.username,
     repliedTo: answered,
+    forceQueue: true,
   });
 }
 
@@ -2279,7 +2406,7 @@ async function fireRoutine(routine) {
       const dm = await client.users.createDM(uid);
       const parts = chunk(header + out);
       for (let i = 0; i < parts.length; i++) {
-        const options = { content: parts[i] };
+        const options = { content: parts[i], allowedMentions: { parse: [] } };
         if (i === 0) {
           if (sendable.length > 0) options.files = sendable;
           if (embeds.length > 0) options.embeds = embeds;
@@ -2412,7 +2539,7 @@ async function fireRoutine(routine) {
   for (let i = 0; i < parts.length; i++) {
     const options = {
       content: parts[i],
-      allowedMentions: { users: [routine.userId] },
+      allowedMentions: { parse: [], users: [routine.userId] },
     };
     if (i === 0) {
       if (sendable.length > 0) options.files = sendable;
@@ -3167,6 +3294,62 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  if (interaction.commandName === "multitask") {
+    const uid = interaction.user.id;
+    const sub = interaction.options.getSubcommand();
+    if (sub === "on") {
+      await interaction.reply({
+        content: settings.setMultitaskEnabled(uid, true),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (sub === "off") {
+      await interaction.reply({
+        content: settings.setMultitaskEnabled(uid, false),
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (sub === "status") {
+      const enabled = store.getUserSettings(uid).multitaskEnabled;
+      const body = await activeStatusText(uid);
+      await interaction.reply({
+        content: `Multitask: **${enabled ? "on" : "off"}**\n${body}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    if (sub === "start") {
+      const prompt = interaction.options.getString("prompt", true);
+      const kind = interaction.options.getString("kind") || "coding";
+      const model = interaction.options.getString("model") || undefined;
+      const timeoutMinutes = Math.max(1, Math.min(30, interaction.options.getInteger("timeout_minutes") || 10));
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const result = await startMultitaskWorker(uid, {
+        channelId: interaction.channelId,
+        messageId: null,
+        text: prompt,
+        contextMessages: [],
+        opts: { workerKind: kind, model, timeoutMinutes },
+      });
+      if (result.ok) {
+        await interaction.editReply({
+          content: `Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — watch this channel for the result.`,
+        });
+        await interaction.channel.send({
+          content: `🧵 Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — I'll reply here when done.`,
+          allowedMentions: { parse: [] },
+        });
+      } else {
+        await interaction.editReply({
+          content: `⚠️ Could not start subtask: ${result.error || "unknown error"}`,
+        });
+      }
+      return;
+    }
+  }
+
   if (interaction.commandName === "workers") {
     const uid = interaction.user.id;
     const url = apiUrlFor(uid);
@@ -3785,7 +3968,10 @@ async function notifyPigeonDM(recipientId, from, text) {
   try {
     const user = await client.users.fetch(recipientId);
     const dm = await user.createDM();
-    await dm.send(`📬 **Pigeon message from ${from}**\n\n${text}`);
+    await dm.send({
+      content: `📬 **Pigeon message from ${from}**\n\n${text}`,
+      allowedMentions: { parse: [] },
+    });
     console.log(`[pigeon] notified ${recipientId} (${from}): ${text.slice(0, 80)}`);
   } catch (err) {
     console.error(`[pigeon] failed to DM ${recipientId}:`, err.message);
@@ -3819,6 +4005,7 @@ function pigeonEnqueueOpts(recipientId, from, hop, sandboxName) {
     pigeonFrom: from,
     pigeonHop: hop,
     sandboxName,
+    forceQueue: true,
   };
 }
 
@@ -4009,6 +4196,10 @@ const botHttpServer = createServer(async (req, res) => {
     }
     workerProgressSent.set(key, now);
     try {
+      if (worker.channelId) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ success: true, skipped: true }));
+      }
       const icon = phase === "tool" ? "🛠️" : phase === "finalizing" ? "📦" : phase === "failed" || phase === "timed_out" ? "⚠️" : "⏳";
       const detail = String(worker.detail || "Working").replace(/[\r\n`]/g, " ").slice(0, 180);
       const dm = await client.users.createDM(userId);
@@ -4030,10 +4221,16 @@ const botHttpServer = createServer(async (req, res) => {
     }
     workerProgressSent.delete(`${userId}:${worker.id}`);
     try {
-      const dm = await client.users.createDM(userId);
+      const isSubtask = worker.source === "multitask" || worker.channelId;
+      const label = isSubtask ? "subtask" : "worker";
       const icon = worker.status === "succeeded" ? "✅" : worker.status === "stopped" ? "🛑" : "⚠️";
       const detail = worker.status === "succeeded" ? (worker.result || "_(no output)_") : (worker.error || worker.result || "Worker stopped without output.");
-      await dm.send(`${icon} **${worker.kind} worker complete** \`${worker.id}\` (${worker.status})\n${detail.slice(-1_700)}`);
+      const content = `${icon} **${worker.kind} ${label} complete** \`${String(worker.id).slice(0, 8)}\` (${worker.status})\n${detail.slice(-1_700)}`;
+      const delivered = await deliverWorkerToChannel(worker, content);
+      if (!delivered) {
+        const dm = await client.users.createDM(userId);
+        await dm.send(content);
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ success: true }));
     } catch (error) {

@@ -76,6 +76,7 @@ export const USER_SETTINGS_DEFAULTS = {
   noThinking: false,
   showContext: false,
   gitCoAuthor: true,
+  multitaskEnabled: false,
 };
 
 let seq = 0;
