@@ -1462,9 +1462,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     store.setSession(cid, res.sessionId);
 
     const filesToSend = [];
-    for (const m of res.attachments || []) {
-      pushFile(filesToSend, m.buffer, m.name);
-    }
 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
@@ -1473,9 +1470,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     for (const relPath of attachments) {
       try {
         const f = await getFile(relPath, uid);
-        const dup = filesToSend.some((existing) => existing.attachment?.length === f.buffer.length && existing.attachment?.equals(f.buffer));
-        if (!dup) pushFile(filesToSend, f.buffer, f.name);
-        else console.log(`[attach-debug] skipped duplicate attachment: ${relPath}`);
+        pushFile(filesToSend, f.buffer, f.name);
       } catch (err) {
         console.error(`[attachments] fetch "${relPath}" failed:`, err.message);
       }
@@ -1524,6 +1519,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
     const sendable = filesToSend.filter((f) => !f.oversize);
+    if (sendable.length > 1) console.log(`[attach-debug] WARNING: ${sendable.length} files in sendable: ${sendable.map((f) => `${f.name}(${f.attachment?.length})`).join(", ")}`);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
     const reactionOnly =
@@ -2203,14 +2199,10 @@ async function fireRoutine(routine) {
       const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
 
       const filesToSend = [];
-      for (const m of res.attachments || []) {
-        pushFile(filesToSend, m.buffer, m.name);
-      }
       for (const relPath of attachments) {
         try {
           const f = await getFile(relPath, uid);
-          const dup = filesToSend.some((existing) => existing.attachment?.length === f.buffer.length && existing.attachment?.equals(f.buffer));
-          if (!dup) pushFile(filesToSend, f.buffer, f.name);
+          pushFile(filesToSend, f.buffer, f.name);
         } catch (err) {
           console.error(`[heartbeat] attachment fetch failed:`, err.message);
         }
@@ -2327,9 +2319,6 @@ async function fireRoutine(routine) {
   if (!routine.isolatedSession) store.setSession(cid, res.sessionId);
 
   const filesToSend = [];
-  for (const m of res.attachments || []) {
-    pushFile(filesToSend, m.buffer, m.name);
-  }
 
   const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
   const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
@@ -2337,8 +2326,7 @@ async function fireRoutine(routine) {
   for (const relPath of attachments) {
     try {
       const f = await getFile(relPath, uid);
-      const dup = filesToSend.some((existing) => existing.attachment?.length === f.buffer.length && existing.attachment?.equals(f.buffer));
-      if (!dup) pushFile(filesToSend, f.buffer, f.name);
+      pushFile(filesToSend, f.buffer, f.name);
     } catch (err) {
       console.error(`[routines] attachment fetch "${relPath}" failed:`, err.message);
     }

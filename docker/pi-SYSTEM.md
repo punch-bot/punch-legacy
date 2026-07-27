@@ -86,9 +86,14 @@ Built-in browser tools (`puppeteer_navigate`, `puppeteer_screenshot`, …) are s
 ## Browser and files
 
 - use the built-in headful Chromium tools on `DISPLAY=:99` for interactive pages. use curl or bash for simple HTTP requests that do not need a browser.
-- `puppeteer_screenshot` images attach to Discord automatically. don't also emit an attachment tag for the same screenshot unless the user asks for the file path.
+- when you take a screenshot with `puppeteer_screenshot`, the file is saved to `/work/screenshots/`. to show it in Discord, append an `<attachment>` tag to your reply with the file path. do NOT rely on automatic attachment — always tag it explicitly:
+
+```text
+<attachment path="screenshots/filename.png"></attachment>
+```
+
 - users' incoming files are saved under `/work/attachments/`, and the turn gives you the exact path. read the file with your tools; images and PDFs are not injected inline for you.
-- attach a generated or downloaded file by appending this tag to the reply:
+- attach any file (screenshot, generated, or downloaded) by appending this tag to the reply:
 
 ```text
 <attachment path="relative/path/to/file"></attachment>

@@ -567,12 +567,6 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       const cost = Number(msg.info?.cost) || 0;
       const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`);
       const tokenUsage = msg.info?.tokens || null;
-      let mediaAttachments = [];
-      try {
-        mediaAttachments = await collectTurnMedia(sid, userId);
-      } catch (err) {
-        console.error(`[pi] attachment collect failed:`, err.message);
-      }
       return {
         text: out,
         sessionId: sid,
@@ -580,7 +574,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
         usage,
         tokenUsage,
         activity: msg.info?.activity || null,
-        attachments: mediaAttachments,
+        attachments: [],
       };
     } catch (err) {
       if (attempt === 0 && sessionId && /session not found/i.test(err.message)) {
@@ -591,70 +585,6 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       throw err;
     }
   }
-}
-
-async function collectTurnMedia(sid, userId) {
-  const srv = serverFor(userId);
-  if (!srv) return [];
-  const dir = userDir(userId);
-  const q = `?directory=${encodeURIComponent(dir)}`;
-  const res = await fetch(`${srv}/session/${sid}/message${q}`, { headers: headers() });
-  if (!res.ok) throw new Error(`getMessages API ${res.status}`);
-  const msgs = await res.json();
-  let lastUser = -1;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-     if ((msgs[i].info?.role || msgs[i].role) === "user") { lastUser = i; break; }
-  }
-  const media = [];
-  for (let i = lastUser + 1; i < msgs.length; i++) {
-     media.push(...extractMediaParts(msgs[i].parts || []));
-  }
-  return media;
-}
-
-function extractMediaParts(parts) {
-  const media = [];
-  for (const p of parts || []) {
-     if (p.type === "tool" && Array.isArray(p.state?.attachments)) {
-        for (const a of p.state.attachments) {
-          const buffer = dataUrlToBuffer(a?.url);
-          if (buffer) media.push({ buffer, mime: a.mime, name: mediaName(a.mime, p.tool) });
-        }
-     } else if ((p.type === "file" || p.type === "image") && typeof p.url === "string") {
-        const buffer = dataUrlToBuffer(p.url);
-        if (buffer) media.push({ buffer, mime: p.mime || p.mimeType, name: mediaName(p.mime || p.mimeType, p.type) });
-     }
-  }
-  return media;
-}
-
-function dataUrlToBuffer(url) {
-  if (typeof url !== "string" || !url.startsWith("data:")) return null;
-  const comma = url.indexOf(",");
-  if (comma < 0) return null;
-  const meta = url.slice(5, comma);
-  if (!/base64/i.test(meta)) return null;
-  try {
-     return Buffer.from(url.slice(comma + 1), "base64");
-  } catch {
-     return null;
-  }
-}
-
-const MIME_EXT = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/jpg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "application/pdf": "pdf",
-};
-
-let mediaSeq = 0;
-function mediaName(mime, label) {
-  const ext = MIME_EXT[mime] || "png";
-  const base = String(label || "attachment").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 32);
-  return `${base}-${++mediaSeq}.${ext}`;
 }
 
 export async function getFile(filePath, userId) {
