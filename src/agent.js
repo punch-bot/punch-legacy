@@ -1023,6 +1023,7 @@ export async function syncMultitaskWorkerCap(userId) {
     headers: { ...headers(), "Content-Type": "application/json" },
     body: JSON.stringify({ cap }),
   });
+  if (res.status === 404) return null;
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`workers settings API ${res.status}: ${text.slice(0, 200)}`);
