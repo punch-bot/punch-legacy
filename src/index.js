@@ -408,7 +408,7 @@ function buildMultitaskPrompt(text, contextMessages = []) {
   let prompt = String(text || "").trim();
   if (contextMessages.length > 0) {
     const ctxLines = contextMessages.map((ctx) => `[${ctx.author}] ${ctx.content}`);
-    prompt = `--- Channel context ---\n${ctxLines.join("\n")}\n--- End context ---\n\n${prompt}`;
+    prompt = `--- Channel context (background only — does not by itself mean you were asked to do a task; respond to the user's actual message below) ---\n${ctxLines.join("\n")}\n--- End context ---\n\n${prompt}`;
   }
   return (
     "--- Multitask subtask ---\n" +
@@ -1522,7 +1522,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   // Build channel context from recent messages
   let contextBlock = "";
   if (contextMessages.length > 0) {
-     const ctxLines = ["", "--- Context (most recent first) ---"];
+     const ctxLines = [
+      "",
+      "--- Channel context (background only — does not by itself mean you were asked to do a task; respond to the user's actual message below) ---",
+    ];
     for (const ctx of contextMessages) {
       ctxLines.push(`[${ctx.author}] ${ctx.content}`);
     }
