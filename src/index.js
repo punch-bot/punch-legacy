@@ -1465,6 +1465,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     for (const m of res.attachments || []) {
       pushFile(filesToSend, m.buffer, m.name);
     }
+    console.log(`[attach-debug] res.attachments=${(res.attachments || []).length}, filesToSend=${filesToSend.length}`);
+    for (const f of filesToSend) {
+      console.log(`[attach-debug]   file=${f.name} size=${f.attachment?.length} oversize=${f.oversize}`);
+    }
 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
@@ -1522,6 +1526,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
     const sendable = filesToSend.filter((f) => !f.oversize);
+    console.log(`[attach-debug] sendable=${sendable.length} (filtered from ${filesToSend.length})`);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
     const reactionOnly =

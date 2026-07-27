@@ -451,7 +451,11 @@ function extractTextFromParts(parts) {
 function attachmentsFromToolResult(result) {
   const out = [];
   const content = result?.content;
-  if (!Array.isArray(content)) return out;
+  if (!Array.isArray(content)) {
+    log(`[attach-debug] result has no content array, typeof result=${typeof result}, keys=${result && typeof result === "object" ? Object.keys(result).join(",") : "n/a"}`);
+    return out;
+  }
+  log(`[attach-debug] result.content has ${content.length} parts: ${content.map((p) => `${p?.type}:${p?.mimeType || p?.mime || "?"}:${typeof p?.data === "string" ? p.data.length : "no-data"}len`).join(", ")}`);
   for (const part of content) {
     if (!part || part.type !== "image") continue;
     const data = typeof part.data === "string" ? part.data : "";
@@ -547,8 +551,10 @@ function trackMessageCache(logicalId, ev) {
     const part = last?.parts?.find(
       (p) => p.type === "tool" && p.callID === ev.toolCallId,
     );
+    log(`[attach-debug] tool_execution_end: toolCallId=${ev.toolCallId}, result type=${typeof ev.result}, hasResult=${ev.result != null}, partFound=${part != null}, tool=${part?.tool}`);
     if (part) {
       const attachments = attachmentsFromToolResult(ev.result);
+      log(`[attach-debug] tool_execution_end: attachments count=${attachments.length}, tool=${part.tool}`);
       part.state = {
         status: ev.isError ? "error" : "done",
         title: part.state?.title,
@@ -816,11 +822,19 @@ const server = createServer(async (req, res) => {
             };
           });
           // Append cached tool parts from this gateway turn for media scrape
-          const withTools = mapped.concat(
-            s.messages.filter((m) =>
-              (m.parts || []).some((p) => p.type === "tool"),
-            ),
+          const toolParts = s.messages.filter((m) =>
+            (m.parts || []).some((p) => p.type === "tool"),
           );
+          log(`[attach-debug] GET messages: mapped=${mapped.length}, cached=${s.messages.length}, toolParts=${toolParts.length}`);
+          for (const tp of toolParts) {
+            for (const p of tp.parts || []) {
+              if (p.type === "tool") {
+                const attCount = Array.isArray(p.state?.attachments) ? p.state.attachments.length : 0;
+                log(`[attach-debug]   tool=${p.tool} status=${p.state?.status} attachments=${attCount}`);
+              }
+            }
+          }
+          const withTools = mapped.concat(toolParts);
           json(res, 200, withTools.length ? withTools : s.messages);
         } catch {
           json(res, 200, s.messages || []);
