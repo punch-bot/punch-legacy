@@ -151,8 +151,7 @@ test("live render shows phase, elapsed, tools, current action, and milestone fie
     next: "Run full suite",
   }), 13_000);
   const text = renderProgressLive(state, 13_000);
-  assert.match(text, /\*\*Progress\*\* · 12s · 3 tools/);
-  assert.match(text, /\*\*Current:\*\* Running focused tests/);
+  assert.match(text, /⏳ Running focused tests · 12s · 3 tools/);
   assert.match(text, /\*\*Goal:\*\* Ship renderer/);
   assert.match(text, /\*\*Finding:\*\* One race fixed/);
   assert.match(text, /\*\*Next:\*\* Run full suite/);

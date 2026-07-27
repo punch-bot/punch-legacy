@@ -146,7 +146,26 @@ function legacyToolAction(part) {
   const title = sanitizeProgressText(part?.state?.title, ACTION_LIMIT);
   if (title) return title;
   const name = String(part?.tool || "").toLowerCase();
-  return LEGACY_TOOL_ACTIONS[name] || "Using a tool";
+  const base = LEGACY_TOOL_ACTIONS[name] || "Using a tool";
+  const input = part?.state?.input || part?.state?.arguments;
+  if (!input || typeof input !== "object") return base;
+  if (["read", "write", "edit"].includes(name)) {
+    const p = sanitizeProgressText(input.path || input.filePath, 80);
+    if (p) return `${base} ${p}`;
+  }
+  if (name === "bash") {
+    const cmd = sanitizeProgressText(input.command, 80);
+    if (cmd) return `Running ${cmd}`;
+  }
+  if (["grep", "find", "glob"].includes(name)) {
+    const p = sanitizeProgressText(input.path || input.pattern, 80);
+    if (p) return `${base} ${p}`;
+  }
+  if (["webfetch", "puppeteer_navigate"].includes(name)) {
+    const u = sanitizeProgressText(input.url, 80);
+    if (u) return `${base} ${u}`;
+  }
+  return base;
 }
 
 function reduceLegacyProgress(state, event, now) {
@@ -247,10 +266,9 @@ export function formatProgressDuration(value) {
 
 export function renderProgressLive(state, now = Date.now()) {
   const icon = STATUS_ICONS[state.status] || STATUS_ICONS.running;
-  const phase = PHASE_LABELS[state.phase] || PHASE_LABELS.working;
+  const current = sanitizeProgressText(state.current, LIVE_CURRENT_LIMIT) || "Working on the request";
   const lines = [
-    `${icon} **${phase}** · ${formatProgressDuration(elapsedMsFor(state, now))} · ${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"}`,
-    `**Current:** ${sanitizeProgressText(state.current, LIVE_CURRENT_LIMIT) || "Working on the request"}`,
+    `${icon} ${current} · ${formatProgressDuration(elapsedMsFor(state, now))} · ${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"}`,
   ];
   if (state.goal) lines.push(`**Goal:** ${sanitizeProgressText(state.goal, FIELD_LIMITS.goal)}`);
   if (state.finding) lines.push(`**Finding:** ${sanitizeProgressText(state.finding, FIELD_LIMITS.finding)}`);
