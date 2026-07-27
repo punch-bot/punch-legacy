@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
+import { doctorTokenFor } from "./sandbox-manager.js";
 
 // Talks to the sandbox's Pi gateway (HTTP on :4096 over `pi --mode rpc`).
 // All tool execution (bash/read/write/edit) happens SERVER-SIDE in the sandbox
@@ -172,6 +173,44 @@ const IDLE_MS = (Number(process.env.OPENCODE_IDLE_TIMEOUT) || 90) * 1000;
 const CEIL_MS = (Number(process.env.OPENCODE_MAX) || 1800) * 1000;
 const HARD_MS = (Number(process.env.OPENCODE_HARD_TIMEOUT) || 300) * 1000;
 
+export function isStuckTurnError(message) {
+  return /timed out|stalled|ceiling|hard timeout|hard cap/i.test(String(message || ""));
+}
+
+export async function restartPiGateway(userId, reason = "stuck turn") {
+  const name = sandboxNameForUser(userId);
+  const apiUrl = apiUrlFor(userId);
+  if (!name || !apiUrl) return false;
+  try {
+    const auth =
+      "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64");
+    const res = await fetch(`${apiUrl}/doctor/fix`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: auth,
+        "x-punch-doctor-token": doctorTokenFor(name),
+      },
+      body: JSON.stringify({ action: "restart-gateway" }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const body = await res.json().catch(() => ({}));
+    const ok = res.ok || res.status === 202;
+    console.log(
+      `[pi] gateway restart (${reason}) uid=${userId}: ${ok ? "ok" : res.status} ${body.message || ""}`.trim(),
+    );
+    return ok;
+  } catch (err) {
+    console.error(`[pi] gateway restart failed uid=${userId}:`, err.message);
+    return false;
+  }
+}
+
+async function recoverStuckGateway(sessionId, userId, reason) {
+  void abortSession(sessionId, userId);
+  void restartPiGateway(userId, reason);
+}
+
 function idleThresholdMs(userId) {
   const s = getUserSettings(userId);
   if (s && s.disableIdleTimeout) return Infinity;
@@ -287,6 +326,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   const start = Date.now();
   let last = Date.now();
   let lastProgressFingerprint = "";
+  let recoveryReason = null;
   const bump = () => { last = Date.now(); };
 
   let resolveSseReady;
@@ -317,9 +357,11 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
         if (postAC.signal.aborted) return;
         const now = Date.now();
         if (now - last > idleMs) {
+          recoveryReason = "stall";
           postAC.abort();
           reject(new Error(`pi stalled: no progress for ${idleMs / 1000}s (session stuck)`));
         } else if (now - start > CEIL_MS) {
+          recoveryReason = "ceiling";
           postAC.abort();
           reject(new Error(`pi turn exceeded ${CEIL_MS / 1000}s ceiling`));
         }
@@ -327,6 +369,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   });
   const hardDeadline = new Promise((_, reject) => {
      hardTimer = setTimeout(() => {
+        recoveryReason = "hard-cap";
         postAC.abort();
         sseAC.abort();
         reject(new Error(`pi turn exceeded ${HARD_MS / 1000}s hard timeout`));
@@ -373,12 +416,20 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
 
   try {
     return await Promise.race([doPost, idle, hardDeadline]);
+  } catch (err) {
+    if (!recoveryReason && isStuckTurnError(err?.message)) {
+      recoveryReason = "stuck-turn";
+    }
+    throw err;
   } finally {
     clearInterval(idleIv);
     clearTimeout(hardTimer);
     clearTimeout(sseReadyTimer);
     sseAC.abort();
     postAC.abort();
+    if (recoveryReason) {
+      void recoverStuckGateway(sid, userId, recoveryReason);
+    }
   }
 }
 
