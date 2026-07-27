@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/*.mjs",
-    "prepare": "husky"
+    "test": "node --test test/*.mjs"
   },
   "engines": {
     "node": ">=18"
@@ -18,8 +17,5 @@
     "cron-parser": "^5.6.1",
     "discord.js": "^14.26.4",
     "dotenv": "^16.6.1"
-  },
-  "devDependencies": {
-    "husky": "^9.1.7"
   }
 }
