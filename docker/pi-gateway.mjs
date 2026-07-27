@@ -44,6 +44,11 @@ let MODEL =
   "anthropic/claude-sonnet-4-5";
 const MODEL_FALLBACK = "anthropic/claude-sonnet-4-5";
 const MAX_TOOL_STUBS = 40;
+const ABORT_GRACE_MS = Number(process.env.PI_GATEWAY_ABORT_GRACE_MS) || 3000;
+const TURN_MAX_MS =
+  (Number(process.env.PI_GATEWAY_TURN_MAX_MS) ||
+    Number(process.env.OPENCODE_HARD_TIMEOUT) ||
+    300) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
 
@@ -229,6 +234,40 @@ function rememberSession(logicalId, sessionFile) {
 
 loadSessionMap();
 
+function clearPiWaiters(err) {
+  for (const [, p] of pending) p.reject(err);
+  pending.clear();
+  eventWaiters.clear();
+}
+
+function forceKillPi(reason = "forced") {
+  log("force-kill pi:", reason);
+  clearPiWaiters(new Error("pi force-killed"));
+  const proc = child;
+  child = null;
+  ready = false;
+  stdoutBuf = "";
+  if (proc) {
+    try {
+      proc.kill("SIGTERM");
+    } catch {}
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+    }, 2000).unref();
+  } else {
+    startPi();
+  }
+}
+
+async function recoverStuckPi(reason = "stuck") {
+  try {
+    await rpc("abort", {}, ABORT_GRACE_MS);
+  } catch {}
+  forceKillPi(reason);
+}
+
 function startPi() {
   if (child) {
     try {
@@ -238,8 +277,7 @@ function startPi() {
   }
   ready = false;
   stdoutBuf = "";
-  for (const [, p] of pending) p.reject(new Error("pi restarted"));
-  pending.clear();
+  clearPiWaiters(new Error("pi restarted"));
 
   piSpawnedAt = Date.now();
   const { provider, modelId } = parseModel(MODEL);
@@ -273,8 +311,7 @@ function startPi() {
     log(`pi exited code=${code} signal=${signal}`);
     ready = false;
     child = null;
-    for (const [, p] of pending) p.reject(new Error("pi exited"));
-    pending.clear();
+    clearPiWaiters(new Error("pi exited"));
     if (activeLogicalId) finishTurnProgress(activeLogicalId, "error");
     // Unknown / bad provider exits immediately — fall back so health/session work.
     if (
@@ -694,6 +731,13 @@ async function promptAndWait(promptText, signal) {
     throw Object.assign(new Error("aborted"), { name: "AbortError" });
   }
   const turnP = waitTurn(signal);
+  let turnTimer;
+  const turnMax = new Promise((_, reject) => {
+    turnTimer = setTimeout(
+      () => reject(new Error(`turn exceeded ${TURN_MAX_MS / 1000}s hard cap`)),
+      TURN_MAX_MS,
+    );
+  });
   try {
     await rpc("prompt", { message: promptText, streamingBehavior: "followUp" }, 60000);
   } catch (e) {
@@ -701,7 +745,17 @@ async function promptAndWait(promptText, signal) {
     await turnP.catch(() => {});
     throw e;
   }
-  await turnP;
+  try {
+    await Promise.race([turnP, turnMax]);
+  } catch (e) {
+    turnP.cancel(e);
+    if (!signal?.aborted) {
+      void recoverStuckPi(e.message || "turn failed");
+    }
+    throw e;
+  } finally {
+    clearTimeout(turnTimer);
+  }
 }
 
 // --- HTTP ------------------------------------------------------------------
@@ -772,8 +826,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/abort") {
-      // Fire-and-forget: don't await Pi RPC response — it may hang if Pi is stuck.
-      rpc("abort", {}, 5000).catch(() => {});
+      void recoverStuckPi("global abort");
       if (activeLogicalId) finishTurnProgress(activeLogicalId, "aborted");
       json(res, 200, { ok: true });
       return;
@@ -829,7 +882,7 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && action === "abort") {
-        await rpc("abort").catch(() => {});
+        void recoverStuckPi("session abort");
         finishTurnProgress(sid, "aborted");
         json(res, 200, { ok: true });
         return;
@@ -924,8 +977,11 @@ const server = createServer(async (req, res) => {
           });
         } catch (e) {
           if (e.name === "AbortError" || ac.signal.aborted) {
-            await rpc("abort").catch(() => {});
+            void recoverStuckPi("client disconnect");
             json(res, 499, { error: "aborted" });
+          } else if (/hard cap|force-killed|timed out/i.test(e.message || "")) {
+            void recoverStuckPi(e.message);
+            json(res, 504, { error: e.message });
           } else {
             log("message error:", e.message);
             json(res, 500, { error: e.message });
