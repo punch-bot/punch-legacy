@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  MAX_RECAP_ACTIONS,
-  MAX_RECAP_MILESTONES,
   applyProgressActivity,
   createProgressRenderer,
   createProgressState,
@@ -172,10 +170,10 @@ test("authoritative activity replaces counts, actions, milestones, and terminal 
     actions: Array.from({ length: 10 }, (_, i) => `Safe action ${i}`),
     milestones: Array.from({ length: 5 }, (_, i) => ({ finding: `Finding ${i}` })),
   });
-  const recap = renderProgressRecap(state);
-  assert.match(recap, /^✅ \*\*Completed\*\* · 7 tools · thinking 12s · total 1m 5s/);
-  assert.equal((recap.match(/Safe action/g) || []).length, MAX_RECAP_ACTIONS);
-  assert.equal((recap.match(/Finding \d/g) || []).length, MAX_RECAP_MILESTONES);
+  const recap = renderProgressRecap(state, "The requested change is ready.");
+  assert.match(recap, /^-# 🔨 7 tools used · 💭 1m 5s\n\nThe requested change is ready\.$/);
+  assert.equal(recap.includes("Completed"), false);
+  assert.equal(recap.includes("✅"), false);
   assert.ok(recap.length <= 1900);
 });
 
@@ -189,7 +187,7 @@ test("recap omits zero thinking and distinguishes abort, error, and timeout", ()
     const recap = renderProgressRecap(state);
     assert.match(recap, new RegExp(`^${expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.equal(recap.includes("thinking"), false);
-    assert.match(recap, /total 9s/);
+    assert.match(recap, /💭 9s/);
   }
 });
 
@@ -259,15 +257,16 @@ test("renderer serializes edits, coalesces state, and queues final recap after i
     current: "Complete",
     actions: ["Newest action"],
     milestones: [{ next: "Finish safely" }],
-  });
+  }, "completed", "Here is the result.", { files: ["result.txt"] });
   assert.equal(edits.length, 1, "second edit must wait for first");
 
   releaseFirst();
   await flushPromises();
   assert.equal(edits.length, 2);
-  assert.match(edits[1].content, /^✅ \*\*Completed\*\*/);
-  assert.match(edits[1].content, /Newest action/);
-  assert.match(edits[1].content, /Finish safely/);
+  assert.match(edits[1].content, /^-# 🔨 2 tools used · 💭 8s\n\nHere is the result\./);
+  assert.equal(edits[1].content.includes("Completed"), false);
+  assert.equal(edits[1].content.includes("✅"), false);
+  assert.deepEqual(edits[1].files, ["result.txt"]);
   assert.match(edits[1].content, /-# from sandbox:test$/);
   assert.equal(edits[1].content.includes("Old action"), false);
   assert.deepEqual(edits[1].allowedMentions, { parse: [] });

@@ -263,14 +263,22 @@ function appendWithin(lines, line) {
   if (candidate.length <= MAX_DISCORD_CONTENT) lines.push(line);
 }
 
-export function renderProgressRecap(state) {
+export function renderProgressRecap(state, result = "") {
   const status = safeStatus(state.status, "error");
+  const stats = [
+    `🔨 ${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"} used`,
+    `💭 ${formatProgressDuration(state.elapsedMs)}`,
+  ];
+  const resultText = String(result || "").trim();
+
+  if (status === "completed") {
+    return [`-# ${stats.join(" · ")}`, resultText].filter(Boolean).join("\n\n");
+  }
+
   const icon = STATUS_ICONS[status];
   const label = PHASE_LABELS[status] || PHASE_LABELS.error;
-  const stats = [`${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"}`];
-  if (state.thinkingMs > 0) stats.push(`thinking ${formatProgressDuration(state.thinkingMs)}`);
-  stats.push(`total ${formatProgressDuration(state.elapsedMs)}`);
   const lines = [`${icon} **${label}** · ${stats.join(" · ")}`];
+  if (resultText) appendWithin(lines, resultText);
 
   const actions = state.actions.slice(0, MAX_RECAP_ACTIONS);
   if (actions.length) {
@@ -329,8 +337,8 @@ export function createProgressRenderer({
     timer = setTimer(pump, Math.min(semanticDue, elapsedDue));
   };
 
-  const performEdit = (content) => Promise.resolve(
-    edit({ content, allowedMentions: { parse: [] } }),
+  const performEdit = (options) => Promise.resolve(
+    edit({ ...options, allowedMentions: { parse: [] } }),
   ).catch(() => {});
 
   const pump = () => {
@@ -340,7 +348,7 @@ export function createProgressRenderer({
       const request = finalRequest;
       finalRequest = null;
       inFlight = true;
-      void performEdit(request.content).finally(() => {
+      void performEdit(request.options).finally(() => {
         inFlight = false;
         closed = true;
         request.resolve();
@@ -358,7 +366,7 @@ export function createProgressRenderer({
 
     const editRevision = revision;
     inFlight = true;
-    void performEdit(renderProgressLive(state, time)).finally(() => {
+    void performEdit({ content: renderProgressLive(state, time) }).finally(() => {
       inFlight = false;
       lastEditAt = now();
       renderedRevision = Math.max(renderedRevision, editRevision);
@@ -378,7 +386,7 @@ export function createProgressRenderer({
       }
       return state;
     },
-    finalize(activity = null, fallbackStatus = "completed") {
+    finalize(activity = null, fallbackStatus = "completed", result = "", options = {}) {
       if (finalPromise) return finalPromise;
       state = applyProgressActivity(state, activity);
       if (state.status === "running" || fallbackStatus !== "completed") {
@@ -387,11 +395,11 @@ export function createProgressRenderer({
       revision += 1;
       clearScheduled();
       finalPromise = new Promise((resolve) => {
-        const recap = renderProgressRecap(state);
+        const recap = renderProgressRecap(state, result);
         const suffix = String(finalSuffix || "");
         const recapLimit = Math.max(0, MAX_DISCORD_CONTENT - suffix.length);
         const content = recap.slice(0, recapLimit).trimEnd() + suffix;
-        finalRequest = { content, resolve };
+        finalRequest = { options: { ...options, content }, resolve };
         pump();
       });
       return finalPromise;

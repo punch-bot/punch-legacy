@@ -1440,9 +1440,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     turn.detail = progressState.current;
   };
 
-  const finalizeProgress = async (activity, fallbackStatus) => {
+  const finalizeProgress = async (activity, fallbackStatus, result = "", rich = {}) => {
     if (progressRenderer) {
-      await progressRenderer.finalize(activity, fallbackStatus);
+      await progressRenderer.finalize(activity, fallbackStatus, result, rich);
       progressState = progressRenderer.getState();
     } else if (thinking) {
       await thinking.delete().catch(() => {});
@@ -1528,11 +1528,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       !hasText && !hasNotes && sendable.length === 0 &&
       reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0;
 
-    // Attribution label at the very bottom of textual replies. Progress recaps
-    // carry their own footer so context collection can skip this sandbox's UI.
     const label = labelLineFor(uid);
-    if (!reactionOnly && label) out += label;
-
     const activityStatus = res.activity?.status || "completed";
     if (reactionOnly) {
       progressRenderer?.discard();
@@ -1540,13 +1536,22 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       thinking = null;
     }
 
-    if (!reactionOnly && (out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0)) {
-      await settle(message, out, sendable, { embeds });
+    const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0;
+    if (!reactionOnly && hasResult) {
+      if (progressRenderer) {
+        // Keep the answer and activity count in the original status message.
+        // Discord's content limit still requires overflow replies for long answers.
+        const [primary = "", ...overflow] = chunk(out, 1_650);
+        await finalizeProgress(res.activity, activityStatus, primary, { files: sendable, embeds });
+        if (overflow.length) await settle(message, overflow.join("") + label);
+      } else {
+        await settle(message, out + label, sendable, { embeds });
+      }
       for (const q of questions) {
         await sendQuestion(message.channel, q, uid);
       }
     }
-    if (!reactionOnly) {
+    if (!reactionOnly && (!hasResult || !progressRenderer)) {
       await finalizeProgress(res.activity, activityStatus);
     }
 
