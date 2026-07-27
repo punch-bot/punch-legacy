@@ -1051,7 +1051,7 @@ client.once(Events.ClientReady, async (c) => {
     description: "Start a fresh Pi session in this channel (drops prior context)",
   }, {
     name: "botmode",
-    description: "Experimental toggles: let bots trigger Punch, disable thinking message, or toggle git co-author",
+    description: "Experimental toggles: let bots trigger Punch and/or disable the thinking message",
     options: [
       { type: 1, name: "allow-bots", description: "Allow messages authored by bots to trigger Punch",
         options: [
@@ -1064,11 +1064,6 @@ client.once(Events.ClientReady, async (c) => {
             choices: [{ name: "on", value: "on" }, { name: "off", value: "off" }, { name: "status", value: "status" }] },
         ] },
       { type: 1, name: "show-context", description: "Always show a context-window % indicator under each reply",
-        options: [
-          { type: 3, name: "state", description: "on / off / status", required: true,
-            choices: [{ name: "on", value: "on" }, { name: "off", value: "off" }, { name: "status", value: "status" }] },
-        ] },
-      { type: 1, name: "git-co-author", description: "Add Co-Authored-By: Punch trailer to git commits",
         options: [
           { type: 3, name: "state", description: "on / off / status", required: true,
             choices: [{ name: "on", value: "on" }, { name: "off", value: "off" }, { name: "status", value: "status" }] },
@@ -3326,8 +3321,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const sub = interaction.options.getSubcommand();
     const uid = interaction.user.id;
     const state = interaction.options.getString("state", true);
-    const key = sub === "allow-bots" ? "allowBots" : sub === "show-context" ? "showContext" : sub === "git-co-author" ? "gitCoAuthor" : "noThinking";
-    const label = sub === "allow-bots" ? "Bot messages triggering Punch" : sub === "show-context" ? "Always-on context indicator" : sub === "git-co-author" ? "Co-Authored-By trailer in commits" : "Thinking message";
+    const key = sub === "allow-bots" ? "allowBots" : sub === "show-context" ? "showContext" : "noThinking";
+    const label = sub === "allow-bots" ? "Bot messages triggering Punch" : sub === "show-context" ? "Always-on context indicator" : "Thinking message";
     if (state === "status") {
       const us = store.getUserSettings(uid);
       await interaction.reply({ content: `${label} is currently **${us[key] ? "ON" : "off"}**.`, flags: MessageFlags.Ephemeral });

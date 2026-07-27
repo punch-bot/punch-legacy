@@ -75,7 +75,6 @@ export const USER_SETTINGS_DEFAULTS = {
   allowBots: false,
   noThinking: false,
   showContext: false,
-  gitCoAuthor: true,
 };
 
 let seq = 0;

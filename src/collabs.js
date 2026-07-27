@@ -89,7 +89,7 @@ export async function create({ owner, reviewer, workspace }) {
     await sandbox.gitInSandbox(owner, ["-C", source, "config", "user.name", `Punch ${owner}`]);
     await sandbox.gitInSandbox(owner, ["-C", source, "config", "user.email", `${owner}@punch.local`]);
     await sandbox.gitInSandbox(owner, ["-C", source, "add", "--all"]);
-    await sandbox.gitInSandbox(owner, ["-C", source, "commit", "--allow-empty", "--message", "Initialize collaboration\n\nCo-Authored-By: Punch <punch@orb.gay>"]);
+    await sandbox.gitInSandbox(owner, ["-C", source, "commit", "--allow-empty", "--message", "Initialize collaboration"]);
   }
   await sandbox.gitInSandbox(owner, ["clone", "--bare", source, repo]);
   const { stdout: base } = await sandbox.gitInSandbox(owner, ["--git-dir", repo, "rev-parse", "HEAD"]);
