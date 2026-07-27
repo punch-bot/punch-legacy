@@ -1465,16 +1465,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     for (const m of res.attachments || []) {
       pushFile(filesToSend, m.buffer, m.name);
     }
-    console.log(`[attach-debug] res.attachments=${(res.attachments || []).length}, filesToSend=${filesToSend.length}`);
-    for (const f of filesToSend) {
-      console.log(`[attach-debug]   file=${f.name} size=${f.attachment?.length} oversize=${f.oversize}`);
-    }
 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
-    console.log(`[attach-debug] raw res.text (first 500): ${JSON.stringify(res.text.slice(0, 500))}`);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
-    console.log(`[attach-debug] extractAttachments found ${attachments.length} refs: ${attachments.join(", ")}`);
-    console.log(`[attach-debug] textAfterAttachments (first 500): ${JSON.stringify(textAfterAttachments.slice(0, 500))}`);
     const { clean: textAfterReacts, emojis: reactEmojis } = extractReactTags(textAfterAttachments);
 
     for (const relPath of attachments) {
@@ -1531,11 +1524,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
     const sendable = filesToSend.filter((f) => !f.oversize);
-    console.log(`[attach-debug] sendable=${sendable.length} (filtered from ${filesToSend.length})`);
-    for (const f of sendable) {
-      console.log(`[attach-debug]   sendable file=${f.name} size=${f.attachment?.length}`);
-    }
-    console.log(`[attach-debug] final out (first 500): ${JSON.stringify(out.slice(0, 500))}`);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
     const reactionOnly =
@@ -2221,7 +2209,8 @@ async function fireRoutine(routine) {
       for (const relPath of attachments) {
         try {
           const f = await getFile(relPath, uid);
-          pushFile(filesToSend, f.buffer, f.name);
+          const dup = filesToSend.some((existing) => existing.attachment?.length === f.buffer.length && existing.attachment?.equals(f.buffer));
+          if (!dup) pushFile(filesToSend, f.buffer, f.name);
         } catch (err) {
           console.error(`[heartbeat] attachment fetch failed:`, err.message);
         }
@@ -2348,7 +2337,8 @@ async function fireRoutine(routine) {
   for (const relPath of attachments) {
     try {
       const f = await getFile(relPath, uid);
-      pushFile(filesToSend, f.buffer, f.name);
+      const dup = filesToSend.some((existing) => existing.attachment?.length === f.buffer.length && existing.attachment?.equals(f.buffer));
+      if (!dup) pushFile(filesToSend, f.buffer, f.name);
     } catch (err) {
       console.error(`[routines] attachment fetch "${relPath}" failed:`, err.message);
     }

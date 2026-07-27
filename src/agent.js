@@ -601,23 +601,14 @@ async function collectTurnMedia(sid, userId) {
   const res = await fetch(`${srv}/session/${sid}/message${q}`, { headers: headers() });
   if (!res.ok) throw new Error(`getMessages API ${res.status}`);
   const msgs = await res.json();
-  console.log(`[attach-debug] collectTurnMedia: ${msgs.length} messages returned`);
   let lastUser = -1;
   for (let i = msgs.length - 1; i >= 0; i--) {
      if ((msgs[i].info?.role || msgs[i].role) === "user") { lastUser = i; break; }
   }
-  console.log(`[attach-debug] collectTurnMedia: lastUser=${lastUser}`);
   const media = [];
   for (let i = lastUser + 1; i < msgs.length; i++) {
-     const parts = msgs[i].parts || [];
-     for (const p of parts) {
-       if (p.type === "tool" && Array.isArray(p.state?.attachments)) {
-         console.log(`[attach-debug]   tool=${p.tool} status=${p.state?.status} attachments=${p.state.attachments.length}`);
-       }
-     }
-     media.push(...extractMediaParts(parts));
+     media.push(...extractMediaParts(msgs[i].parts || []));
   }
-  console.log(`[attach-debug] collectTurnMedia: total media=${media.length}`);
   return media;
 }
 
@@ -626,15 +617,11 @@ function extractMediaParts(parts) {
   for (const p of parts || []) {
      if (p.type === "tool" && Array.isArray(p.state?.attachments)) {
         for (const a of p.state.attachments) {
-          console.log(`[attach-debug] extractMediaParts: tool=${p.tool} att mime=${a.mime} urlLen=${a?.url?.length || 0}`);
           const buffer = dataUrlToBuffer(a?.url);
-          console.log(`[attach-debug] extractMediaParts: buffer=${buffer?.length || "null"}`);
           if (buffer) media.push({ buffer, mime: a.mime, name: mediaName(a.mime, p.tool) });
         }
      } else if ((p.type === "file" || p.type === "image") && typeof p.url === "string") {
-        console.log(`[attach-debug] extractMediaParts: ${p.type} mime=${p.mime || p.mimeType} urlLen=${p.url?.length || 0}`);
         const buffer = dataUrlToBuffer(p.url);
-        console.log(`[attach-debug] extractMediaParts: buffer=${buffer?.length || "null"}`);
         if (buffer) media.push({ buffer, mime: p.mime || p.mimeType, name: mediaName(p.mime || p.mimeType, p.type) });
      }
   }
