@@ -172,3 +172,10 @@ test("compactMemory removes normalized duplicates and keeps the newest entry", a
 
   assert.ok(!readdirSync(dataDir).some((name) => name.endsWith(".tmp")));
 });
+
+test("user settings include multitaskWorkersCap default", () => {
+  const settings = memory.getUserSettings("multitask-user");
+  assert.equal(settings.multitaskWorkersCap, 3);
+  memory.patchUserSettings("multitask-user", { multitaskWorkersCap: 7 });
+  assert.equal(memory.getUserSettings("multitask-user").multitaskWorkersCap, 7);
+});

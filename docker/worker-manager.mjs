@@ -5,13 +5,40 @@ import { randomUUID } from "node:crypto";
 
 const ROOT = "/data/workers";
 const RECORDS_FILE = join(ROOT, "records.json");
-const MAX_WORKERS = 3;
+const SETTINGS_FILE = join(ROOT, "settings.json");
+const DEFAULT_WORKER_CAP = 3;
+const MIN_WORKER_CAP = 1;
+const MAX_WORKER_CAP = 10;
 const MAX_TIMEOUT_MS = 30 * 60_000;
 const MAX_OUTPUT_CHARS = 20_000;
 const active = new Map();
 
 function readJson(file, fallback) { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return fallback; } }
 function save(records) { mkdirSync(ROOT, { recursive: true }); const temporary = `${RECORDS_FILE}.${process.pid}.tmp`; writeFileSync(temporary, JSON.stringify(records.slice(-100), null, 2) + "\n", { mode: 0o600 }); renameSync(temporary, RECORDS_FILE); }
+function clampWorkerCap(value) {
+  const cap = Math.floor(Number(value));
+  if (!Number.isFinite(cap)) return DEFAULT_WORKER_CAP;
+  return Math.max(MIN_WORKER_CAP, Math.min(MAX_WORKER_CAP, cap));
+}
+function readWorkerSettings() { return readJson(SETTINGS_FILE, { cap: DEFAULT_WORKER_CAP }); }
+function saveWorkerSettings(settings) {
+  mkdirSync(ROOT, { recursive: true });
+  const temporary = `${SETTINGS_FILE}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(settings, null, 2) + "\n", { mode: 0o600 });
+  renameSync(temporary, SETTINGS_FILE);
+}
+export function getWorkerCap() { return clampWorkerCap(readWorkerSettings().cap); }
+export function getWorkerSettings() {
+  const cap = getWorkerCap();
+  const active = activeWorkers();
+  return { cap, active, available: Math.max(0, cap - active) };
+}
+export function setWorkerCap(cap) {
+  const next = { cap: clampWorkerCap(cap) };
+  saveWorkerSettings(next);
+  return getWorkerSettings();
+}
+function activeWorkers() { return active.size; }
 function records() { return readJson(RECORDS_FILE, []); }
 function update(id, patch) { const all = records(); const index = all.findIndex((entry) => entry.id === id); if (index >= 0) { all[index] = { ...all[index], ...patch }; save(all); return all[index]; } return null; }
 function modelParts(model) { const slash = model.indexOf("/"); return slash > 0 ? [model.slice(0, slash), model.slice(slash + 1)] : [model, model]; }
@@ -32,7 +59,8 @@ export function stopWorker(id) {
 }
 
 export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, notify, notifyProgress }) {
-  if (active.size >= MAX_WORKERS) throw new Error(`Worker limit reached (${MAX_WORKERS})`);
+  const cap = getWorkerCap();
+  if (active.size >= cap) throw new Error(`Worker limit reached (${cap})`);
   if (!["research", "coding", "browser"].includes(kind)) throw new Error("kind must be research, coding, or browser");
   if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 20_000) throw new Error("prompt must be 1-20000 characters");
   const safeModel = String(model || process.env.OPENCODE_MODEL || "opencode/big-pickle");

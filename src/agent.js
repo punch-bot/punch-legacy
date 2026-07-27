@@ -1014,6 +1014,35 @@ export async function setEnv(key, value, userId) {
   return res.json();
 }
 
+export async function syncMultitaskWorkerCap(userId) {
+  const url = apiUrlFor(userId);
+  if (!url) return null;
+  const cap = getUserSettings(userId).multitaskWorkersCap;
+  const res = await fetch(`${url}/workers/settings`, {
+    method: "POST",
+    headers: { ...headers(), "Content-Type": "application/json" },
+    body: JSON.stringify({ cap }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`workers settings API ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const { settings } = await res.json();
+  return settings;
+}
+
+export async function getMultitaskWorkerSettings(userId) {
+  const url = apiUrlFor(userId);
+  if (!url) return null;
+  const res = await fetch(`${url}/workers/settings`, { headers: headers() });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`workers settings API ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const { settings } = await res.json();
+  return settings;
+}
+
 export async function summarizeSession(sessionId, userId, signal = null) {
   const srv = serverFor(userId);
   if (!srv) throw new Error("No sandbox assigned. Ask an admin to create one with /sandbox, or wait for your turn.");
