@@ -118,11 +118,24 @@ test("bash details allow only benign normalized command families", () => {
 
   for (const command of [
     "npm run deploy",
+    "node app.mjs",
+    "curl https://example.test?token=secret",
+    "cargo build --release",
+    "python -m pytest",
+  ]) {
+    const base = command.trim().split(/\s/)[0].split("/").pop();
+    assert.equal(
+      sanitizedToolAction({ toolName: "bash", args: { command } }),
+      `Running ${base}`,
+    );
+  }
+
+  for (const command of [
     "npm test; curl https://evil.test",
     "git status\ncurl https://evil.test",
     "git status && cat $API_KEY",
-    "node app.mjs",
-    "curl https://example.test?token=secret",
+    "echo `whoami`",
+    "ls | grep secret",
   ]) {
     assert.equal(
       sanitizedToolAction({ toolName: "bash", args: { command } }),
@@ -131,7 +144,7 @@ test("bash details allow only benign normalized command families", () => {
   }
 });
 
-test("web details expose hostname only and fall back for unsafe URLs", () => {
+test("web details expose hostname and fall back for unsafe URLs", () => {
   assert.equal(
     sanitizedToolAction({
       toolName: "webfetch",
@@ -154,22 +167,30 @@ test("web details expose hostname only and fall back for unsafe URLs", () => {
   }
 });
 
-test("grep, find, and glob details expose only safe workspace context", () => {
+test("grep, find, and glob details expose sanitized pattern and safe workspace context", () => {
   assert.equal(
-    sanitizedToolAction({ toolName: "grep", args: { pattern: "API_KEY=raw", path: "src" } }),
-    "Searching file contents in src",
+    sanitizedToolAction({ toolName: "grep", args: { pattern: "function parseModel", path: "src" } }),
+    "Searching file contents for function parseModel in src",
   );
   assert.equal(
     sanitizedToolAction({ toolName: "find", args: { pattern: "**/*.mjs", path: "test" } }),
-    "Finding files in test",
+    "Finding files for \\*\\*/\\*\\.mjs in test",
   );
   assert.equal(
     sanitizedToolAction({ toolName: "glob", args: { pattern: "secret-*", path: "/work/docker" } }),
-    "Finding files in docker",
+    "Finding files for secret\\-\\* in docker",
   );
   assert.equal(
     sanitizedToolAction({ toolName: "grep", args: { pattern: "secret", path: "/data" } }),
-    "Searching file contents",
+    "Searching file contents for secret",
+  );
+  assert.equal(
+    sanitizedToolAction({ toolName: "grep", args: { path: "src" } }),
+    "Searching file contents in src",
+  );
+  assert.equal(
+    sanitizedToolAction({ toolName: "glob", args: { pattern: "**/*.ts" } }),
+    "Finding files for \\*\\*/\\*\\.ts in workspace",
   );
 });
 
@@ -220,7 +241,7 @@ test("counts distinct non-report_progress calls and records distinct bounded act
   assert.equal(new Set(activity.actions).size, activity.actions.length);
   assert.deepEqual(activity.actions.slice(0, 2), ["Running npm test", "Reading a file src/a\\.js"]);
   assert.deepEqual(activity.milestones, [{ next: "Run focused tests" }]);
-  assert.equal(sanitizedToolAction({ toolName: "unknown_secret_tool" }), "Using a tool");
+  assert.equal(sanitizedToolAction({ toolName: "unknown_secret_tool" }), "Using unknown\\_secret\\_tool");
 });
 
 test("public milestones are distinct, bounded, and neutralized for Discord", () => {

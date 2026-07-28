@@ -119,6 +119,17 @@ function safeBashCommand(value) {
   return null;
 }
 
+function safeBaseCommand(value) {
+  if (typeof value !== "string" || /[\r\n]/.test(value)) return null;
+  const command = value.trim().replace(/\s+/g, " ");
+  if (!command || /[\n\r;&|<>$`'"\\(){}]/.test(command)) return null;
+  const match = command.match(/^([a-zA-Z0-9._/-]+)/);
+  if (!match) return null;
+  const name = match[1].split("/").pop();
+  if (!/^[a-zA-Z][a-zA-Z0-9._-]*$/.test(name)) return null;
+  return name;
+}
+
 function safeHostname(value) {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
@@ -163,12 +174,24 @@ export function sanitizedToolAction(event) {
   } else if (name === "bash") {
     const command = safeBashCommand(args.command);
     if (command) action = `Running ${command}`;
+    else {
+      const base = safeBaseCommand(args.command);
+      if (base) action = `Running ${base}`;
+    }
   } else if (["webfetch", "puppeteer_navigate"].includes(name)) {
     const host = safeHostname(args.url);
     if (host) action = `${name === "webfetch" ? "Fetching" : "Opening"} ${host}`;
   } else if (["grep", "find", "glob"].includes(name)) {
     const path = workspaceRelativePath(args.path || ".");
-    if (path) action = `${TOOL_ACTIONS[name]} in ${path}`;
+    const pattern = typeof args.pattern === "string" && args.pattern.trim()
+      ? args.pattern.trim()
+      : null;
+    if (path && pattern) action = `${TOOL_ACTIONS[name]} for ${pattern} in ${path}`;
+    else if (path) action = `${TOOL_ACTIONS[name]} in ${path}`;
+    else if (pattern) action = `${TOOL_ACTIONS[name]} for ${pattern}`;
+  } else if (action === "Using a tool") {
+    const rawName = String(event?.toolName || event?.name || "");
+    if (/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(rawName)) action = `Using ${rawName}`;
   }
 
   return neutralizePublicText(action, MAX_ACTION_LENGTH) || TOOL_ACTIONS[name] || "Using a tool";
