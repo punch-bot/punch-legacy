@@ -1305,6 +1305,62 @@ client.once(Events.ClientReady, async (c) => {
       { type: 1, name: "status", description: "Check Tailscale connection status" },
       { type: 1, name: "down", description: "Disconnect Tailscale" },
     ],
+  }, {
+    name: "provider",
+    description: "Manage custom LLM providers",
+    options: [
+      { type: 1, name: "add", description: "Add a custom provider",
+        options: [
+          { type: 3, name: "name", description: "Provider name (used for /apikey set <name>)", required: true },
+          { type: 3, name: "endpoint", description: "Base URL (e.g. https://api.my-llm.com/v1)", required: true },
+          { type: 3, name: "api", description: "API format",
+            choices: [
+              { name: "OpenAI Completions", value: "openai-completions" },
+              { name: "OpenAI Chat", value: "openai-chat" },
+            ] },
+        ] },
+      { type: 1, name: "edit", description: "Edit a custom provider's endpoint or API format",
+        options: [
+          { type: 3, name: "name", description: "Provider name", required: true },
+          { type: 3, name: "endpoint", description: "New base URL" },
+          { type: 3, name: "api", description: "New API format",
+            choices: [
+              { name: "OpenAI Completions", value: "openai-completions" },
+              { name: "OpenAI Chat", value: "openai-chat" },
+            ] },
+        ] },
+      { type: 1, name: "remove", description: "Remove a custom provider and its models",
+        options: [{ type: 3, name: "name", description: "Provider name", required: true }] },
+      { type: 1, name: "list", description: "List providers (built-in and custom)" },
+      {
+        type: 2, name: "model", description: "Manage models for a custom provider",
+        options: [
+          { type: 1, name: "add", description: "Add a model to a custom provider",
+            options: [
+              { type: 3, name: "provider", description: "Provider name", required: true },
+              { type: 3, name: "model", description: "Model ID (e.g. my-model-v1)", required: true },
+              { type: 3, name: "name", description: "Display name (defaults to prettified model ID)" },
+              { type: 4, name: "context", description: "Context window size (default 128000)" },
+              { type: 4, name: "max_tokens", description: "Max output tokens (default 4096)" },
+              { type: 5, name: "reasoning", description: "Supports reasoning/thinking (default No)" },
+            ] },
+          { type: 1, name: "edit", description: "Edit a model's details via modal",
+            options: [
+              { type: 3, name: "provider", description: "Provider name", required: true },
+              { type: 3, name: "model", description: "Model ID", required: true },
+            ] },
+          { type: 1, name: "remove", description: "Remove a model from a custom provider",
+            options: [
+              { type: 3, name: "provider", description: "Provider name", required: true },
+              { type: 3, name: "model", description: "Model ID to remove", required: true },
+            ] },
+          { type: 1, name: "list", description: "List models for a custom provider",
+            options: [
+              { type: 3, name: "provider", description: "Provider name", required: true },
+            ] },
+        ],
+      },
+    ],
   }, settings.getSlashCommandDefinition()];
 
   try {
@@ -3467,8 +3523,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const provider = interaction.options.getString("provider", true).toLowerCase();
     const key = interaction.options.getString("key");
     if (!PROVIDER_NAMES.includes(provider)) {
-      await interaction.reply({ content: `⚠️ Unknown provider \`${provider}\`. Valid: ${PROVIDER_NAMES.join(", ")}`, flags: MessageFlags.Ephemeral });
-      return;
+      const provRes = await fetch(`${apiUrl}/providers`, { headers: { authorization: auth } });
+      if (provRes.ok) {
+        const { providers = [] } = await provRes.json();
+        if (!providers.includes(provider)) {
+          await interaction.reply({ content: `⚠️ Unknown provider \`${provider}\`. Use \`/provider add\` to register custom providers, or choose: ${PROVIDER_NAMES.join(", ")}`, flags: MessageFlags.Ephemeral });
+          return;
+        }
+      } else {
+        await interaction.reply({ content: `⚠️ Unknown provider \`${provider}\`. Valid: ${PROVIDER_NAMES.join(", ")}`, flags: MessageFlags.Ephemeral });
+        return;
+      }
     }
     try {
       const res = await fetch(`${apiUrl}/apikey`, {
@@ -3487,6 +3552,208 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } catch (err) {
       await interaction.reply({ content: `⚠️ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
     }
+    return;
+  }
+
+  if (interaction.commandName === "provider") {
+    const uid = interaction.user.id;
+    const apiUrl = apiUrlFor(uid);
+    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === "add") {
+      const name = interaction.options.getString("name", true).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+      const endpoint = interaction.options.getString("endpoint", true);
+      const api = interaction.options.getString("api") || "openai-completions";
+      try {
+        const res = await fetch(`${apiUrl}/provider`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name, endpoint, api }),
+        });
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `supervisor API ${res.status}`); }
+        await interaction.reply({
+          content: `\u2705 Custom provider **${name}** created.\nEndpoint: \`${endpoint}\`\n\nAdd models with: \`/provider model add ${name} <model-id>\``,
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+      return;
+    }
+
+    if (sub === "edit") {
+      const name = interaction.options.getString("name", true).toLowerCase();
+      const endpoint = interaction.options.getString("endpoint") || undefined;
+      const api = interaction.options.getString("api") || undefined;
+      if (!endpoint && !api) {
+        await interaction.reply({ content: "\u26a0\ufe0f Provide at least one field to update (endpoint or api).", flags: MessageFlags.Ephemeral });
+        return;
+      }
+      try {
+        const res = await fetch(`${apiUrl}/provider`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name, endpoint, api }),
+        });
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `supervisor API ${res.status}`); }
+        await interaction.reply({ content: `\u2705 Provider **${name}** updated.`, flags: MessageFlags.Ephemeral });
+      } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+      return;
+    }
+
+    if (sub === "remove") {
+      const name = interaction.options.getString("name", true).toLowerCase();
+      try {
+        const res = await fetch(`${apiUrl}/provider`, {
+          method: "DELETE",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name }),
+        });
+        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `supervisor API ${res.status}`); }
+        await interaction.reply({ content: `\u2705 Provider **${name}** removed.`, flags: MessageFlags.Ephemeral });
+      } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+      return;
+    }
+
+    if (sub === "list") {
+      try {
+        const res = await fetch(`${apiUrl}/providers`, { headers: { authorization: auth } });
+        if (!res.ok) throw new Error(`supervisor API ${res.status}`);
+        const { providers = [], custom = {} } = await res.json();
+        const lines = providers.map(p => {
+          const cfg = custom[p];
+          if (!cfg) return `\u2022 **${p}** (built-in)`;
+          const modelCount = (cfg.models || []).length;
+          return `\u2022 **${p}** \u2014 \`${cfg.baseUrl}\` (${modelCount} model${modelCount === 1 ? "" : "s"})`;
+        });
+        await interaction.reply({
+          content: `**Available providers:**\n${lines.length ? lines.join("\n") : "No providers found."}`,
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+      return;
+    }
+
+    const group = interaction.options.getSubcommandGroup();
+    if (group === "model") {
+      if (sub === "add") {
+        const provider = interaction.options.getString("provider", true).toLowerCase();
+        const model = interaction.options.getString("model", true);
+        const name = interaction.options.getString("name") || undefined;
+        const context = interaction.options.getInteger("context") ?? undefined;
+        const maxTokens = interaction.options.getInteger("max_tokens") ?? undefined;
+        const reasoning = interaction.options.getBoolean("reasoning") ?? undefined;
+        try {
+          const res = await fetch(`${apiUrl}/provider/model`, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: auth },
+            body: JSON.stringify({ provider, model, name, context, maxTokens, reasoning }),
+          });
+          if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `supervisor API ${res.status}`); }
+          await interaction.reply({
+            content: `\u2705 Model **${model}** added to **${provider}**.\nProperties: ${name ? `"${name}"` : model} | ${context ?? 128000} ctx | ${maxTokens ?? 4096} max${reasoning ? " | reasoning" : ""}`,
+            flags: MessageFlags.Ephemeral,
+          });
+        } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+        return;
+      }
+
+      if (sub === "edit") {
+        const provider = interaction.options.getString("provider", true).toLowerCase();
+        const model = interaction.options.getString("model", true);
+        try {
+          const provRes = await fetch(`${apiUrl}/providers`, { headers: { authorization: auth } });
+          const { custom = {} } = await provRes.json();
+          const cfg = custom[provider];
+          if (!cfg) { await interaction.reply({ content: `\u26a0\ufe0f Provider **${provider}** not found.`, flags: MessageFlags.Ephemeral }); return; }
+          const modelEntry = (cfg.models || []).find(m => m.id === model);
+          if (!modelEntry) { await interaction.reply({ content: `\u26a0\ufe0f Model **${model}** not found on **${provider}**.`, flags: MessageFlags.Ephemeral }); return; }
+
+          const modal = new ModalBuilder()
+            .setCustomId(`model_edit_modal:${provider}:${model}`)
+            .setTitle(`Edit: ${provider}/${model}`);
+
+          const nameInput = new TextInputBuilder()
+            .setCustomId("edit_name")
+            .setLabel("Display name")
+            .setStyle(TextInputStyle.Short)
+            .setValue(modelEntry.name || "")
+            .setRequired(false)
+            .setMaxLength(100);
+
+          const ctxInput = new TextInputBuilder()
+            .setCustomId("edit_context")
+            .setLabel("Context window (number)")
+            .setStyle(TextInputStyle.Short)
+            .setValue(String(modelEntry.contextWindow ?? ""))
+            .setRequired(false)
+            .setMaxLength(10);
+
+          const mtInput = new TextInputBuilder()
+            .setCustomId("edit_maxTokens")
+            .setLabel("Max tokens (number)")
+            .setStyle(TextInputStyle.Short)
+            .setValue(String(modelEntry.maxTokens ?? ""))
+            .setRequired(false)
+            .setMaxLength(10);
+
+          const reasonInput = new TextInputBuilder()
+            .setCustomId("edit_reasoning")
+            .setLabel("Reasoning (yes/no)")
+            .setStyle(TextInputStyle.Short)
+            .setValue(modelEntry.reasoning ? "yes" : "no")
+            .setRequired(false)
+            .setMaxLength(3);
+
+          await interaction.showModal(modal.addComponents(
+            new ActionRowBuilder().addComponents(nameInput),
+            new ActionRowBuilder().addComponents(ctxInput),
+            new ActionRowBuilder().addComponents(mtInput),
+            new ActionRowBuilder().addComponents(reasonInput),
+          ));
+        } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+        return;
+      }
+
+      if (sub === "remove") {
+        const provider = interaction.options.getString("provider", true).toLowerCase();
+        const model = interaction.options.getString("model", true);
+        try {
+          const res = await fetch(`${apiUrl}/provider/model`, {
+            method: "DELETE",
+            headers: { "content-type": "application/json", authorization: auth },
+            body: JSON.stringify({ provider, model }),
+          });
+          if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `supervisor API ${res.status}`); }
+          await interaction.reply({ content: `\u2705 Model **${model}** removed from **${provider}**.`, flags: MessageFlags.Ephemeral });
+        } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+        return;
+      }
+
+      if (sub === "list") {
+        const provider = interaction.options.getString("provider", true).toLowerCase();
+        try {
+          const res = await fetch(`${apiUrl}/providers`, { headers: { authorization: auth } });
+          const { custom = {} } = await res.json();
+          const cfg = custom[provider];
+          if (!cfg) { await interaction.reply({ content: `\u26a0\ufe0f Provider **${provider}** not found.`, flags: MessageFlags.Ephemeral }); return; }
+          const models = cfg.models || [];
+          if (!models.length) {
+            await interaction.reply({ content: `No models for **${provider}**. Add one: \`/provider model add ${provider} <model-id>\``, flags: MessageFlags.Ephemeral });
+            return;
+          }
+          const lines = models.map(m => {
+            const parts = [`\u2022 \`${m.id}\``];
+            if (m.name && m.name !== m.id) parts.push(`\u2014 ${m.name}`);
+            parts.push(`(${m.contextWindow ?? "?"} ctx, ${m.maxTokens ?? "?"} max${m.reasoning ? ", reasoning" : ""})`);
+            return parts.join(" ");
+          });
+          await interaction.reply({ content: `**Models for ${provider}:**\n${lines.join("\n")}`, flags: MessageFlags.Ephemeral });
+        } catch (err) { await interaction.reply({ content: `\u26a0\ufe0f Error: ${err.message}`, flags: MessageFlags.Ephemeral }); }
+        return;
+      }
+    }
+
+    await interaction.reply({ content: "\u26a0\ufe0f Unknown subcommand.", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -3994,6 +4261,44 @@ client.on(Events.InteractionCreate, async (interaction) => {
     });
   } catch (err) {
     await interaction.reply({ content: `⚠️ Failed to set model: ${err.message}`, flags: MessageFlags.Ephemeral });
+  }
+});
+
+// Handle model edit modal submission
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isModalSubmit() || !interaction.customId.startsWith("model_edit_modal:")) return;
+
+  const parts = interaction.customId.split(":");
+  if (parts.length < 3) { await interaction.reply({ content: "\u26a0\ufe0f Could not parse provider/model from modal.", flags: MessageFlags.Ephemeral }); return; }
+  const provider = parts[1].toLowerCase();
+  const model = parts.slice(2).join(":");
+
+  const uid = interaction.user.id;
+  const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+  const apiUrl = apiUrlFor(uid);
+
+  const name = interaction.fields.getTextInputValue("edit_name").trim() || undefined;
+  const contextRaw = interaction.fields.getTextInputValue("edit_context").trim();
+  const maxTokensRaw = interaction.fields.getTextInputValue("edit_maxTokens").trim();
+  const reasoningRaw = interaction.fields.getTextInputValue("edit_reasoning").trim().toLowerCase();
+
+  const context = contextRaw ? parseInt(contextRaw, 10) : undefined;
+  const maxTokens = maxTokensRaw ? parseInt(maxTokensRaw, 10) : undefined;
+  const reasoning = reasoningRaw === "yes" || reasoningRaw === "true" || reasoningRaw === "y" || reasoningRaw === "1" ? true : reasoningRaw === "no" || reasoningRaw === "false" || reasoningRaw === "n" || reasoningRaw === "0" ? false : undefined;
+
+  try {
+    const res = await fetch(`${apiUrl}/provider/model`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: auth },
+      body: JSON.stringify({ provider, model, name, context, maxTokens, reasoning }),
+    });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `supervisor API ${res.status}`); }
+    await interaction.reply({
+      content: `\u2705 Model **${model}** updated on **${provider}**.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  } catch (err) {
+    await interaction.reply({ content: `\u26a0\ufe0f Failed to update model: ${err.message}`, flags: MessageFlags.Ephemeral });
   }
 });
 

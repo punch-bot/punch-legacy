@@ -999,6 +999,153 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
+  // --- Custom provider management ---
+  if (req.method === "GET" && url.pathname === "/providers") {
+    const models = loadJSON(MODELS_FILE);
+    const modelProviders = models.providers || {};
+    const builtinProviders = Object.keys(PROVIDER_ENV_MAP);
+    const allProviders = [...new Set([...builtinProviders, ...Object.keys(modelProviders)])];
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ providers: allProviders, custom: modelProviders }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/provider") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name, endpoint, api } = JSON.parse(body);
+        if (!name) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing name" })); return; }
+        const id = name.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+        if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid provider name" })); return; }
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers) models.providers = {};
+        const prev = models.providers[id] || {};
+        models.providers[id] = {
+          ...prev,
+          baseUrl: endpoint || prev.baseUrl || "",
+          api: api || prev.api || "openai-completions",
+          apiKey: prev.apiKey || `$${id.toUpperCase()}_API_KEY`,
+          models: prev.models || [],
+        };
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true, provider: id, baseUrl: models.providers[id].baseUrl }));
+        log(`provider ${prev.baseUrl ? "updated" : "created"}: ${id}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/provider") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name } = JSON.parse(body);
+        if (!name) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing name" })); return; }
+        const id = name.toLowerCase();
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers?.[id]) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Provider not found" }));
+          return;
+        }
+        delete models.providers[id];
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true }));
+        log(`provider removed: ${id}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/provider/model") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { provider, model, name, context, maxTokens, reasoning } = JSON.parse(body);
+        if (!provider || !model) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "Missing provider or model" }));
+          return;
+        }
+        const pid = provider.toLowerCase();
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers?.[pid]) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Provider not found" }));
+          return;
+        }
+        const modelList = models.providers[pid].models || [];
+        const idx = modelList.findIndex(m => m.id === model);
+        const entry = {
+          id: model,
+          name: name || model.replace(/[-_]/g, " ").replace(/\w/g, c => c.toUpperCase()),
+          reasoning: reasoning === true || reasoning === "true" || reasoning === "yes",
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: context != null ? parseInt(context, 10) : 128000,
+          maxTokens: maxTokens != null ? parseInt(maxTokens, 10) : 4096,
+        };
+        if (idx >= 0) {
+          modelList[idx] = { ...modelList[idx], ...entry };
+        } else {
+          modelList.push(entry);
+        }
+        models.providers[pid].models = modelList;
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true, model }));
+        log(`model ${idx >= 0 ? "updated" : "added"}: ${pid}/${model}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/provider/model") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { provider, model } = JSON.parse(body);
+        if (!provider || !model) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "Missing provider or model" }));
+          return;
+        }
+        const pid = provider.toLowerCase();
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers?.[pid]) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Provider not found" }));
+          return;
+        }
+        const modelList = models.providers[pid].models || [];
+        const idx = modelList.findIndex(m => m.id === model);
+        if (idx < 0) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Model not found" }));
+          return;
+        }
+        modelList.splice(idx, 1);
+        models.providers[pid].models = modelList;
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true }));
+        log(`model removed: ${pid}/${model}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
   // --- Instruction skills: Markdown only, no gateway reload required. ---
   if (req.method === "GET" && url.pathname === "/skills") {
     res.writeHead(200, { "content-type": "application/json" });
