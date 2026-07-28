@@ -77,6 +77,7 @@ export const USER_SETTINGS_DEFAULTS = {
   showContext: false,
   gitCoAuthor: true,
   multitaskEnabled: false,
+  multitaskWorkersCap: 3,
 };
 
 let seq = 0;

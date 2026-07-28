@@ -108,7 +108,7 @@ export function createProgressState(startedAt = Date.now()) {
     toolCalls: 0,
     phase: "starting",
     status: "running",
-    current: "Starting work",
+    current: "Working",
     goal: "",
     finding: "",
     next: "",
