@@ -216,7 +216,7 @@ export function createProgressState(startedAt) {
     closedAt: null,
     status: "running",
     phase: "starting",
-    current: "Starting work",
+    current: "Working",
     thinkingStartedAt: null,
     thinkingMs: 0,
     lastHeartbeatAt: startedAt,
