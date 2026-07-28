@@ -1085,26 +1085,6 @@ client.once(Events.ClientReady, async (c) => {
           { type: 3, name: "model", description: "Optional model override" },
           { type: 4, name: "timeout_minutes", description: "1-30; default 10" },
         ] },
-    ],
-  }, {
-    name: "workers",
-    description: "Manage isolated Pi background workers",
-    options: [
-      { type: 1, name: "start", description: "Start isolated research, coding, or browser worker",
-        options: [
-          { type: 3, name: "kind", description: "Worker capability", required: true, choices: [{ name: "research", value: "research" }, { name: "coding", value: "coding" }, { name: "browser", value: "browser" }] },
-          { type: 3, name: "prompt", description: "Worker task", required: true },
-          { type: 3, name: "model", description: "Optional cheaper model" },
-          { type: 4, name: "timeout_minutes", description: "1-30; default 10" },
-        ] },
-      { type: 1, name: "list", description: "List worker runs" },
-      { type: 1, name: "stop", description: "Stop a worker", options: [{ type: 3, name: "id", description: "Worker id", required: true }] },
-      { type: 1, name: "logs", description: "View worker log", options: [{ type: 3, name: "id", description: "Worker id", required: true }] },
-    ],
-  }, {
-    name: "multitask",
-    description: "Configure isolated Pi worker multitasking limits",
-    options: [
       {
         type: 2,
         name: "settings",
@@ -1119,6 +1099,21 @@ client.once(Events.ClientReady, async (c) => {
           },
         ],
       },
+    ],
+  }, {
+    name: "workers",
+    description: "Manage isolated Pi background workers",
+    options: [
+      { type: 1, name: "start", description: "Start isolated research, coding, or browser worker",
+        options: [
+          { type: 3, name: "kind", description: "Worker capability", required: true, choices: [{ name: "research", value: "research" }, { name: "coding", value: "coding" }, { name: "browser", value: "browser" }] },
+          { type: 3, name: "prompt", description: "Worker task", required: true },
+          { type: 3, name: "model", description: "Optional cheaper model" },
+          { type: 4, name: "timeout_minutes", description: "1-30; default 10" },
+        ] },
+      { type: 1, name: "list", description: "List worker runs" },
+      { type: 1, name: "stop", description: "Stop a worker", options: [{ type: 3, name: "id", description: "Worker id", required: true }] },
+      { type: 1, name: "logs", description: "View worker log", options: [{ type: 3, name: "id", description: "Worker id", required: true }]     },
     ],
   }, {
     name: "models",
@@ -3453,7 +3448,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  if (interaction.commandName === "multitask") {
+  if (interaction.commandName === "multitask" && interaction.options.getSubcommandGroup() === "settings") {
     const uid = interaction.user.id;
     if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
     const sub = interaction.options.getSubcommand();
