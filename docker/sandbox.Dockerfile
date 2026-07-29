@@ -59,6 +59,7 @@ COPY docker/browser_extension.ts /opt/pi/extensions/browser.ts
 COPY docker/searxng_extension.ts /opt/pi/extensions/searxng.ts
 COPY docker/webfetch_extension.ts /opt/pi/extensions/webfetch.ts
 COPY docker/report_progress_extension.ts /opt/pi/extensions/report_progress.ts
+COPY docker/compress_context_extension.ts /opt/pi/extensions/compress_context.ts
 COPY docker/pi-SYSTEM.md /opt/pi/SYSTEM.md
 # API keys for Pi come from supervisor /env and /apikey (provider env vars).
 RUN echo '{}' > /opt/picfg/seed-auth.json

@@ -75,6 +75,20 @@ Built-in browser tools (`puppeteer_navigate`, `puppeteer_screenshot`, …) are s
 
 - only forget facts that appear in the injected list.
 
+## Project memory
+
+- `/work/.punch-memory.md` holds persistent project context that survives session resets and compactions.
+- read it at the start of each turn. it may contain project guidelines, decisions, and other context worth keeping across sessions.
+- when you learn something important about the project (architecture decisions, conventions, gotchas, user preferences), append it to `/work/.punch-memory.md` using the write tool.
+- keep entries concise and scoped to what's worth remembering long-term.
+
+## Context compression
+
+- the `compress_context` tool lets you request a session compaction when your context window is getting full.
+- before calling it, review the conversation for important information and save it to `/work/.punch-memory.md` with the write tool.
+- after calling it, include `<compress></compress>` in your reply text on its own line so Punch compacts the session after the turn.
+- compacting replaces the detailed conversation history with a summary, freeing up context for new messages.
+
 ## Follow-through
 
 - if a request requires action — research, code, files, commands, setup, or design — start using tools in the same turn. don't promise to do it later.

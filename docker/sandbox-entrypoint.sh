@@ -42,6 +42,16 @@ fi
 if [ -f /opt/pi/extensions/report_progress.ts ]; then
   cp /opt/pi/extensions/report_progress.ts /work/.pi/extensions/report_progress.ts
 fi
+if [ -f /opt/pi/extensions/compress_context.ts ]; then
+  cp /opt/pi/extensions/compress_context.ts /work/.pi/extensions/compress_context.ts
+fi
+# Seed .punch-memory.md if it doesn't exist
+if [ ! -f /work/.punch-memory.md ]; then
+  echo "# Project memory" > /work/.punch-memory.md
+  echo "" >> /work/.punch-memory.md
+  echo "Persistent project context that survives session resets and compactions." >> /work/.punch-memory.md
+  echo "Punch appends important information here before compacting sessions." >> /work/.punch-memory.md
+fi
 # Seed Pi identity addendum (always refresh so persona stays Pi-only)
 if [ -f /opt/pi/SYSTEM.md ]; then
   cp /opt/pi/SYSTEM.md /work/.pi/SYSTEM.md

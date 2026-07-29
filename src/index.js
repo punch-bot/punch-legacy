@@ -144,6 +144,13 @@ function extractReactTags(textIn) {
   return { clean: clean.trim(), emojis };
 }
 
+function extractCompressTag(textIn) {
+  const text = String(textIn || "");
+  const requested = /<compress\s*\/?>\s*(?:<\/compress\s*>)?/i.test(text);
+  const clean = text.replace(/<compress\s*\/?>\s*(?:<\/compress\s*>)?/gi, "").trim();
+  return { clean, requested };
+}
+
 async function applyReactTags(message, emojis) {
   const seen = new Set();
   for (const emoji of emojis) {
@@ -1247,6 +1254,10 @@ client.once(Events.ClientReady, async (c) => {
           { type: 3, name: "state", description: "on / off / status", required: true,
             choices: [{ name: "on", value: "on" }, { name: "off", value: "off" }, { name: "status", value: "status" }] },
         ] },
+      { type: 1, name: "auto-compress", description: "Auto-compress when context exceeds a threshold (50-75%, 0 to disable)",
+        options: [
+          { type: 4, name: "threshold", description: "Context % threshold (50-75, 0=off)", required: false, min_value: 0, max_value: 75 },
+        ] },
     ],
   }, {
     name: "compress",
@@ -1654,6 +1665,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
     const { clean: textAfterReacts, emojis: reactEmojis } = extractReactTags(textAfterAttachments);
+    const { clean: textAfterCompress, requested: compressRequested } = extractCompressTag(textAfterReacts);
 
     for (const relPath of attachments) {
       try {
@@ -1668,7 +1680,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       await applyReactTags(message, reactEmojis);
     }
 
-    let out = textAfterReacts || "";
+    let out = textAfterCompress || "";
     if (out === "(no output)") out = "";
     if (opts.pigeonFrom) {
       out = scanOutbound(out).text;
@@ -1700,6 +1712,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (dropped) notes.push(`forgot ${dropped}`);
     const ctxNote = contextUsageNote(res.usage, uid);
     if (ctxNote) notes.push(ctxNote);
+    const threshold = store.getUserSettings(uid)?.autoCompressThreshold;
+    const pct = res.usage?.pct;
+    const needsAutoCompress = !compressRequested && threshold > 0 && pct != null && pct >= threshold;
+    if (needsAutoCompress) notes.push("context auto-compressed");
     if (agentAttachments.length) notes.push(`parsed ${agentAttachments.length} attachment(s)`);
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
@@ -1762,6 +1778,14 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         error: activityStatus === "completed" ? "" : out,
         notifyPigeonDM,
       });
+    }
+
+    if (compressRequested || needsAutoCompress) {
+      const compressSid = store.getSession(cid);
+      if (compressSid) {
+        const reason = compressRequested ? "model-requested" : "auto";
+        summarizeSession(compressSid, uid).catch(e => console.error(`[compress] ${reason} failed:`, e.message));
+      }
     }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
@@ -3601,6 +3625,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.commandName === "botmode") {
     const sub = interaction.options.getSubcommand();
     const uid = interaction.user.id;
+
+    if (sub === "auto-compress") {
+      const threshold = interaction.options.getInteger("threshold");
+      if (threshold != null) {
+        store.patchUserSettings(uid, { autoCompressThreshold: threshold });
+        const msg = threshold === 0 ? "Auto-compress disabled." : `Auto-compress threshold set to **${threshold}%**.`;
+        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+      } else {
+        const us = store.getUserSettings(uid);
+        const msg = us.autoCompressThreshold === 0 ? "Auto-compress **disabled**." : `Auto-compress threshold: **${us.autoCompressThreshold}%**.`;
+        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
+      }
+      return;
+    }
+
     const state = interaction.options.getString("state", true);
     const key = sub === "allow-bots" ? "allowBots" : sub === "show-context" ? "showContext" : sub === "git-co-author" ? "gitCoAuthor" : "noThinking";
     const label = sub === "allow-bots" ? "Bot messages triggering Punch" : sub === "show-context" ? "Always-on context indicator" : sub === "git-co-author" ? "Co-Authored-By trailer in commits" : "Thinking message";

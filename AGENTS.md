@@ -96,6 +96,18 @@ Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/
 - **`/compress`** uses `OPENCODE_COMPRESS_TIMEOUT` (default 300s; legacy env name).
 - **Prod vs nightly:** never `docker compose` in `/punch` when user means nightly, and vice versa.
 
+## Active Context Pruning (PNCH-6)
+
+Three-part memory management system:
+
+1. **`compress_context` Pi tool** (`/opt/pi/extensions/compress_context.ts`) — model calls it when context is full. Before calling, the model reviews the conversation and saves important info to `/work/.punch-memory.md` using the write tool. The model emits `<compress></compress>` in its reply text to signal the bot.
+
+2. **Auto-compress threshold** — after every turn the bot checks context usage. If it exceeds the user's threshold (default 75%, configurable 50-75% via `/botmode auto-compress`, or 0 to disable) the bot auto-triggers a session compaction. Adds "context auto-compressed" note to the reply.
+
+3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The model reads it at the start of each turn and appends important information (architecture decisions, conventions, preferences) before compacting. Survives session resets and compactions.
+
+**Flow:** model detects full context → saves important info to `.punch-memory.md` → calls `compress_context` → emits `<compress>` tag → bot compacts session after turn. Or: bot detects usage over threshold → compacts automatically.
+
 ## Env naming (legacy aliases)
 
 Compose and sandboxes still use `OPENCODE_*` variable names (`OPENCODE_SERVER_PASSWORD`, `OPENCODE_MODEL`, etc.) as **legacy aliases** so existing `.env` / containers keep working. Product copy and Discord should not say “OpenCode”; treat them as Punch/Pi stack secrets. Basic-auth username remains `opencode` for wire compatibility.
