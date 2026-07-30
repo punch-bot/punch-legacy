@@ -42,6 +42,30 @@ fi
 if [ -f /opt/pi/extensions/report_progress.ts ]; then
   cp /opt/pi/extensions/report_progress.ts /work/.pi/extensions/report_progress.ts
 fi
+if [ -f /opt/pi/extensions/compress_context.ts ]; then
+  cp /opt/pi/extensions/compress_context.ts /work/.pi/extensions/compress_context.ts
+fi
+if [ -f /opt/pi/context-pruning-state.mjs ]; then
+  cp /opt/pi/context-pruning-state.mjs /work/.pi/context-pruning-state.mjs
+fi
+# Seed .punch-memory.md if it doesn't exist
+if [ ! -f /work/.punch-memory.md ]; then
+  cat > /work/.punch-memory.md << 'PUNCH_MEMORY_EOF'
+# Project memory
+
+Persistent project context that survives session resets and compactions.
+Update sections with the `update_memory` tool.
+
+## Guidelines
+- architecture decisions
+- code conventions
+- project gotchas
+
+## Open work
+- current task
+- next steps
+PUNCH_MEMORY_EOF
+fi
 # Seed Pi identity addendum (always refresh so persona stays Pi-only)
 if [ -f /opt/pi/SYSTEM.md ]; then
   cp /opt/pi/SYSTEM.md /work/.pi/SYSTEM.md
