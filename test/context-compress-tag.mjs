@@ -1,13 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
-// Inline the extractCompressTag function for testing (it's not exported from index.js)
-function extractCompressTag(textIn) {
-  const text = String(textIn || "");
-  const requested = /<compress\s*\/?>\s*(?:<\/compress\s*>)?/i.test(text);
-  const clean = text.replace(/<compress\s*\/?>\s*(?:<\/compress\s*>)?/gi, "").trim();
-  return { clean, requested };
-}
+import { extractCompressTag } from "../src/compress-tag.mjs";
 
 test("extractCompressTag detects self-closing tag", () => {
   const { clean, requested } = extractCompressTag("hello <compress /> world");

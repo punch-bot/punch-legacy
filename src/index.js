@@ -27,6 +27,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgroundTask, execCommand, setSecret, getSecrets, setEnv, getEnv, reloadSandboxMap, apiUrlFor, abortSession, sandboxNameForUser, summarizeSession, syncMultitaskWorkerCap, getMultitaskWorkerSettings } from "./agent.js";
 import { validateAutoCompressThreshold } from "./context-compression.js";
+import { extractCompressTag } from "./compress-tag.mjs";
 import { filterThreadSubtree } from "./thread-context.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
@@ -143,13 +144,6 @@ function extractReactTags(textIn) {
   clean = clean.replace(REACT_OPEN_RE, collect);
   clean = clean.replace(REACT_CLOSE_RE, "");
   return { clean: clean.trim(), emojis };
-}
-
-function extractCompressTag(textIn) {
-  const text = String(textIn || "");
-  const requested = /<compress\s*\/?>\s*(?:<\/compress\s*>)?/i.test(text);
-  const clean = text.replace(/<compress\s*\/?>\s*(?:<\/compress\s*>)?/gi, "").trim();
-  return { clean, requested };
 }
 
 async function applyReactTags(message, emojis) {

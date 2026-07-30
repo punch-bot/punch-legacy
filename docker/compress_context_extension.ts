@@ -18,6 +18,8 @@ import {
 
 type PruningState = ReturnType<typeof emptyState>;
 
+const MAX_MEMORY_CHARS = 12_000;
+
 const textResult = (text: string) => ({ content: [{ type: "text" as const, text }] });
 
 function loadState(ctx: ExtensionContext): PruningState {
@@ -29,7 +31,15 @@ function loadState(ctx: ExtensionContext): PruningState {
   return emptyState();
 }
 
-function saveState(pi: ExtensionAPI, state: PruningState) {
+function saveState(pi: ExtensionAPI, ctx: ExtensionContext, state: PruningState) {
+  const entries = ctx.sessionManager.getBranch();
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i] as { type?: string; customType?: string; data?: unknown } | undefined;
+    if (entry?.type === "custom" && entry.customType === STATE_TYPE) {
+      entry.data = state;
+      return;
+    }
+  }
   pi.appendEntry(STATE_TYPE, state);
 }
 
@@ -137,7 +147,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args, _signal, _onUpdate, ctx) {
       const state = createBlock(loadState(ctx), records(ctx), args);
-      saveState(pi, state);
+      saveState(pi, ctx, state);
       const block = state.blocks.at(-1)!;
       return textResult(`Compressed ${block.id}: ${block.messageIds.length} messages, ${block.sourceCharacters} source characters. Use decompress_context with ${block.id} to restore it.`);
     },
@@ -160,7 +170,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args, _signal, _onUpdate, ctx) {
       const state = recompressBlock(loadState(ctx), args.blockIds, args);
-      saveState(pi, state);
+      saveState(pi, ctx, state);
       const block = state.blocks.at(-1)!;
       return textResult(`Recompressed ${args.blockIds.join(", ")} into ${block.id} [T2]: ${block.messageIds.length} messages, ${block.sourceCharacters} source characters.`);
     },
@@ -177,7 +187,7 @@ export default function (pi: ExtensionAPI) {
       const block = activeBlocks(state).find((candidate) => candidate.id === args.blockId);
       if (!block) throw new Error(`active block ${args.blockId} not found`);
       const next = deactivateBlock(state, args.blockId);
-      saveState(pi, next);
+      saveState(pi, ctx, next);
       return textResult(`Restored ${args.blockId}. Preview:\n${blockPreview(records(ctx), block)}`);
     },
   });
@@ -231,14 +241,18 @@ export default function (pi: ExtensionAPI) {
       const path = "/work/.punch-memory.md";
       let existing = "";
       try { existing = await readFile(path, "utf8"); } catch {}
+      const content = args.content.trim().replace(/^(## )/gm, "\\$1");
       const header = `## ${args.section}`;
       const sectionPattern = new RegExp(`(?:^|\n)${header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\n.*?(?=\n## |\n*$)`, "ds");
-      const newSection = `\n${header}\n${args.content.trim()}`;
+      const newSection = `\n${header}\n${content}`;
       let updated;
       if (sectionPattern.test(existing)) {
         updated = existing.replace(sectionPattern, newSection);
       } else {
         updated = existing.trimEnd() + newSection;
+      }
+      if (updated.length > MAX_MEMORY_CHARS) {
+        return textResult(`Update skipped: memory would be ${updated.length} characters (max ${MAX_MEMORY_CHARS}). Shorten the content or remove old sections.`);
       }
       await writeFile(path, updated, "utf8");
       return textResult(`Memory section "${args.section}" updated.`);

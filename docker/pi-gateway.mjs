@@ -806,22 +806,24 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/session") {
       await waitReady();
-      const id = randomUUID();
-      await rpc("new_session");
-      const st = await rpc("get_state");
-      sessions.set(id, {
-        id,
-        sessionFile: st.data?.sessionFile || null,
-        systemHash: null,
-        messages: [],
+      await enqueueTurn(async () => {
+        const id = randomUUID();
+        await rpc("new_session");
+        const st = await rpc("get_state");
+        sessions.set(id, {
+          id,
+          sessionFile: st.data?.sessionFile || null,
+          systemHash: null,
+          messages: [],
+        });
+        if (st.data?.sessionFile) persistSessionMap();
+        activeLogicalId = id;
+        broadcastSse({
+          type: "session.created",
+          properties: { sessionID: id, info: { id } },
+        });
+        json(res, 200, { id, title: "", time: { created: Date.now() } });
       });
-      if (st.data?.sessionFile) persistSessionMap();
-      activeLogicalId = id;
-      broadcastSse({
-        type: "session.created",
-        properties: { sessionID: id, info: { id } },
-      });
-      json(res, 200, { id, title: "", time: { created: Date.now() } });
       return;
     }
 

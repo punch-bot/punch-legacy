@@ -87,7 +87,7 @@ export function createBlock(state, records, { startId, endId, topic, summary }) 
   const rangeRecords = records.slice(start, end + 1);
   const messageIds = rangeRecords.map((record) => record.id);
   if (rangeRecords.some((record) => {
-    const toolName = record.message?.toolName || (record.message?.role === "tool" && record.message?.name);
+    const toolName = record.message?.toolName;
     return toolName && PROTECTED_TOOL_PATTERNS.some((pattern) => pattern.test(toolName));
   })) throw new Error("range contains protected tool output — decompress or skip that turn");
   const compressed = activeMessageIds(next);
@@ -119,13 +119,20 @@ export function recompressBlock(state, blockIds, { summary, topic }) {
   if (summary.length > MAX_SUMMARY_CHARS) throw new Error(`summary exceeds ${MAX_SUMMARY_CHARS} characters`);
   if (!Array.isArray(blockIds) || blockIds.length < 2) throw new Error("need at least 2 deactivated blocks to recompress");
   const parents = [];
-  const allMessageIds = [];
-  let sourceCharacters = 0;
   for (const id of blockIds) {
     const block = next.blocks.find((b) => b.id === id);
     if (!block) throw new Error(`block ${id} not found`);
     if (block.active !== false) throw new Error(`block ${id} must be deactivated first`);
     parents.push(block);
+  }
+  parents.sort((a, b) => {
+    const aId = a.startId || a.anchorId || a.messageIds[0] || "";
+    const bId = b.startId || b.anchorId || b.messageIds[0] || "";
+    return (parseInt(aId.replace(/[^\d]/g, ""), 10) || 0) - (parseInt(bId.replace(/[^\d]/g, ""), 10) || 0);
+  });
+  const allMessageIds = [];
+  let sourceCharacters = 0;
+  for (const block of parents) {
     allMessageIds.push(...block.messageIds);
     sourceCharacters += block.sourceCharacters || 0;
   }
