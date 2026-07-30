@@ -1711,7 +1711,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       const result = await runAgent(prompt, session, onProgress, signal, uid, agentAttachments);
       if (result.sessionId && /<\/?compress\s*\/?\s*>/i.test(result.text)) {
         try {
-          await summarizeSession(result.sessionId, uid);
+          await summarizeSession(result.sessionId, uid, signal);
           compressed = true;
         } catch (error) {
           console.error(`[compress] model-requested failed:`, error.message);
