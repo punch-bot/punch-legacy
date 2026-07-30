@@ -89,18 +89,6 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 
 Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (unused registry; Discord `/mcp` says not supported yet), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
 
-## Active Context Pruning (PNCH-6)
-
-Three-part memory management system:
-
-1. **Selective Pi pruning tools** (`/opt/pi/extensions/compress_context.ts`) — `compress_context` replaces stale complete user-turn ranges with model-written summaries in provider context. Blocks have stable Pi entry IDs, preserve raw session entries, and can be searched (`search_context`), inspected (`context_status`), and restored (`decompress_context`). First user message is protected; uncertain mappings leave raw context intact.
-
-2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
-
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. Punch injects a bounded copy at every turn; model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
-
-**Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
-
 ## Known quirks
 
 - Sandboxes from older agent images must be **recreated** to get the Pi image.

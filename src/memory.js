@@ -78,7 +78,6 @@ export const USER_SETTINGS_DEFAULTS = {
   gitCoAuthor: true,
   multitaskEnabled: false,
   multitaskWorkersCap: 3,
-  autoCompressThreshold: 75,
 };
 
 let seq = 0;

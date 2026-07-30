@@ -75,20 +75,6 @@ Built-in browser tools (`puppeteer_navigate`, `puppeteer_screenshot`, …) are s
 
 - only forget facts that appear in the injected list.
 
-## Project memory
-
-- `/work/.punch-memory.md` holds persistent project context that survives session resets and compactions.
-- Punch injects a bounded copy at the start of each turn. it may contain project guidelines, decisions, and other context worth keeping across sessions.
-- when you learn something important about the project (architecture decisions, conventions, gotchas, user preferences), append it to `/work/.punch-memory.md` using the write tool.
-- keep entries concise and scoped to what's worth remembering long-term.
-
-## Context compression
-
-- visible user turns carry `punch-message-id` markers. use `compress_context` to replace stale complete turn ranges with a self-contained summary.
-- before compression, write durable project context to `/work/.punch-memory.md`.
-- raw Pi session entries remain intact. use `search_context`, `context_status`, and `decompress_context` only when older detail becomes relevant.
-- keep current task, recent turns, and active tool work uncompressed. full `/compress` remains emergency fallback. `/botmode auto-compress` sets selective-pruning prompt threshold, not destructive whole-session compaction.
-
 ## Follow-through
 
 - if a request requires action — research, code, files, commands, setup, or design — start using tools in the same turn. don't promise to do it later.
