@@ -1706,9 +1706,19 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     turn.detail = "waiting for Pi";
     const session = store.getSession(cid);
     console.log(`[chat] uid=${uid} cid=${cid} session=${session || "new"} -> pi`);
-    const res = await withUserRunLock(uid, () =>
-      runAgent(prompt, session, onProgress, signal, uid, agentAttachments),
-    );
+    let compressed = false;
+    const res = await withUserRunLock(uid, async () => {
+      const result = await runAgent(prompt, session, onProgress, signal, uid, agentAttachments);
+      if (result.sessionId && /<\/?compress\s*\/?\s*>/i.test(result.text)) {
+        try {
+          await summarizeSession(result.sessionId, uid);
+          compressed = true;
+        } catch (error) {
+          console.error(`[compress] model-requested failed:`, error.message);
+        }
+      }
+      return result;
+    });
     console.log(`[chat] uid=${uid} cid=${cid} reply len=${res.text.length}`);
     store.setSession(cid, res.sessionId);
 
@@ -1764,15 +1774,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (dropped) notes.push(`forgot ${dropped}`);
     const ctxNote = contextUsageNote(res.usage, uid);
     if (ctxNote) notes.push(ctxNote);
-    let compressed = false;
-    if (compressRequested && res.sessionId) {
-      try {
-        await withUserRunLock(uid, () => summarizeSession(res.sessionId, uid));
-        compressed = true;
-      } catch (error) {
-        console.error(`[compress] model-requested failed:`, error.message);
-      }
-    }
     if (compressed) notes.push("context compressed");
     if (agentAttachments.length) notes.push(`parsed ${agentAttachments.length} attachment(s)`);
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);

@@ -148,7 +148,7 @@ export function recompressBlock(state, blockIds, { summary, topic }) {
     tier: 2,
     active: true,
     anchorId: firstAnchor,
-    parentBlockIds: blockIds,
+    parentBlockIds: parents.map((parent) => parent.id),
     messageIds: allMessageIds,
     topic: typeof topic === "string" ? topic.slice(0, 120) : "",
     summary: summary.trim(),

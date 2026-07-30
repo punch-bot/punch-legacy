@@ -209,7 +209,7 @@ test("recompressBlock sorts parents by createdAt with non-numeric block IDs", ()
   });
   const t2 = recompressed.blocks[2];
   assert.equal(t2.tier, 2);
-  assert.deepEqual(t2.parentBlockIds, ["b2", "b1"]);
+  assert.deepEqual(t2.parentBlockIds, ["b1", "b2"]);
   assert.equal(t2.messageIds.length, 2);
   assert.ok(t2.messageIds.includes("a1b2c3d4"));
   assert.ok(t2.messageIds.includes("i9j0k1l2"));
