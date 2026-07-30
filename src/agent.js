@@ -568,6 +568,9 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
 
   if (userId) {
     const settings = getUserSettings(userId);
+    if (settings.autoCompressThreshold > 0) {
+      sysPrompt += `\n\n## Context pruning threshold\n\n- PUNCH_CONTEXT_PRUNING_THRESHOLD=${settings.autoCompressThreshold}\n- When context reaches this threshold, use selective compress_context on stale complete ranges before continuing. Do not use whole-session compaction unless explicitly requested.`;
+    }
     if (settings.gitCoAuthor) {
       sysPrompt += `\n\n## Git conventions\n\n- when committing code, always append a \`Co-Authored-By\` trailer to the commit message:\n\n\`\`\`text\nCo-Authored-By: Punch <punch@orb.gay>\n\`\`\`\n\n- use \`git commit -m "message\\n\\nCo-Authored-By: Punch <punch@orb.gay>"\` or equivalent so the trailer appears on its own line at the end of the message body.\n- do not add the trailer if the commit message already contains a \`Co-Authored-By: Punch\` line.`;
     }

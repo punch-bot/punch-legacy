@@ -1,0 +1,122 @@
+export const STATE_VERSION = 1;
+export const STATE_TYPE = "punch-context-pruning";
+export const MAX_SUMMARY_CHARS = 16_000;
+
+export function emptyState() {
+  return { version: STATE_VERSION, nextBlockId: 1, blocks: [] };
+}
+
+export function normalizeState(value) {
+  if (!value || value.version !== STATE_VERSION || !Array.isArray(value.blocks)) return emptyState();
+  const blocks = value.blocks.filter((block) =>
+    block && typeof block.id === "string" && Array.isArray(block.messageIds) && typeof block.summary === "string",
+  );
+  const nextBlockId = Number.isInteger(value.nextBlockId) && value.nextBlockId > 0
+    ? value.nextBlockId
+    : blocks.length + 1;
+  return { version: STATE_VERSION, nextBlockId, blocks };
+}
+
+export function textFromContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part) => part?.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+}
+
+export function messageRecords(entries) {
+  const records = [];
+  for (const entry of entries) {
+    if (entry?.type !== "message" || !entry.id || !entry.message) continue;
+    records.push({ id: entry.id, message: entry.message });
+  }
+  return records;
+}
+
+export function activeBlocks(state) {
+  return normalizeState(state).blocks.filter((block) => block.active !== false);
+}
+
+export function activeMessageIds(state) {
+  const ids = new Set();
+  for (const block of activeBlocks(state)) {
+    for (const id of block.messageIds) ids.add(id);
+  }
+  return ids;
+}
+
+export function createBlock(state, records, { startId, endId, topic, summary }) {
+  const next = normalizeState(state);
+  if (typeof summary !== "string" || !summary.trim()) throw new Error("summary is required");
+  if (summary.length > MAX_SUMMARY_CHARS) throw new Error(`summary exceeds ${MAX_SUMMARY_CHARS} characters`);
+  const start = records.findIndex((record) => record.id === startId);
+  const end = records.findIndex((record) => record.id === endId);
+  if (start < 0 || end < 0) throw new Error("boundaries must reference current conversation messages");
+  if (start > end) throw new Error("startId must precede endId");
+  if (records[start]?.message?.role !== "user" || records[end]?.message?.role !== "user") {
+    throw new Error("boundaries must reference user messages");
+  }
+  const firstUser = records.find((record) => record.message?.role === "user");
+  if (startId === firstUser?.id) throw new Error("first user message is protected");
+  const messageIds = records.slice(start, end + 1).map((record) => record.id);
+  const compressed = activeMessageIds(next);
+  if (messageIds.some((id) => compressed.has(id))) throw new Error("range overlaps an active compressed block");
+  const sourceCharacters = records.slice(start, end + 1)
+    .reduce((total, record) => total + textFromContent(record.message?.content).length, 0);
+  const block = {
+    id: `b${next.nextBlockId}`,
+    active: true,
+    anchorId: startId,
+    startId,
+    endId,
+    messageIds,
+    topic: typeof topic === "string" ? topic.slice(0, 120) : "",
+    summary: summary.trim(),
+    sourceCharacters,
+    createdAt: Date.now(),
+  };
+  return { ...next, nextBlockId: next.nextBlockId + 1, blocks: [...next.blocks, block] };
+}
+
+export function deactivateBlock(state, id) {
+  const next = normalizeState(state);
+  let changed = false;
+  const blocks = next.blocks.map((block) => {
+    if (block.id !== id || block.active === false) return block;
+    changed = true;
+    return { ...block, active: false, restoredAt: Date.now() };
+  });
+  if (!changed) throw new Error(`active block ${id} not found`);
+  return { ...next, blocks };
+}
+
+export function blockPreview(records, block, maxCharacters = 4_000) {
+  const selected = new Set(block.messageIds);
+  let text = "";
+  for (const record of records) {
+    if (!selected.has(record.id)) continue;
+    const body = textFromContent(record.message?.content).trim();
+    if (!body) continue;
+    const section = `[${record.message.role}]\n${body}\n\n`;
+    if (text.length + section.length > maxCharacters) {
+      return `${text.slice(0, maxCharacters)}\n[preview truncated]`;
+    }
+    text += section;
+  }
+  return text || "[No text content in this range]";
+}
+
+export function searchBlocks(state, query, limit = 5) {
+  const terms = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  return activeBlocks(state)
+    .map((block) => {
+      const haystack = `${block.topic}\n${block.summary}`.toLowerCase();
+      return { block, score: terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0) };
+    })
+    .filter((result) => result.score > 0)
+    .sort((a, b) => b.score - a.score || b.block.createdAt - a.block.createdAt)
+    .slice(0, limit);
+}
