@@ -67,11 +67,47 @@ export function createBlock(state, records, { startId, endId, topic, summary }) 
     .reduce((total, record) => total + textFromContent(record.message?.content).length, 0);
   const block = {
     id: `b${next.nextBlockId}`,
+    tier: 1,
     active: true,
     anchorId: startId,
     startId,
     endId,
     messageIds,
+    topic: typeof topic === "string" ? topic.slice(0, 120) : "",
+    summary: summary.trim(),
+    sourceCharacters,
+    createdAt: Date.now(),
+  };
+  return { ...next, nextBlockId: next.nextBlockId + 1, blocks: [...next.blocks, block] };
+}
+
+export function recompressBlock(state, blockIds, { summary, topic }) {
+  const next = normalizeState(state);
+  if (typeof summary !== "string" || !summary.trim()) throw new Error("summary is required");
+  if (summary.length > MAX_SUMMARY_CHARS) throw new Error(`summary exceeds ${MAX_SUMMARY_CHARS} characters`);
+  if (!Array.isArray(blockIds) || blockIds.length < 2) throw new Error("need at least 2 deactivated blocks to recompress");
+  const parents = [];
+  const allMessageIds = [];
+  let sourceCharacters = 0;
+  for (const id of blockIds) {
+    const block = next.blocks.find((b) => b.id === id);
+    if (!block) throw new Error(`block ${id} not found`);
+    if (block.active !== false) throw new Error(`block ${id} must be deactivated first`);
+    parents.push(block);
+    allMessageIds.push(...block.messageIds);
+    sourceCharacters += block.sourceCharacters || 0;
+  }
+  const firstAnchor = parents[0].anchorId || parents[0].messageIds[0];
+  if (!firstAnchor) throw new Error("parent blocks have no anchor");
+  const active = activeMessageIds(next);
+  if (allMessageIds.some((id) => active.has(id))) throw new Error("some parent message ids are in active blocks");
+  const block = {
+    id: `b${next.nextBlockId}`,
+    tier: 2,
+    active: true,
+    anchorId: firstAnchor,
+    parentBlockIds: blockIds,
+    messageIds: allMessageIds,
     topic: typeof topic === "string" ? topic.slice(0, 120) : "",
     summary: summary.trim(),
     sourceCharacters,

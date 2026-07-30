@@ -11,6 +11,7 @@ import {
   emptyState,
   messageRecords,
   normalizeState,
+  recompressBlock,
   searchBlocks,
   textFromContent,
 } from "../context-pruning-state.mjs";
@@ -142,6 +143,29 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "recompress_context",
+    label: "Recompress into denser summary",
+    promptSnippet: "Condense multiple deactivated blocks into a single denser tier-2 block when context is tight. Parent blocks must be deactivated first.",
+    promptGuidelines: [
+      "Deactivate the source blocks with decompress_context before recompressing them.",
+      "The new summary should be more concise than the individual block summaries combined.",
+    ],
+    description: "Combine 2+ deactivated (restored) blocks into a single tier-2 compressed block with a condensed summary. Frees the anchor slot and reduces context overhead.",
+    executionMode: "sequential",
+    parameters: Type.Object({
+      blockIds: Type.Array(Type.String(), { description: "IDs of deactivated blocks to condense, e.g. [\"b1\", \"b2\"]" }),
+      summary: Type.String({ description: "Condensed summary replacing all parent summaries" }),
+      topic: Type.Optional(Type.String({ description: "Short label" })),
+    }),
+    async execute(_toolCallId, args, _signal, _onUpdate, ctx) {
+      const state = recompressBlock(loadState(ctx), args.blockIds, args);
+      saveState(pi, state);
+      const block = state.blocks.at(-1)!;
+      return textResult(`Recompressed ${args.blockIds.join(", ")} into ${block.id} [T2]: ${block.messageIds.length} messages, ${block.sourceCharacters} source characters.`);
+    },
+  });
+
+  pi.registerTool({
     name: "decompress_context",
     label: "Restore context range",
     description: "Restore a previously compressed block for future model calls. Returns a bounded preview immediately; original Pi session entries are never deleted.",
@@ -166,7 +190,7 @@ export default function (pi: ExtensionAPI) {
       const state = loadState(ctx);
       const blocks = activeBlocks(state);
       const usage = ctx.getContextUsage();
-      const lines = blocks.map((block) => `${block.id}: ${block.messageIds.length} messages, ${block.sourceCharacters} source characters${block.topic ? `, ${block.topic}` : ""}`);
+      const lines = blocks.map((block) => `${block.id} [T${block.tier || 1}]: ${block.messageIds.length} messages, ${block.sourceCharacters} source chars${block.topic ? `, ${block.topic}` : ""}${block.parentBlockIds ? `, from ${block.parentBlockIds.join(", ")}` : ""}`);
       return textResult([
         `Active compressed blocks: ${blocks.length}.`,
         usage?.percent == null ? "Context usage unavailable." : `Context usage: ${Math.round(usage.percent)}%.`,

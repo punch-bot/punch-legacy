@@ -7,6 +7,7 @@ import {
   deactivateBlock,
   emptyState,
   messageRecords,
+  recompressBlock,
   searchBlocks,
 } from "../docker/context-pruning-state.mjs";
 import { readFile } from "node:fs/promises";
@@ -49,6 +50,37 @@ test("searches active summaries without restoring raw context", () => {
   });
   assert.equal(searchBlocks(state, "stale cache")[0].block.id, "b1");
   assert.equal(searchBlocks(deactivateBlock(state, "b1"), "stale").length, 0);
+});
+
+test("recompresses multiple deactivated T1 blocks into a T2 block", () => {
+  const withB1 = createBlock(emptyState(), records, {
+    startId: "u2", endId: "u2", topic: "logs", summary: "Inspected server logs.",
+  });
+  const withB2 = createBlock(withB1, records, {
+    startId: "u3", endId: "u3", topic: "patch", summary: "Implemented the fix.",
+  });
+  const restored = deactivateBlock(deactivateBlock(withB2, "b1"), "b2");
+  const recompressed = recompressBlock(restored, ["b1", "b2"], {
+    summary: "Investigated logs then applied fix.",
+    topic: "log investigation and fix",
+  });
+  assert.equal(recompressed.blocks.length, 3);
+  const t2 = recompressed.blocks[2];
+  assert.equal(t2.tier, 2);
+  assert.equal(t2.active, true);
+  assert.deepEqual(t2.parentBlockIds, ["b1", "b2"]);
+  assert.ok(t2.messageIds.includes("u2"));
+  assert.ok(t2.messageIds.includes("u3"));
+  assert.equal(activeMessageIds(recompressed).size, 2);
+});
+
+test("recompress rejects non-existent and active blocks", () => {
+  assert.throws(() => recompressBlock(emptyState(), ["b1", "b2"], { summary: "nope" }), /not found/);
+  const withB1 = createBlock(emptyState(), records, {
+    startId: "u2", endId: "u3", summary: "still active",
+  });
+  assert.throws(() => recompressBlock(withB1, ["b1"], { summary: "nope" }), /need at least 2/);
+  assert.throws(() => recompressBlock(withB1, ["b2", "b3"], { summary: "nope" }), /not found/);
 });
 
 test("sandbox image and workdir seeding include context-pruning state", async () => {
