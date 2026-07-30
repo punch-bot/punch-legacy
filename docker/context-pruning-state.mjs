@@ -1,6 +1,15 @@
 export const STATE_VERSION = 1;
 export const STATE_TYPE = "punch-context-pruning";
 export const MAX_SUMMARY_CHARS = 16_000;
+export const PROTECTED_TOOL_PATTERNS = [
+  /^compress_context$/,
+  /^decompress_context$/,
+  /^recompress_context$/,
+  /^context_status$/,
+  /^search_context$/,
+  /^task$/,
+  /^summarize/,
+];
 
 export function emptyState() {
   return { version: STATE_VERSION, nextBlockId: 1, blocks: [] };
@@ -60,7 +69,12 @@ export function createBlock(state, records, { startId, endId, topic, summary }) 
   }
   const firstUser = records.find((record) => record.message?.role === "user");
   if (startId === firstUser?.id) throw new Error("first user message is protected");
-  const messageIds = records.slice(start, end + 1).map((record) => record.id);
+  const rangeRecords = records.slice(start, end + 1);
+  const messageIds = rangeRecords.map((record) => record.id);
+  if (rangeRecords.some((record) => {
+    const toolName = record.message?.toolName || (record.message?.role === "tool" && record.message?.name);
+    return toolName && PROTECTED_TOOL_PATTERNS.some((pattern) => pattern.test(toolName));
+  })) throw new Error("range contains protected tool output — decompress or skip that turn");
   const compressed = activeMessageIds(next);
   if (messageIds.some((id) => compressed.has(id))) throw new Error("range overlaps an active compressed block");
   const sourceCharacters = records.slice(start, end + 1)

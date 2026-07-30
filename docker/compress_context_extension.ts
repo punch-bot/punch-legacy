@@ -125,6 +125,7 @@ export default function (pi: ExtensionAPI) {
       "Before compression, save durable project facts to /work/.punch-memory.md.",
       "Only compress complete stale user-turn ranges. Keep active task discussion and recent turns visible.",
       "Supply a self-contained summary. The original session remains retrievable with decompress_context.",
+      "Do not compress ranges that contain compression or task tools (compress_context, decompress_context, recompress_context, context_status, search_context, task). Those turns are protected.",
     ],
     description: "Replace a stale range of complete conversation turns with your summary for future model calls. Boundaries must be visible user-message IDs. Original Pi session entries remain intact and can be restored with decompress_context.",
     executionMode: "sequential",

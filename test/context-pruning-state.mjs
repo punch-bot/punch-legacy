@@ -74,6 +74,20 @@ test("recompresses multiple deactivated T1 blocks into a T2 block", () => {
   assert.equal(activeMessageIds(recompressed).size, 2);
 });
 
+const protectedRecords = messageRecords([
+  { type: "message", id: "u0", message: { role: "user", content: "hello" } },
+  { type: "message", id: "a0", message: { role: "assistant", content: "hi" } },
+  { type: "message", id: "u1", message: { role: "user", content: "compress old stuff" } },
+  { type: "message", id: "a1", message: { role: "assistant", toolName: "compress_context", content: "should not be compressed" } },
+  { type: "message", id: "u2", message: { role: "user", content: "next request" } },
+]);
+
+test("blocks creation over range containing protected tool output", () => {
+  assert.throws(() => createBlock(emptyState(), protectedRecords, {
+    startId: "u1", endId: "u2", summary: "bad",
+  }), /protected tool/);
+});
+
 test("recompress rejects non-existent and active blocks", () => {
   assert.throws(() => recompressBlock(emptyState(), ["b1", "b2"], { summary: "nope" }), /not found/);
   const withB1 = createBlock(emptyState(), records, {
