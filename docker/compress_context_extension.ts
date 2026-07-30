@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -209,6 +209,39 @@ export default function (pi: ExtensionAPI) {
       const results = searchBlocks(loadState(ctx), args.query);
       if (!results.length) return textResult("No matching compressed blocks.");
       return textResult(results.map(({ block }) => `${block.id}${block.topic ? ` (${block.topic})` : ""}: ${block.summary.slice(0, 1_000)}`).join("\n\n"));
+    },
+  });
+
+  pi.registerTool({
+    name: "update_memory",
+    label: "Update project memory",
+    description: "Add or update a section in /work/.punch-memory.md. Sections are delimited by ## headers. Replaces existing content for the same section name.",
+    promptSnippet: "Save durable project context to /work/.punch-memory.md before compression or when you learn something worth keeping across sessions.",
+    promptGuidelines: [
+      "Keep entries concise and scoped to what matters long-term.",
+      "Use existing section names to update them or new names to create sections.",
+      "The file survives session resets and compactions — write decisions, conventions, gotchas, and preferences.",
+    ],
+    executionMode: "sequential",
+    parameters: Type.Object({
+      section: Type.String({ description: "Section name without ## prefix, e.g. Guidelines or Open work" }),
+      content: Type.String({ description: "Section body as markdown" }),
+    }),
+    async execute(_toolCallId, args, _signal, _onUpdate, _ctx) {
+      const path = "/work/.punch-memory.md";
+      let existing = "";
+      try { existing = await readFile(path, "utf8"); } catch {}
+      const header = `## ${args.section}`;
+      const sectionPattern = new RegExp(`(?:^|\n)${header.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\n.*?(?=\n## |\n*$)`, "ds");
+      const newSection = `\n${header}\n${args.content.trim()}`;
+      let updated;
+      if (sectionPattern.test(existing)) {
+        updated = existing.replace(sectionPattern, newSection);
+      } else {
+        updated = existing.trimEnd() + newSection;
+      }
+      await writeFile(path, updated, "utf8");
+      return textResult(`Memory section "${args.section}" updated.`);
     },
   });
 }

@@ -50,10 +50,21 @@ if [ -f /opt/pi/context-pruning-state.mjs ]; then
 fi
 # Seed .punch-memory.md if it doesn't exist
 if [ ! -f /work/.punch-memory.md ]; then
-  echo "# Project memory" > /work/.punch-memory.md
-  echo "" >> /work/.punch-memory.md
-  echo "Persistent project context that survives session resets and compactions." >> /work/.punch-memory.md
-  echo "Punch appends important information here before compacting sessions." >> /work/.punch-memory.md
+  cat > /work/.punch-memory.md << 'PUNCH_MEMORY_EOF'
+# Project memory
+
+Persistent project context that survives session resets and compactions.
+Update sections with the `update_memory` tool.
+
+## Guidelines
+- architecture decisions
+- code conventions
+- project gotchas
+
+## Open work
+- current task
+- next steps
+PUNCH_MEMORY_EOF
 fi
 # Seed Pi identity addendum (always refresh so persona stays Pi-only)
 if [ -f /opt/pi/SYSTEM.md ]; then
