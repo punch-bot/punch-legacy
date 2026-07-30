@@ -26,6 +26,7 @@ import {
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgroundTask, execCommand, setSecret, getSecrets, setEnv, getEnv, reloadSandboxMap, apiUrlFor, abortSession, sandboxNameForUser, summarizeSession, syncMultitaskWorkerCap, getMultitaskWorkerSettings } from "./agent.js";
+import { validateAutoCompressThreshold } from "./context-compression.js";
 import { filterThreadSubtree } from "./thread-context.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
@@ -1715,7 +1716,20 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const threshold = store.getUserSettings(uid)?.autoCompressThreshold;
     const pct = res.usage?.pct;
     const needsAutoCompress = !compressRequested && threshold > 0 && pct != null && pct >= threshold;
-    if (needsAutoCompress) notes.push("context auto-compressed");
+    let compressed = false;
+    if (compressRequested || needsAutoCompress) {
+      const compressSid = store.getSession(cid);
+      if (compressSid) {
+        const reason = compressRequested ? "model-requested" : "auto";
+        try {
+          await withUserRunLock(uid, () => summarizeSession(compressSid, uid));
+          compressed = true;
+        } catch (error) {
+          console.error(`[compress] ${reason} failed:`, error.message);
+        }
+      }
+    }
+    if (compressed) notes.push(compressRequested ? "context compressed" : "context auto-compressed");
     if (agentAttachments.length) notes.push(`parsed ${agentAttachments.length} attachment(s)`);
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
@@ -1780,13 +1794,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       });
     }
 
-    if (compressRequested || needsAutoCompress) {
-      const compressSid = store.getSession(cid);
-      if (compressSid) {
-        const reason = compressRequested ? "model-requested" : "auto";
-        summarizeSession(compressSid, uid).catch(e => console.error(`[compress] ${reason} failed:`, e.message));
-      }
-    }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
@@ -3629,6 +3636,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (sub === "auto-compress") {
       const threshold = interaction.options.getInteger("threshold");
       if (threshold != null) {
+        try {
+          validateAutoCompressThreshold(threshold);
+        } catch (error) {
+          await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral });
+          return;
+        }
         store.patchUserSettings(uid, { autoCompressThreshold: threshold });
         const msg = threshold === 0 ? "Auto-compress disabled." : `Auto-compress threshold set to **${threshold}%**.`;
         await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
@@ -3756,7 +3769,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
 
     try {
-      await summarizeSession(session, uid, ac.signal);
+      await withUserRunLock(uid, () => summarizeSession(session, uid, ac.signal));
       clearInterval(iv);
       clearTimeout(to);
       await interaction.editReply(`✅ Conversation compressed.\n${progressBar(100)} 100%\nContext trimmed — fresh headspace for the next turn.`);

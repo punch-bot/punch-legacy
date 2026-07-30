@@ -898,17 +898,19 @@ const server = createServer(async (req, res) => {
             messages: [],
           });
         }
-        await ensureSession(sid);
         const body = await readBody(req).catch(() => ({}));
-        const providerID = body?.model?.providerID || body?.providerID;
-        const modelID = body?.model?.modelID || body?.modelID;
-        if (providerID && modelID) {
-          await rpc("set_model", {
-            provider: providerID,
-            modelId: modelID,
-          }).catch(() => {});
-        }
-        await rpc("compact", {}, 300000);
+        await enqueueTurn(async () => {
+          await ensureSession(sid);
+          const providerID = body?.model?.providerID || body?.providerID;
+          const modelID = body?.model?.modelID || body?.modelID;
+          if (providerID && modelID) {
+            await rpc("set_model", {
+              provider: providerID,
+              modelId: modelID,
+            }).catch(() => {});
+          }
+          await rpc("compact", {}, 300000);
+        });
         json(res, 200, { ok: true });
         return;
       }

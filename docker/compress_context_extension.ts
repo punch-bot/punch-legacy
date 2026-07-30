@@ -1,19 +1,30 @@
+import { readFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 export default function (_pi: ExtensionAPI) {
+  _pi.on("before_agent_start", async (event) => {
+    let memory = "";
+    try {
+      memory = (await readFile("/work/.punch-memory.md", "utf8")).trim().slice(0, 12_000);
+    } catch {}
+    if (!memory) return;
+    return {
+      systemPrompt: `${event.systemPrompt}\n\n## Persistent project memory\nTreat this as durable project context. Update /work/.punch-memory.md when needed.\n\n${memory}`,
+    };
+  });
+
   _pi.registerTool({
     name: "compress_context",
     label: "Compress conversation context",
     description:
-      "Signal that the conversation context should be compressed. Call this when the conversation history is getting long, tool outputs are piling up, or you feel context-constrained.",
+      "Request whole-session compaction after this turn. Call this when the conversation history is getting long or you are context-constrained.",
     promptSnippet:
-      "Compress conversation context when it's getting full. Before calling, save important info to /work/.punch-memory.md with the write tool.",
+      "Before requesting compaction, save important info to /work/.punch-memory.md with the write tool.",
     promptGuidelines: [
       "Call this when the conversation history is getting long and you feel your context window filling up.",
       "Before calling, review the conversation for important project info, decisions, user preferences, or anything worth keeping and append it to /work/.punch-memory.md using the write tool.",
-      "After calling, include <compress></compress> in your reply text so Punch triggers the session compaction.",
-      "The actual compression happens after your turn finishes.",
+      "After calling, include <compress></compress> in your reply text. Punch will compact after this turn finishes.",
     ],
     parameters: Type.Object({
       userId: Type.String({
@@ -27,7 +38,7 @@ export default function (_pi: ExtensionAPI) {
           {
             type: "text" as const,
             text:
-              "Compression queued. include <compress></compress> in your reply so Punch compacts the session.",
+              "To request compaction after this turn, include <compress></compress> in your reply after saving durable context.",
           },
         ],
       };
