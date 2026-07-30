@@ -1255,7 +1255,7 @@ client.once(Events.ClientReady, async (c) => {
           { type: 3, name: "state", description: "on / off / status", required: true,
             choices: [{ name: "on", value: "on" }, { name: "off", value: "off" }, { name: "status", value: "status" }] },
         ] },
-      { type: 1, name: "auto-compress", description: "Auto-compress when context exceeds a threshold (50-75%, 0 to disable)",
+      { type: 1, name: "auto-compress", description: "Prompt selective context pruning at a threshold (50-75%, 0 to disable)",
         options: [
           { type: 4, name: "threshold", description: "Context % threshold (50-75, 0=off)", required: false, min_value: 0, max_value: 75 },
         ] },
@@ -1713,14 +1713,11 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (dropped) notes.push(`forgot ${dropped}`);
     const ctxNote = contextUsageNote(res.usage, uid);
     if (ctxNote) notes.push(ctxNote);
-    const threshold = store.getUserSettings(uid)?.autoCompressThreshold;
-    const pct = res.usage?.pct;
-    const needsAutoCompress = !compressRequested && threshold > 0 && pct != null && pct >= threshold;
     let compressed = false;
-    if (compressRequested || needsAutoCompress) {
+    if (compressRequested) {
       const compressSid = store.getSession(cid);
       if (compressSid) {
-        const reason = compressRequested ? "model-requested" : "auto";
+        const reason = "model-requested";
         try {
           await withUserRunLock(uid, () => summarizeSession(compressSid, uid));
           compressed = true;
@@ -1729,7 +1726,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         }
       }
     }
-    if (compressed) notes.push(compressRequested ? "context compressed" : "context auto-compressed");
+    if (compressed) notes.push("context compressed");
     if (agentAttachments.length) notes.push(`parsed ${agentAttachments.length} attachment(s)`);
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
@@ -3643,11 +3640,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
         }
         store.patchUserSettings(uid, { autoCompressThreshold: threshold });
-        const msg = threshold === 0 ? "Auto-compress disabled." : `Auto-compress threshold set to **${threshold}%**.`;
+        const msg = threshold === 0 ? "Automatic context-pruning prompt disabled." : `Context-pruning prompt threshold set to **${threshold}%**.`;
         await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
       } else {
         const us = store.getUserSettings(uid);
-        const msg = us.autoCompressThreshold === 0 ? "Auto-compress **disabled**." : `Auto-compress threshold: **${us.autoCompressThreshold}%**.`;
+        const msg = us.autoCompressThreshold === 0 ? "Automatic context-pruning prompt **disabled**." : `Context-pruning prompt threshold: **${us.autoCompressThreshold}%**.`;
         await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
       }
       return;

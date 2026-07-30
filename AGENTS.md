@@ -100,13 +100,13 @@ Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/
 
 Three-part memory management system:
 
-1. **`compress_context` Pi tool** (`/opt/pi/extensions/compress_context.ts`) — model calls it when context is full. Before calling, the model reviews the conversation and saves important info to `/work/.punch-memory.md` using the write tool. The model emits `<compress></compress>` in its reply text to signal the bot.
+1. **Selective Pi pruning tools** (`/opt/pi/extensions/compress_context.ts`) — `compress_context` replaces stale complete user-turn ranges with model-written summaries in provider context. Blocks have stable Pi entry IDs, preserve raw session entries, and can be searched (`search_context`), inspected (`context_status`), and restored (`decompress_context`). First user message is protected; uncertain mappings leave raw context intact.
 
-2. **Auto-compress threshold** — after every turn the bot checks context usage. If it exceeds the user's threshold (default 75%, configurable 50-75% via `/botmode auto-compress`, or 0 to disable) the bot auto-triggers a session compaction. Adds "context auto-compressed" note to the reply.
+2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
 
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The model reads it at the start of each turn and appends important information (architecture decisions, conventions, preferences) before compacting. Survives session resets and compactions.
+3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. Punch injects a bounded copy at every turn; model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
 
-**Flow:** model detects full context → saves important info to `.punch-memory.md` → calls `compress_context` → emits `<compress>` tag → bot compacts session after turn. Or: bot detects usage over threshold → compacts automatically.
+**Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
 
 ## Env naming (legacy aliases)
 

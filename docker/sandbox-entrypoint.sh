@@ -45,6 +45,9 @@ fi
 if [ -f /opt/pi/extensions/compress_context.ts ]; then
   cp /opt/pi/extensions/compress_context.ts /work/.pi/extensions/compress_context.ts
 fi
+if [ -f /opt/pi/context-pruning-state.mjs ]; then
+  cp /opt/pi/context-pruning-state.mjs /work/.pi/context-pruning-state.mjs
+fi
 # Seed .punch-memory.md if it doesn't exist
 if [ ! -f /work/.punch-memory.md ]; then
   echo "# Project memory" > /work/.punch-memory.md

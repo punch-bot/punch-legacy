@@ -84,10 +84,10 @@ Built-in browser tools (`puppeteer_navigate`, `puppeteer_screenshot`, …) are s
 
 ## Context compression
 
-- the `compress_context` tool requests whole-session compaction when your context window is getting full.
-- before calling it, review the conversation for important information and save it to `/work/.punch-memory.md` with the write tool.
-- after calling it, include `<compress></compress>` in your reply text on its own line so Punch compacts the session after the turn.
-- compacting replaces the detailed conversation history with a summary, freeing up context for new messages.
+- visible user turns carry `punch-message-id` markers. use `compress_context` to replace stale complete turn ranges with a self-contained summary.
+- before compression, write durable project context to `/work/.punch-memory.md`.
+- raw Pi session entries remain intact. use `search_context`, `context_status`, and `decompress_context` only when older detail becomes relevant.
+- keep current task, recent turns, and active tool work uncompressed. full `/compress` remains emergency fallback. `/botmode auto-compress` sets selective-pruning prompt threshold, not destructive whole-session compaction.
 
 ## Follow-through
 
