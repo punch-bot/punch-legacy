@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     let memory = "";
     try {
-      memory = (await readFile("/work/.punch-memory.md", "utf8")).trim().slice(0, 12_000);
+      memory = (await readFile("/work/.punch-memory.md", "utf8")).trim().slice(0, MAX_MEMORY_CHARS);
     } catch {}
     const threshold = Number(event.systemPrompt.match(/PUNCH_CONTEXT_PRUNING_THRESHOLD=(\d+)/)?.[1] || 0);
     const usage = ctx.getContextUsage();

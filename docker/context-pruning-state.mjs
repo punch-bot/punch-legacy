@@ -92,7 +92,7 @@ export function createBlock(state, records, { startId, endId, topic, summary }) 
   })) throw new Error("range contains protected tool output — decompress or skip that turn");
   const compressed = activeMessageIds(next);
   if (messageIds.some((id) => compressed.has(id))) throw new Error("range overlaps an active compressed block");
-  const sourceCharacters = records.slice(start, end + 1)
+  const sourceCharacters = rangeRecords
     .reduce((total, record) => total + textFromContent(record.message?.content).length, 0);
   if (!isValidSummary(summary, sourceCharacters)) throw new Error(
     `summary is too short, too vague, or longer than source for a ${sourceCharacters}-character range`,
@@ -125,11 +125,7 @@ export function recompressBlock(state, blockIds, { summary, topic }) {
     if (block.active !== false) throw new Error(`block ${id} must be deactivated first`);
     parents.push(block);
   }
-  parents.sort((a, b) => {
-    const aId = a.startId || a.anchorId || a.messageIds[0] || "";
-    const bId = b.startId || b.anchorId || b.messageIds[0] || "";
-    return (parseInt(aId.replace(/[^\d]/g, ""), 10) || 0) - (parseInt(bId.replace(/[^\d]/g, ""), 10) || 0);
-  });
+  parents.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   const allMessageIds = [];
   let sourceCharacters = 0;
   for (const block of parents) {

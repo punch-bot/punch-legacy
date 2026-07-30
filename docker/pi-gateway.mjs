@@ -851,9 +851,10 @@ const server = createServer(async (req, res) => {
       const action = sessMatch[2] || "";
 
       if (req.method === "GET" && action === "message") {
+        let s;
         try {
           await enqueueTurn(async () => {
-            const s = sessions.get(sid);
+            s = sessions.get(sid);
             if (!s) {
               json(res, 404, { error: "session not found" });
               return;
@@ -880,7 +881,7 @@ const server = createServer(async (req, res) => {
             json(res, 200, withTools.length ? withTools : s.messages);
           });
         } catch {
-          json(res, 200, []);
+          json(res, 200, s?.messages || []);
         }
         return;
       }

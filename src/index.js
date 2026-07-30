@@ -1765,15 +1765,12 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const ctxNote = contextUsageNote(res.usage, uid);
     if (ctxNote) notes.push(ctxNote);
     let compressed = false;
-    if (compressRequested) {
-      const compressSid = store.getSession(cid);
-      if (compressSid) {
-        try {
-          await withUserRunLock(uid, () => summarizeSession(compressSid, uid));
-          compressed = true;
-        } catch (error) {
-          console.error(`[compress] model-requested failed:`, error.message);
-        }
+    if (compressRequested && res.sessionId) {
+      try {
+        await withUserRunLock(uid, () => summarizeSession(res.sessionId, uid));
+        compressed = true;
+      } catch (error) {
+        console.error(`[compress] model-requested failed:`, error.message);
       }
     }
     if (compressed) notes.push("context compressed");

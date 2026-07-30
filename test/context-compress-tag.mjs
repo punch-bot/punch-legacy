@@ -11,7 +11,7 @@ test("extractCompressTag detects self-closing tag", () => {
 test("extractCompressTag detects paired tag", () => {
   const { clean, requested } = extractCompressTag("hello <compress></compress> world");
   assert.equal(requested, true);
-  assert.equal(clean, "hello  world");
+  assert.equal(clean, "hello world");
 });
 
 test("extractCompressTag detects bare tag", () => {
@@ -47,5 +47,11 @@ test("extractCompressTag multiple tags", () => {
 test("extractCompressTag strips tags from mixed content", () => {
   const { clean, requested } = extractCompressTag("text <compress /> more <compress></compress> end");
   assert.equal(requested, true);
-  assert.equal(clean, "text more  end");
+  assert.equal(clean, "text more end");
+});
+
+test("extractCompressTag strips paired tags with non-empty content", () => {
+  const { clean, requested } = extractCompressTag("before <compress>payload</compress> after");
+  assert.equal(requested, true);
+  assert.equal(clean, "before payload after");
 });

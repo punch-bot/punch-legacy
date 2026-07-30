@@ -188,6 +188,33 @@ test("searchBlocks handles empty query or no matches", () => {
   assert.equal(activeBlocks(deactivateBlock(state, "b1")).length, 0);
 });
 
+test("recompressBlock sorts parents by createdAt with non-numeric block IDs", () => {
+  const uuidRecords = messageRecords([
+    { type: "message", id: "u-u-i-d-0", message: { role: "user", content: "hello" } },
+    { type: "message", id: "a1b2c3d4", message: { role: "user", content: "first request" } },
+    { type: "message", id: "e5f6g7h8", message: { role: "assistant", content: "reply" } },
+    { type: "message", id: "i9j0k1l2", message: { role: "user", content: "second request" } },
+    { type: "message", id: "m3n4o5p6", message: { role: "assistant", content: "reply2" } },
+    { type: "message", id: "q7r8s9t0", message: { role: "user", content: "third" } },
+  ]);
+  const withB1 = createBlock(emptyState(), uuidRecords, {
+    startId: "a1b2c3d4", endId: "a1b2c3d4", summary: "First request.",
+  });
+  const withB2 = createBlock(withB1, uuidRecords, {
+    startId: "i9j0k1l2", endId: "i9j0k1l2", summary: "Second request.",
+  });
+  const restored = deactivateBlock(deactivateBlock(withB2, "b1"), "b2");
+  const recompressed = recompressBlock(restored, ["b2", "b1"], {
+    summary: "Investigated both before applying fix.",
+  });
+  const t2 = recompressed.blocks[2];
+  assert.equal(t2.tier, 2);
+  assert.deepEqual(t2.parentBlockIds, ["b2", "b1"]);
+  assert.equal(t2.messageIds.length, 2);
+  assert.ok(t2.messageIds.includes("a1b2c3d4"));
+  assert.ok(t2.messageIds.includes("i9j0k1l2"));
+});
+
 test("createBlock rejects summaries exceeding MAX_SUMMARY_CHARS", () => {
   const hugeSummary = "x".repeat(MAX_SUMMARY_CHARS + 1);
   assert.throws(() => createBlock(emptyState(), records, {
