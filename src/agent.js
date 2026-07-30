@@ -833,7 +833,7 @@ export async function summarizeSession(sessionId, userId, signal = null) {
     try {
       const res = await fetch(`${apiUrl}/model`, {
         headers: headers(),
-        signal: AbortSignal.timeout(2000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2000)]) : AbortSignal.timeout(2000),
       });
       if (res.ok) {
         const d = await res.json();

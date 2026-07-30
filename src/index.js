@@ -1704,11 +1704,12 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   try {
     turn.phase = "thinking";
     turn.detail = "waiting for Pi";
-    const session = store.getSession(cid);
-    console.log(`[chat] uid=${uid} cid=${cid} session=${session || "new"} -> pi`);
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
-      const result = await runAgent(prompt, session, onProgress, signal, uid, agentAttachments);
+      const currentSession = store.getSession(cid);
+      console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
+      const result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
+      store.setSession(cid, result.sessionId);
       if (result.sessionId && /<\/?compress\s*\/?\s*>/i.test(result.text)) {
         try {
           await summarizeSession(result.sessionId, uid, signal);
@@ -1720,7 +1721,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       return result;
     });
     console.log(`[chat] uid=${uid} cid=${cid} reply len=${res.text.length}`);
-    store.setSession(cid, res.sessionId);
 
     const filesToSend = [];
 
@@ -4000,8 +4000,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.commandName === "compress") {
     const uid = interaction.user.id;
     const cid = interaction.channelId;
-    const session = store.getSession(cid);
-    if (!session) {
+    if (!store.getSession(cid)) {
       await interaction.reply({
         content: "Nothing to compress yet — there's no active conversation in this channel. Send a message first.",
         flags: MessageFlags.Ephemeral,
@@ -4040,7 +4039,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
 
     try {
-      await withUserRunLock(uid, () => summarizeSession(session, uid, ac.signal));
+      await withUserRunLock(uid, () => summarizeSession(store.getSession(cid), uid, ac.signal));
       clearInterval(iv);
       clearTimeout(to);
       await interaction.editReply(`✅ Conversation compressed.\n${progressBar(100)} 100%\nContext trimmed — fresh headspace for the next turn.`);
