@@ -851,13 +851,13 @@ const server = createServer(async (req, res) => {
       const action = sessMatch[2] || "";
 
       if (req.method === "GET" && action === "message") {
-        const s = sessions.get(sid);
-        if (!s) {
-          json(res, 404, { error: "session not found" });
-          return;
-        }
         try {
           await enqueueTurn(async () => {
+            const s = sessions.get(sid);
+            if (!s) {
+              json(res, 404, { error: "session not found" });
+              return;
+            }
             await ensureSession(sid);
             const gm = await rpc("get_messages");
             const mapped = (gm.data?.messages || []).map((m) => {
@@ -880,7 +880,7 @@ const server = createServer(async (req, res) => {
             json(res, 200, withTools.length ? withTools : s.messages);
           });
         } catch {
-          json(res, 200, s.messages || []);
+          json(res, 200, []);
         }
         return;
       }
@@ -893,17 +893,17 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && action === "summarize") {
-        // Recreate mapping after gateway restart (same as message path)
-        if (!sessions.has(sid)) {
-          sessions.set(sid, {
-            id: sid,
-            sessionFile: null,
-            systemHash: null,
-            messages: [],
-          });
-        }
         const body = await readBody(req).catch(() => ({}));
         await enqueueTurn(async () => {
+          // Recreate mapping after gateway restart (same as message path)
+          if (!sessions.has(sid)) {
+            sessions.set(sid, {
+              id: sid,
+              sessionFile: null,
+              systemHash: null,
+              messages: [],
+            });
+          }
           await ensureSession(sid);
           const providerID = body?.model?.providerID || body?.providerID;
           const modelID = body?.model?.modelID || body?.modelID;
@@ -1013,9 +1013,11 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "DELETE" && !action) {
-        sessions.delete(sid);
-        if (activeLogicalId === sid) activeLogicalId = null;
-        persistSessionMap();
+        await enqueueTurn(async () => {
+          sessions.delete(sid);
+          if (activeLogicalId === sid) activeLogicalId = null;
+          persistSessionMap();
+        });
         json(res, 200, { ok: true });
         return;
       }
