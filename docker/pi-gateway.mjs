@@ -857,26 +857,28 @@ const server = createServer(async (req, res) => {
           return;
         }
         try {
-          await ensureSession(sid);
-          const gm = await rpc("get_messages");
-          const mapped = (gm.data?.messages || []).map((m) => {
-            const role = m.role || "user";
-            let text = "";
-            if (typeof m.content === "string") text = m.content;
-            else if (Array.isArray(m.content))
-              text = extractTextFromParts(m.content);
-            return {
-              info: { role, id: m.id || randomUUID() },
-              parts: text ? [{ type: "text", text }] : [],
-            };
+          await enqueueTurn(async () => {
+            await ensureSession(sid);
+            const gm = await rpc("get_messages");
+            const mapped = (gm.data?.messages || []).map((m) => {
+              const role = m.role || "user";
+              let text = "";
+              if (typeof m.content === "string") text = m.content;
+              else if (Array.isArray(m.content))
+                text = extractTextFromParts(m.content);
+              return {
+                info: { role, id: m.id || randomUUID() },
+                parts: text ? [{ type: "text", text }] : [],
+              };
+            });
+            // Append cached tool parts from this gateway turn for media scrape
+            const withTools = mapped.concat(
+              s.messages.filter((m) =>
+                (m.parts || []).some((p) => p.type === "tool"),
+              ),
+            );
+            json(res, 200, withTools.length ? withTools : s.messages);
           });
-          // Append cached tool parts from this gateway turn for media scrape
-          const withTools = mapped.concat(
-            s.messages.filter((m) =>
-              (m.parts || []).some((p) => p.type === "tool"),
-            ),
-          );
-          json(res, 200, withTools.length ? withTools : s.messages);
         } catch {
           json(res, 200, s.messages || []);
         }
