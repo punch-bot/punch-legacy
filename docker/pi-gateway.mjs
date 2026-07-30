@@ -806,24 +806,22 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/session") {
       await waitReady();
-      await enqueueTurn(async () => {
-        const id = randomUUID();
-        await rpc("new_session");
-        const st = await rpc("get_state");
-        sessions.set(id, {
-          id,
-          sessionFile: st.data?.sessionFile || null,
-          systemHash: null,
-          messages: [],
-        });
-        if (st.data?.sessionFile) persistSessionMap();
-        activeLogicalId = id;
-        broadcastSse({
-          type: "session.created",
-          properties: { sessionID: id, info: { id } },
-        });
-        json(res, 200, { id, title: "", time: { created: Date.now() } });
+      const id = randomUUID();
+      await rpc("new_session");
+      const st = await rpc("get_state");
+      sessions.set(id, {
+        id,
+        sessionFile: st.data?.sessionFile || null,
+        systemHash: null,
+        messages: [],
       });
+      if (st.data?.sessionFile) persistSessionMap();
+      activeLogicalId = id;
+      broadcastSse({
+        type: "session.created",
+        properties: { sessionID: id, info: { id } },
+      });
+      json(res, 200, { id, title: "", time: { created: Date.now() } });
       return;
     }
 
@@ -851,36 +849,34 @@ const server = createServer(async (req, res) => {
       const action = sessMatch[2] || "";
 
       if (req.method === "GET" && action === "message") {
+        const s = sessions.get(sid);
+        if (!s) {
+          json(res, 404, { error: "session not found" });
+          return;
+        }
         try {
-          await enqueueTurn(async () => {
-            const s = sessions.get(sid);
-            if (!s) {
-              json(res, 404, { error: "session not found" });
-              return;
-            }
-            await ensureSession(sid);
-            const gm = await rpc("get_messages");
-            const mapped = (gm.data?.messages || []).map((m) => {
-              const role = m.role || "user";
-              let text = "";
-              if (typeof m.content === "string") text = m.content;
-              else if (Array.isArray(m.content))
-                text = extractTextFromParts(m.content);
-              return {
-                info: { role, id: m.id || randomUUID() },
-                parts: text ? [{ type: "text", text }] : [],
-              };
-            });
-            // Append cached tool parts from this gateway turn for media scrape
-            const withTools = mapped.concat(
-              s.messages.filter((m) =>
-                (m.parts || []).some((p) => p.type === "tool"),
-              ),
-            );
-            json(res, 200, withTools.length ? withTools : s.messages);
+          await ensureSession(sid);
+          const gm = await rpc("get_messages");
+          const mapped = (gm.data?.messages || []).map((m) => {
+            const role = m.role || "user";
+            let text = "";
+            if (typeof m.content === "string") text = m.content;
+            else if (Array.isArray(m.content))
+              text = extractTextFromParts(m.content);
+            return {
+              info: { role, id: m.id || randomUUID() },
+              parts: text ? [{ type: "text", text }] : [],
+            };
           });
+          // Append cached tool parts from this gateway turn for media scrape
+          const withTools = mapped.concat(
+            s.messages.filter((m) =>
+              (m.parts || []).some((p) => p.type === "tool"),
+            ),
+          );
+          json(res, 200, withTools.length ? withTools : s.messages);
         } catch {
-          json(res, 200, []);
+          json(res, 200, s.messages || []);
         }
         return;
       }
@@ -893,28 +889,26 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && action === "summarize") {
+        // Recreate mapping after gateway restart (same as message path)
+        if (!sessions.has(sid)) {
+          sessions.set(sid, {
+            id: sid,
+            sessionFile: null,
+            systemHash: null,
+            messages: [],
+          });
+        }
+        await ensureSession(sid);
         const body = await readBody(req).catch(() => ({}));
-        await enqueueTurn(async () => {
-          // Recreate mapping after gateway restart (same as message path)
-          if (!sessions.has(sid)) {
-            sessions.set(sid, {
-              id: sid,
-              sessionFile: null,
-              systemHash: null,
-              messages: [],
-            });
-          }
-          await ensureSession(sid);
-          const providerID = body?.model?.providerID || body?.providerID;
-          const modelID = body?.model?.modelID || body?.modelID;
-          if (providerID && modelID) {
-            await rpc("set_model", {
-              provider: providerID,
-              modelId: modelID,
-            }).catch(() => {});
-          }
-          await rpc("compact", {}, 300000);
-        });
+        const providerID = body?.model?.providerID || body?.providerID;
+        const modelID = body?.model?.modelID || body?.modelID;
+        if (providerID && modelID) {
+          await rpc("set_model", {
+            provider: providerID,
+            modelId: modelID,
+          }).catch(() => {});
+        }
+        await rpc("compact", {}, 300000);
         json(res, 200, { ok: true });
         return;
       }
@@ -1013,11 +1007,9 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "DELETE" && !action) {
-        await enqueueTurn(async () => {
-          sessions.delete(sid);
-          if (activeLogicalId === sid) activeLogicalId = null;
-          persistSessionMap();
-        });
+        sessions.delete(sid);
+        if (activeLogicalId === sid) activeLogicalId = null;
+        persistSessionMap();
         json(res, 200, { ok: true });
         return;
       }

@@ -26,8 +26,6 @@ import {
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgroundTask, execCommand, setSecret, getSecrets, setEnv, getEnv, reloadSandboxMap, apiUrlFor, abortSession, sandboxNameForUser, summarizeSession, syncMultitaskWorkerCap, getMultitaskWorkerSettings } from "./agent.js";
-import { validateAutoCompressThreshold } from "./context-compression.js";
-import { extractCompressTag } from "./compress-tag.mjs";
 import { filterThreadSubtree } from "./thread-context.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
@@ -1136,12 +1134,6 @@ client.once(Events.ClientReady, async (c) => {
       { type: 1, name: "clear", description: "Remove your personal trigger word" },
     ],
   }, {
-    name: "memory",
-    description: "View your sandbox project memory (/work/.punch-memory.md)",
-    options: [
-      { type: 1, name: "view", description: "Show your sandbox's .punch-memory.md contents" },
-    ],
-  }, {
     name: "routine",
     description: "Schedule reminders and automations",
     options: [
@@ -1249,10 +1241,6 @@ client.once(Events.ClientReady, async (c) => {
         options: [
           { type: 3, name: "state", description: "on / off / status", required: true,
             choices: [{ name: "on", value: "on" }, { name: "off", value: "off" }, { name: "status", value: "status" }] },
-        ] },
-      { type: 1, name: "auto-compress", description: "Prompt selective context pruning at a threshold (50-75%, 0 to disable)",
-        options: [
-          { type: 4, name: "threshold", description: "Context % threshold (50-75, 0=off)", required: false, min_value: 0, max_value: 75 },
         ] },
     ],
   }, {
@@ -1717,7 +1705,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
     const { clean: textAfterReacts, emojis: reactEmojis } = extractReactTags(textAfterAttachments);
-    const { clean: textAfterCompress, requested: compressRequested } = extractCompressTag(textAfterReacts);
 
     for (const relPath of attachments) {
       try {
@@ -1732,7 +1719,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       await applyReactTags(message, reactEmojis);
     }
 
-    let out = textAfterCompress || "";
+    let out = textAfterReacts || "";
     if (out === "(no output)") out = "";
     if (opts.pigeonFrom) {
       out = scanOutbound(out).text;
@@ -1764,19 +1751,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (dropped) notes.push(`forgot ${dropped}`);
     const ctxNote = contextUsageNote(res.usage, uid);
     if (ctxNote) notes.push(ctxNote);
-    let compressed = false;
-    if (compressRequested) {
-      const compressSid = store.getSession(cid);
-      if (compressSid) {
-        try {
-          await withUserRunLock(uid, () => summarizeSession(compressSid, uid));
-          compressed = true;
-        } catch (error) {
-          console.error(`[compress] model-requested failed:`, error.message);
-        }
-      }
-    }
-    if (compressed) notes.push("context compressed");
     if (agentAttachments.length) notes.push(`parsed ${agentAttachments.length} attachment(s)`);
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
@@ -3806,22 +3780,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  if (interaction.commandName === "memory") {
-    const sub = interaction.options.getSubcommand();
-    const uid = interaction.user.id;
-    if (sub === "view") {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const file = await getFile("/work/.punch-memory.md", uid);
-        const text = file.buffer.toString("utf8").slice(0, 1900);
-        await interaction.editReply({ content: `**Project memory:**\n\n${text}` });
-      } catch (err) {
-        await interaction.editReply({ content: `\u26a0\ufe0f Could not read memory: ${err.message}` });
-      }
-    }
-    return;
-  }
-
   if (interaction.commandName === "routine") {
     const sub = interaction.options.getSubcommand();
     const ctx = routineContextFromInteraction(interaction);
@@ -3905,27 +3863,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.commandName === "botmode") {
     const sub = interaction.options.getSubcommand();
     const uid = interaction.user.id;
-
-    if (sub === "auto-compress") {
-      const threshold = interaction.options.getInteger("threshold");
-      if (threshold != null) {
-        try {
-          validateAutoCompressThreshold(threshold);
-        } catch (error) {
-          await interaction.reply({ content: `\u26a0\ufe0f ${error.message}`, flags: MessageFlags.Ephemeral });
-          return;
-        }
-        store.patchUserSettings(uid, { autoCompressThreshold: threshold });
-        const msg = threshold === 0 ? "Automatic context-pruning prompt disabled." : `Context-pruning prompt threshold set to **${threshold}%**.`;
-        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
-      } else {
-        const us = store.getUserSettings(uid);
-        const msg = us.autoCompressThreshold === 0 ? "Automatic context-pruning prompt **disabled**." : `Context-pruning prompt threshold: **${us.autoCompressThreshold}%**.`;
-        await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral });
-      }
-      return;
-    }
-
     const state = interaction.options.getString("state", true);
     const key = sub === "allow-bots" ? "allowBots" : sub === "show-context" ? "showContext" : sub === "git-co-author" ? "gitCoAuthor" : "noThinking";
     const label = sub === "allow-bots" ? "Bot messages triggering Punch" : sub === "show-context" ? "Always-on context indicator" : sub === "git-co-author" ? "Co-Authored-By trailer in commits" : "Thinking message";
@@ -4042,7 +3979,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
 
     try {
-      await withUserRunLock(uid, () => summarizeSession(session, uid, ac.signal));
+      await summarizeSession(session, uid, ac.signal);
       clearInterval(iv);
       clearTimeout(to);
       await interaction.editReply(`✅ Conversation compressed.\n${progressBar(100)} 100%\nContext trimmed — fresh headspace for the next turn.`);
