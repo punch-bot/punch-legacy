@@ -125,7 +125,11 @@ export function recompressBlock(state, blockIds, { summary, topic }) {
     if (block.active !== false) throw new Error(`block ${id} must be deactivated first`);
     parents.push(block);
   }
-  parents.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const stateOrder = new Map(next.blocks.map((block, index) => [block.id, index]));
+  parents.sort((a, b) =>
+    (a.createdAt || 0) - (b.createdAt || 0) ||
+    stateOrder.get(a.id) - stateOrder.get(b.id),
+  );
   const allMessageIds = [];
   let sourceCharacters = 0;
   for (const block of parents) {
