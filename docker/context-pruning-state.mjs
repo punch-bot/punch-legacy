@@ -1,6 +1,21 @@
 export const STATE_VERSION = 1;
 export const STATE_TYPE = "punch-context-pruning";
 export const MAX_SUMMARY_CHARS = 16_000;
+const MIN_SUMMARY_ABSOLUTE = 20;
+const MIN_SUMMARY_RATIO = 0.03;
+const SMALL_RANGE_CHARS = 500;
+const PLACEHOLDER_PATTERNS = [/^\.\.\.$/s, /^see above$/i, /^same as above$/i, /^n\/a\.?$/i, /^\[.*\]$/s];
+
+function isValidSummary(summary, sourceCharacters) {
+  if (typeof summary !== "string" || !summary.trim()) return false;
+  if (PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(summary.trim()))) return false;
+  if (sourceCharacters < SMALL_RANGE_CHARS) return true;
+  if (summary.trim().length < MIN_SUMMARY_ABSOLUTE) return false;
+  if (summary.trim().length > sourceCharacters) return false;
+  if (summary.trim().length < sourceCharacters * MIN_SUMMARY_RATIO) return false;
+  return true;
+}
+
 export const PROTECTED_TOOL_PATTERNS = [
   /^compress_context$/,
   /^decompress_context$/,
@@ -79,6 +94,9 @@ export function createBlock(state, records, { startId, endId, topic, summary }) 
   if (messageIds.some((id) => compressed.has(id))) throw new Error("range overlaps an active compressed block");
   const sourceCharacters = records.slice(start, end + 1)
     .reduce((total, record) => total + textFromContent(record.message?.content).length, 0);
+  if (!isValidSummary(summary, sourceCharacters)) throw new Error(
+    `summary is too short, too vague, or longer than source for a ${sourceCharacters}-character range`,
+  );
   const block = {
     id: `b${next.nextBlockId}`,
     tier: 1,
@@ -111,6 +129,9 @@ export function recompressBlock(state, blockIds, { summary, topic }) {
     allMessageIds.push(...block.messageIds);
     sourceCharacters += block.sourceCharacters || 0;
   }
+  if (!isValidSummary(summary, sourceCharacters)) throw new Error(
+    `recompressed summary is too short, too vague, or longer than source for ${sourceCharacters} source characters`,
+  );
   const firstAnchor = parents[0].anchorId || parents[0].messageIds[0];
   if (!firstAnchor) throw new Error("parent blocks have no anchor");
   const active = activeMessageIds(next);

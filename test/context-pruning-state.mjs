@@ -82,6 +82,30 @@ const protectedRecords = messageRecords([
   { type: "message", id: "u2", message: { role: "user", content: "next request" } },
 ]);
 
+test("quality gate rejects placeholder summaries", () => {
+  assert.throws(() => createBlock(emptyState(), records, {
+    startId: "u2", endId: "u3", summary: "...",
+  }), /too vague/);
+});
+
+test("quality gate enforces ratio for ranges >= 500 chars", () => {
+  const bigContent = "x".repeat(200);
+  const bigRecords = messageRecords([
+    { type: "message", id: "u0", message: { role: "user", content: "hi" } },
+    { type: "message", id: "a0", message: { role: "assistant", content: "hey" } },
+    { type: "message", id: "u2", message: { role: "user", content: bigContent } },
+    { type: "message", id: "a2", message: { role: "assistant", content: bigContent } },
+    { type: "message", id: "u3", message: { role: "user", content: bigContent } },
+  ]);
+  assert.throws(() => createBlock(emptyState(), bigRecords, {
+    startId: "u2", endId: "u3", summary: "too short",
+  }), /too short/);
+  const valid = createBlock(emptyState(), bigRecords, {
+    startId: "u2", endId: "u3", summary: "long enough summary that exceeds the minimum ratio requirement for quality check purposes",
+  });
+  assert.ok(valid.blocks[0].summary);
+});
+
 test("blocks creation over range containing protected tool output", () => {
   assert.throws(() => createBlock(emptyState(), protectedRecords, {
     startId: "u1", endId: "u2", summary: "bad",
