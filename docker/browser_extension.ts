@@ -48,30 +48,24 @@ function textResult(text: string, details: Record<string, unknown> = {}) {
   };
 }
 
+const LAUNCH_OPTIONS = {
+  headless: false,
+  viewport: DEFAULT_VIEWPORT,
+  args: LAUNCH_ARGS,
+  env: {
+    ...process.env,
+    DISPLAY: process.env.DISPLAY || ":99",
+  },
+};
+
 async function launchContext(): Promise<BrowserContext> {
   clearSingletonLocks();
   try {
-    return await chromium.launchPersistentContext(USER_DATA_DIR, {
-      headless: false,
-      viewport: DEFAULT_VIEWPORT,
-      args: LAUNCH_ARGS,
-      env: {
-        ...process.env,
-        DISPLAY: process.env.DISPLAY || ":99",
-      },
-    });
+    return await chromium.launchPersistentContext(USER_DATA_DIR, LAUNCH_OPTIONS);
   } catch (err) {
     // A concurrent/leftover Chromium may still hold the profile; clear and retry once.
     clearSingletonLocks();
-    return chromium.launchPersistentContext(USER_DATA_DIR, {
-      headless: false,
-      viewport: DEFAULT_VIEWPORT,
-      args: LAUNCH_ARGS,
-      env: {
-        ...process.env,
-        DISPLAY: process.env.DISPLAY || ":99",
-      },
-    });
+    return chromium.launchPersistentContext(USER_DATA_DIR, LAUNCH_OPTIONS);
   }
 }
 
