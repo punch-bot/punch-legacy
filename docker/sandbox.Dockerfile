@@ -63,6 +63,7 @@ COPY docker/report_progress_extension.ts /opt/pi/extensions/report_progress.ts
 COPY docker/compress_context_extension.ts /opt/pi/extensions/compress_context.ts
 COPY docker/context-pruning-state.mjs /opt/pi/context-pruning-state.mjs
 COPY docker/pi-SYSTEM.md /opt/pi/SYSTEM.md
+COPY docker/skills/ /opt/pi/skills/
 # API keys for Pi come from supervisor /env and /apikey (provider env vars).
 RUN echo '{}' > /opt/picfg/seed-auth.json
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
