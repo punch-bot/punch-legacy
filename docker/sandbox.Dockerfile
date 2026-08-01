@@ -32,15 +32,16 @@ ENV HOME=/root \
     PI_OFFLINE=1 \
     PI_SKIP_VERSION_CHECK=1 \
     PI_TELEMETRY=0 \
-    PUPPETEER_CACHE_DIR=/opt/pi/puppeteer-cache
+    PLAYWRIGHT_BROWSERS_PATH=/opt/pi/playwright-browsers
 
 RUN mkdir -p /data/pi/sessions /data/pi/agent /data/cache /data/state /work \
-      /opt/pi/extensions /opt/pi/puppeteer-cache /opt/picfg /work/.pi/extensions /work/.pi/tools /work/.pi/skills /data/pi/skills /data/pi/skill-proposals /data/workers \
+      /opt/pi/extensions /opt/pi/playwright-browsers /opt/picfg /work/.pi/extensions /work/.pi/tools /work/.pi/skills /data/pi/skills /data/pi/skill-proposals /data/workers \
       /root/.chrome-profile /work/screenshots /var/log
 
-# Puppeteer + Chromium under /opt/pi (not /root — home is a runtime volume mount).
+# Playwright + Chromium under /opt/pi (not /root — home is a runtime volume mount).
 COPY docker/pi-package.json /opt/pi/package.json
 RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
+    && npx playwright install --with-deps chromium \
     && npm cache clean --force
 
 COPY docker/serve-supervisor.mjs /usr/local/bin/serve-supervisor.mjs

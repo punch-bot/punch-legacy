@@ -4,6 +4,6 @@
   "version": "1.0.0",
   "description": "Runtime deps for Punch Pi extensions (browser)",
   "dependencies": {
-    "puppeteer": "^23.11.1"
+    "playwright": "^1.54.0"
   }
 }
