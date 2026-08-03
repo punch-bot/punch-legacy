@@ -1709,7 +1709,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const res = await withUserRunLock(uid, async () => {
       const currentSession = store.getSession(cid);
       // New sessions get a temporary recall key until Pi returns a session ID.
-      memoryRecallKey = currentSession || `pending:${uid}:${cid}`;
+      memoryRecallKey = currentSession || `pending:${uid}:${cid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
       const pre = store.preamble(uid, cid, memoryUserText, {
         isDm: isDirectMessage,
         maxChars: 1_200,
