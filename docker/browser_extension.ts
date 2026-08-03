@@ -1,16 +1,16 @@
 /**
- * Built-in headful Chromium tools for Punch (Pi extension, not MCP).
+ * Built-in headful Chromium tools for Punch (Pi extension, not MCP), powered by Playwright.
  * Screenshots return image content so pi-gateway can auto-attach them to Discord.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createRequire } from "node:module";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const require = createRequire("/opt/pi/package.json");
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const puppeteer = require("puppeteer") as typeof import("puppeteer");
+const { chromium } = require("playwright") as typeof import("playwright");
 
 const SCREENSHOT_DIR = "/work/screenshots";
 const USER_DATA_DIR = "/root/.chrome-profile";
@@ -25,11 +25,21 @@ const LAUNCH_ARGS = [
   "--no-default-browser-check",
 ];
 
-type Browser = Awaited<ReturnType<typeof puppeteer.launch>>;
-type Page = Awaited<ReturnType<Browser["newPage"]>>;
+// A crashed Chromium leaves stale singleton locks in the profile dir. A headful
+// launch then refuses with "The profile appears to be in use by another Chromium
+// process" — clear them before launching.
+const LOCK_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket", "chrome_debug.log"];
 
-let browserPromise: Promise<Browser> | null = null;
-let pagePromise: Promise<Page> | null = null;
+type BrowserContext = Awaited<ReturnType<typeof chromium.launchPersistentContext>>;
+type Page = import("playwright").Page;
+
+let contextPromise: Promise<BrowserContext> | null = null;
+
+function clearSingletonLocks(): void {
+  for (const name of LOCK_FILES) {
+    rmSync(join(USER_DATA_DIR, name), { force: true });
+  }
+}
 
 function textResult(text: string, details: Record<string, unknown> = {}) {
   return {
@@ -38,45 +48,45 @@ function textResult(text: string, details: Record<string, unknown> = {}) {
   };
 }
 
-async function getBrowser(): Promise<Browser> {
-  if (!browserPromise) {
-    browserPromise = puppeteer
-      .launch({
-        headless: false,
-        userDataDir: USER_DATA_DIR,
-        defaultViewport: DEFAULT_VIEWPORT,
-        args: LAUNCH_ARGS,
-        env: {
-          ...process.env,
-          DISPLAY: process.env.DISPLAY || ":99",
-        },
-      })
-      .catch((err) => {
-        browserPromise = null;
-        throw err;
-      });
+const LAUNCH_OPTIONS = {
+  headless: false,
+  viewport: DEFAULT_VIEWPORT,
+  args: LAUNCH_ARGS,
+  env: {
+    ...process.env,
+    DISPLAY: process.env.DISPLAY || ":99",
+  },
+};
+
+async function launchContext(): Promise<BrowserContext> {
+  clearSingletonLocks();
+  try {
+    return await chromium.launchPersistentContext(USER_DATA_DIR, LAUNCH_OPTIONS);
+  } catch (err) {
+    // A concurrent/leftover Chromium may still hold the profile; clear and retry once.
+    clearSingletonLocks();
+    return chromium.launchPersistentContext(USER_DATA_DIR, LAUNCH_OPTIONS);
   }
-  return browserPromise;
+}
+
+async function getContext(): Promise<BrowserContext> {
+  if (!contextPromise) {
+    contextPromise = launchContext().catch((err) => {
+      contextPromise = null;
+      throw err;
+    });
+    const ctx = await contextPromise;
+    // Used by the webfetch extension's JS-rendered-page fallback.
+    (globalThis as any).__pi_browser = ctx;
+  }
+  return contextPromise;
 }
 
 async function getPage(): Promise<Page> {
-  const browser = await getBrowser();
-  if (!pagePromise) {
-    pagePromise = (async () => {
-      const pages = await browser.pages();
-      const page = pages[0] || (await browser.newPage());
-      await page.setViewport(DEFAULT_VIEWPORT);
-      return page;
-    })().catch((err) => {
-      pagePromise = null;
-      throw err;
-    });
-  }
-  const page = await pagePromise;
-  if (page.isClosed()) {
-    pagePromise = null;
-    return getPage();
-  }
+  const context = await getContext();
+  const pages = context.pages();
+  const page = pages[0] && !pages[0].isClosed() ? pages[0] : await context.newPage();
+  await page.setViewportSize(DEFAULT_VIEWPORT);
   return page;
 }
 
@@ -141,7 +151,7 @@ export default function (pi: ExtensionAPI) {
       const page = await getPage();
       const width = Number(args.width) > 0 ? Math.floor(Number(args.width)) : DEFAULT_VIEWPORT.width;
       const height = Number(args.height) > 0 ? Math.floor(Number(args.height)) : DEFAULT_VIEWPORT.height;
-      await page.setViewport({ width, height });
+      await page.setViewportSize({ width, height });
 
       mkdirSync(SCREENSHOT_DIR, { recursive: true });
       const stem = safeName(args.name);
@@ -149,17 +159,13 @@ export default function (pi: ExtensionAPI) {
 
       let buffer: Buffer;
       if (args.selector) {
-        const el = await page.$(String(args.selector));
-        if (!el) throw new Error(`No element matches selector: ${args.selector}`);
-        const shot = await el.screenshot({ type: "png" });
-        buffer = Buffer.from(shot);
-        await el.dispose().catch(() => {});
+        const locator = page.locator(String(args.selector));
+        await locator.waitFor({ state: "attached", timeout: 15000 });
+        buffer = await locator.screenshot({ path: filePath, type: "png" });
       } else {
-        const shot = await page.screenshot({ type: "png" });
-        buffer = Buffer.from(shot);
+        buffer = await page.screenshot({ path: filePath, type: "png" });
       }
 
-      writeFileSync(filePath, buffer);
       const b64 = buffer.toString("base64");
       const url = page.url();
 
@@ -190,7 +196,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args) {
       const page = await getPage();
-      await page.click(String(args.selector), { delay: 20 });
+      await page.locator(String(args.selector)).click({ delay: 20 });
       return textResult(`Clicked ${args.selector}`, { selector: args.selector });
     },
   });
@@ -207,9 +213,7 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, args) {
       const page = await getPage();
       const selector = String(args.selector);
-      await page.waitForSelector(selector, { timeout: 15000 });
-      await page.click(selector, { clickCount: 3 }).catch(() => {});
-      await page.type(selector, String(args.value), { delay: 10 });
+      await page.locator(selector).fill(String(args.value));
       return textResult(`Filled ${selector}`, { selector, valueLength: String(args.value).length });
     },
   });
@@ -225,7 +229,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args) {
       const page = await getPage();
-      const selected = await page.select(String(args.selector), String(args.value));
+      const selected = await page.selectOption(String(args.selector), String(args.value));
       return textResult(`Selected ${JSON.stringify(selected)} on ${args.selector}`, {
         selector: args.selector,
         value: args.value,
@@ -244,7 +248,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args) {
       const page = await getPage();
-      await page.hover(String(args.selector));
+      await page.locator(String(args.selector)).hover();
       return textResult(`Hovered ${args.selector}`, { selector: args.selector });
     },
   });
