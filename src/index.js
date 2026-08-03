@@ -27,6 +27,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgroundTask, execCommand, setSecret, getSecrets, setEnv, getEnv, reloadSandboxMap, apiUrlFor, abortSession, sandboxNameForUser, summarizeSession } from "./agent.js";
 import { filterThreadSubtree } from "./thread-context.js";
+import { isBotDirectlyMentioned } from "./message-mentions.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
 import * as routines from "./routines.js";
@@ -2393,7 +2394,7 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot && !store.getUserSettings(message.author.id).allowBots) return;
 
   const isDM = !message.guild;
-  const mentioned = message.mentions.has(client.user);
+  const mentioned = isBotDirectlyMentioned(message, client.user);
   const content = message.content.trim();
 
   console.log(
