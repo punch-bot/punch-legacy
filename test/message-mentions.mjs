@@ -29,6 +29,19 @@ test("isBotDirectlyMentioned is false for @here / @everyone alone", () => {
   assert.equal(isBotDirectlyMentioned(message, bot), false);
 });
 
+test("isBotDirectlyMentioned ignores role-only matches", () => {
+  const bot = { id: BOT_ID };
+  const message = {
+    mentions: {
+      users: new Map(),
+      roles: new Map([["987654321098765432", { id: "987654321098765432" }]]),
+      has: () => true,
+    },
+  };
+  assert.equal(message.mentions.has(bot), true);
+  assert.equal(isBotDirectlyMentioned(message, bot), false);
+});
+
 test("isBotDirectlyMentioned is true when bot is mentioned alongside @everyone", () => {
   const bot = { id: BOT_ID };
   const message = { mentions: mockMentions({ userIds: [BOT_ID], everyone: true }) };
