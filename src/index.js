@@ -1586,10 +1586,14 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const speakerName = opts.speakerUsername ?? message.author.username;
   const speaker = `${who} (@${speakerName}, id:${uid})`;
   const isDirectMessage = !message.guildId;
+  const existingSession = store.getSession(cid);
+  // New sessions get a temporary recall key until Pi returns a session ID.
+  const memoryRecallKey = existingSession || `pending:${uid}:${cid}`;
   const pre = store.preamble(uid, cid, memoryUserText, {
     isDm: isDirectMessage,
-    maxChars: 2_400,
-    limit: 8,
+    maxChars: 1_200,
+    limit: 3,
+    recallSessionId: memoryRecallKey,
   });
 
   const { useLifecycle, useThinking } = progressSettingsFor(message);
@@ -1692,12 +1696,13 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   try {
     turn.phase = "thinking";
     turn.detail = "waiting for Pi";
-    const session = store.getSession(cid);
+    const session = existingSession;
     console.log(`[chat] uid=${uid} cid=${cid} session=${session || "new"} -> pi`);
     const res = await withUserRunLock(uid, () =>
       runAgent(prompt, session, onProgress, signal, uid, agentAttachments),
     );
     console.log(`[chat] uid=${uid} cid=${cid} reply len=${res.text.length}`);
+    store.moveMemoryRecall(memoryRecallKey, res.sessionId);
     store.setSession(cid, res.sessionId);
 
     const filesToSend = [];
@@ -1816,6 +1821,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
+    if (!existingSession) store.clearMemoryRecall(memoryRecallKey);
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
     const timedOut = /timed out|timeout|stalled|ceiling/i.test(err?.message || "");
     await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
@@ -3980,6 +3986,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     try {
       await summarizeSession(session, uid, ac.signal);
+      store.clearMemoryRecall(session);
       clearInterval(iv);
       clearTimeout(to);
       await interaction.editReply(`✅ Conversation compressed.\n${progressBar(100)} 100%\nContext trimmed — fresh headspace for the next turn.`);
