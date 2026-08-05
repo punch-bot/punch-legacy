@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
+import { punchRegistryToAdapterConfig } from "/usr/local/lib/mcp-config.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
@@ -339,6 +340,17 @@ const MODELS_FILE = join(
   "models.json",
 );
 const MCP_FILE = "/data/mcp.json";
+const PI_MCP_FILE = "/data/pi/agent/mcp.json";
+
+/** Write adapter-shaped mcp.json for ops/debug; Punch extension reads /data/mcp.json directly. */
+function syncMcpConfig() {
+  mkdirSync("/data/pi/agent", { recursive: true });
+  const customMcp = loadJSON(MCP_FILE);
+  const adapterConfig = punchRegistryToAdapterConfig(customMcp);
+  writeFileSync(PI_MCP_FILE, JSON.stringify(adapterConfig, null, 2));
+  const names = Object.keys(adapterConfig.mcpServers || {});
+  log(`mcp config synced (${names.length} server${names.length === 1 ? "" : "s"}): ${names.join(", ") || "(none)"}`);
+}
 
 /** Seed OpenAI-compatible providers Pi does not ship (e.g. Poolside).
  * OpenCode Zen is NOT here — Pi ships a native `opencode` provider with
@@ -573,15 +585,11 @@ if (SANDBOX_USER_ID) {
   log(`serving user: ${SANDBOX_USER_ID}`);
 }
 
-// Persist MCP registry for future Pi MCP wiring (v1: registry kept, not loaded into Pi).
+// Sync Punch MCP registry → Pi adapter config before the gateway starts.
 (function generateConfig() {
   mkdirSync("/data/pi", { recursive: true });
-  const customMcp = loadJSON(MCP_FILE);
-  writeFileSync(
-    "/data/pi/mcp-registry.json",
-    JSON.stringify({ note: "Punch Pi v1 — MCP deferred", mcp: customMcp }, null, 2),
-  );
-  log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"} (MCP registry saved, not active)`);
+  syncMcpConfig();
+  log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"}`);
 })();
 
 start();
@@ -1403,10 +1411,8 @@ const apiServer = createServer((req, res) => {
   }
 
   // --- Custom MCP server management ---
-  // Custom MCP servers are persisted in /data/mcp.json so that generateConfig()
-  // (which runs on every supervisor start and would otherwise wipe them) keeps
-  // them across container restarts. auth (OAuth) tokens themselves are stored by
-  // opencode itself in its mcp-auth.json (on the data volume), so they persist too.
+  // Registry: /data/mcp.json (Punch shape). Synced to /data/pi/agent/mcp.json for
+  // ops; pi-mcp-adapter extension loads the Punch registry into Pi on gateway start.
   if (req.method === "GET" && url.pathname === "/mcp") {
     const mcp = loadJSON(MCP_FILE);
     res.writeHead(200, { "content-type": "application/json" });
@@ -1447,11 +1453,12 @@ const apiServer = createServer((req, res) => {
         const mcp = loadJSON(MCP_FILE);
         mcp[name] = entry;
         saveJSON(MCP_FILE, mcp);
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, name }));
         log(`mcp added: ${name} (${type})`);
       } catch (e) {
-        res.writeHead(400).end(JSON.stringify({ error: "Invalid JSON" }));
+        res.writeHead(400).end(JSON.stringify({ error: e?.message || "Invalid JSON" }));
       }
     });
     return;
@@ -1468,6 +1475,7 @@ const apiServer = createServer((req, res) => {
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
         delete mcp[name];
         saveJSON(MCP_FILE, mcp);
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true }));
       } catch {
@@ -1477,11 +1485,12 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
-  // MCP OAuth is deferred in Pi v1 (no opencode mcp auth). Registry still CRUD-able.
+  // Interactive OAuth for MCP is deferred (no Discord browser OAuth UX yet).
+  // Use remote headers or local environment for bearer/API tokens.
   if (req.method === "POST" && url.pathname === "/mcp/auth") {
     res.writeHead(501, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      error: "MCP OAuth not available in Punch Pi v1 — deferred until Pi MCP wiring",
+      error: "MCP OAuth not available yet — pass Authorization via /mcp add headers (remote) or environment (local)",
     }));
     return;
   }
@@ -1489,7 +1498,7 @@ const apiServer = createServer((req, res) => {
   if (req.method === "POST" && url.pathname === "/mcp/logout") {
     res.writeHead(501, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      error: "MCP logout not available in Punch Pi v1",
+      error: "MCP OAuth logout not available yet — remove Authorization headers/env or /mcp remove the server",
     }));
     return;
   }

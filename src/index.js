@@ -1261,10 +1261,10 @@ client.once(Events.ClientReady, async (c) => {
     description: "Compress (summarize) the conversation in this channel to free up context",
   }, {
     name: "mcp",
-    description: "MCP is not supported yet on Punch",
+    description: "Manage MCP servers loaded into Pi",
     options: [
-      { type: 1, name: "list", description: "MCP is not supported yet" },
-      { type: 1, name: "add", description: "MCP is not supported yet",
+      { type: 1, name: "list", description: "List configured MCP servers" },
+      { type: 1, name: "add", description: "Add a local or remote MCP server",
         options: [
           { type: 3, name: "name", description: "Unique MCP server name", required: true },
           { type: 3, name: "type", description: "local (command) or remote (URL)", required: true,
@@ -1274,11 +1274,11 @@ client.once(Events.ClientReady, async (c) => {
           { type: 3, name: "headers", description: "Remote headers JSON, e.g. {\"Authorization\":\"Bearer x\"}" },
           { type: 3, name: "environment", description: "Local env JSON, e.g. {\"KEY\":\"value\"}" },
         ] },
-      { type: 1, name: "remove", description: "MCP is not supported yet",
+      { type: 1, name: "remove", description: "Remove an MCP server",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
-      { type: 1, name: "auth", description: "MCP is not supported yet",
+      { type: 1, name: "auth", description: "MCP OAuth (not available yet)",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
-      { type: 1, name: "logout", description: "MCP is not supported yet",
+      { type: 1, name: "logout", description: "MCP OAuth logout (not available yet)",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
     ],
   }, {
@@ -4130,15 +4130,117 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.commandName === "mcp") {
-    // Punch does not load MCP into the agent. Refuse all subcommands —
-    // do not pretend add/list/auth will connect (supervisor registry may remain).
-    await interaction.reply({
-      content:
-        "**MCP is not supported yet** on Punch. " +
-        "Custom MCP servers are not loaded into Pi. " +
-        "Use bash/curl or a Pi extension under `/work/.pi/extensions` instead.",
-      flags: MessageFlags.Ephemeral,
-    });
+    const uid = interaction.user.id;
+    const url = apiUrlFor(uid);
+    if (!url) {
+      await interaction.reply({ content: "No sandbox assigned. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const sub = interaction.options.getSubcommand();
+    try {
+      if (sub === "auth" || sub === "logout") {
+        await interaction.reply({
+          content:
+            "**MCP OAuth is not available yet.** " +
+            "Pass tokens with `/mcp add` `headers` (remote) or `environment` (local), then remove/re-add to rotate them.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      if (sub === "list") {
+        const res = await fetch(`${url}/mcp`, { headers: { authorization: auth } });
+        if (!res.ok) throw new Error(`supervisor API ${res.status}`);
+        const { mcp } = await res.json();
+        const names = Object.keys(mcp || {});
+        if (!names.length) {
+          await interaction.reply({ content: "No MCP servers configured. Add one with `/mcp add`.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        const lines = names.map((name) => {
+          const e = mcp[name] || {};
+          const on = e.enabled === false ? "⏸️" : "✅";
+          if (e.type === "remote") return `${on} **${name}** (remote) \`${e.url || ""}\``;
+          const cmd = Array.isArray(e.command) ? e.command.join(" ") : String(e.command || "");
+          return `${on} **${name}** (local) \`${cmd}\``.slice(0, 200);
+        });
+        await interaction.reply({ content: `**MCP servers:**\n${lines.join("\n")}`.slice(0, 1900), flags: MessageFlags.Ephemeral });
+        return;
+      }
+      if (sub === "remove") {
+        const name = interaction.options.getString("name", true);
+        const res = await fetch(`${url}/mcp/remove`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
+        await interaction.reply({ content: `Removed MCP server \`${name}\`. Restarting Pi…`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      if (sub === "add") {
+        const name = interaction.options.getString("name", true);
+        const type = interaction.options.getString("type", true);
+        const mcpUrl = interaction.options.getString("url");
+        const commandStr = interaction.options.getString("command");
+        const headersStr = interaction.options.getString("headers");
+        const envStr = interaction.options.getString("environment");
+        const payload = { name, type, enabled: true };
+        if (type === "remote") {
+          if (!mcpUrl) throw new Error("Remote MCP requires `url`");
+          payload.url = mcpUrl;
+          if (headersStr) {
+            try { payload.headers = JSON.parse(headersStr); }
+            catch { throw new Error("`headers` must be valid JSON object"); }
+          }
+        } else if (type === "local") {
+          if (!commandStr?.trim()) throw new Error("Local MCP requires `command`");
+          // Simple argv split (supports "quoted" tokens). Same rules as docker/mcp-config.mjs.
+          const argv = [];
+          let cur = "";
+          let quote = null;
+          const s = commandStr.trim();
+          for (let i = 0; i < s.length; i++) {
+            const ch = s[i];
+            if (quote) {
+              if (ch === quote) quote = null;
+              else if (ch === "\\" && i + 1 < s.length) cur += s[++i];
+              else cur += ch;
+              continue;
+            }
+            if (ch === '"' || ch === "'") { quote = ch; continue; }
+            if (/\s/.test(ch)) { if (cur) { argv.push(cur); cur = ""; } continue; }
+            if (ch === "\\" && i + 1 < s.length) { cur += s[++i]; continue; }
+            cur += ch;
+          }
+          if (quote) throw new Error("Unclosed quote in command");
+          if (cur) argv.push(cur);
+          if (!argv.length) throw new Error("Local MCP `command` is empty");
+          payload.command = argv;
+          if (envStr) {
+            try { payload.environment = JSON.parse(envStr); }
+            catch { throw new Error("`environment` must be valid JSON object"); }
+          }
+        } else {
+          throw new Error("type must be local or remote");
+        }
+        const res = await fetch(`${url}/mcp/add`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
+        await interaction.reply({
+          content: `Added MCP server \`${name}\` (${type}). Restarting Pi so the \`mcp\` tool can use it.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+    } catch (err) {
+      await interaction.reply({ content: `⚠️ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
+    }
     return;
   }
 
