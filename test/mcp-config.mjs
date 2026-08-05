@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assertPunchEntry,
   punchEntryToAdapter,
   punchRegistryToAdapterConfig,
   punchRegistryToMcpServers,
@@ -77,6 +78,59 @@ test("registry conversion skips invalid and maps names", () => {
   assert.equal(servers.good.url, "https://ok.example/mcp");
   assert.equal(servers.off.disabled, true);
   assert.equal(servers.off.command, "node");
+});
+
+test("registry conversion ignores arrays", () => {
+  assert.deepEqual(punchRegistryToMcpServers([{ type: "remote", url: "https://x.test/mcp" }]), {});
+});
+
+test("rejects credentialed http remote MCP; allows https and plain http", () => {
+  assert.equal(
+    punchEntryToAdapter({
+      type: "remote",
+      url: "http://mcp.example.com/mcp",
+      headers: { Authorization: "Bearer x" },
+    }),
+    null,
+  );
+  assert.throws(
+    () => assertPunchEntry({
+      type: "remote",
+      url: "http://mcp.example.com/mcp",
+      headers: { Authorization: "Bearer x" },
+    }),
+    /https:\/\//,
+  );
+  assert.ok(
+    punchEntryToAdapter({
+      type: "remote",
+      url: "https://mcp.example.com/mcp",
+      headers: { Authorization: "Bearer x" },
+    }),
+  );
+  assert.deepEqual(
+    punchEntryToAdapter({ type: "remote", url: "http://intranet.local/mcp" }),
+    { url: "http://intranet.local/mcp", auth: false },
+  );
+});
+
+test("assertPunchEntry rejects bad headers and command shapes", () => {
+  assert.throws(
+    () => assertPunchEntry({ type: "remote", url: "https://x.test/mcp", headers: ["nope"] }),
+    /headers must be a JSON object/,
+  );
+  assert.throws(
+    () => assertPunchEntry({ type: "remote", url: "https://x.test/mcp", headers: { Authorization: 1 } }),
+    /headers.Authorization must be a string/,
+  );
+  assert.throws(
+    () => assertPunchEntry({ type: "local", command: ["npx", 2] }),
+    /non-empty strings/,
+  );
+  assert.throws(
+    () => assertPunchEntry({ type: "local", command: [] }),
+    /non-empty command/,
+  );
 });
 
 test("adapter root config includes headless settings", () => {

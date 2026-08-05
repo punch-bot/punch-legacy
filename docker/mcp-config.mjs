@@ -59,47 +59,96 @@ function asStringRecord(value, label) {
   return out;
 }
 
+function normalizeLocalCommand(command) {
+  let argv = command;
+  if (typeof argv === "string") argv = splitCommandString(argv);
+  if (!Array.isArray(argv) || argv.length === 0) {
+    throw new Error("Local MCP requires a non-empty command array");
+  }
+  if (!argv.every((p) => typeof p === "string" && p.length > 0)) {
+    throw new Error("Local MCP command entries must be non-empty strings");
+  }
+  return argv;
+}
+
+/**
+ * Strict validation for /mcp/add. Throws on invalid shapes.
+ * Returns a normalized Punch registry entry ready to persist.
+ */
+export function assertPunchEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error("MCP entry must be an object");
+  }
+  const type = entry.type;
+  if (type !== "local" && type !== "remote") {
+    throw new Error("type must be 'local' or 'remote'");
+  }
+  const enabled = entry.enabled !== false;
+  if (type === "remote") {
+    if (typeof entry.url !== "string" || !entry.url.trim()) {
+      throw new Error("Missing url for remote MCP");
+    }
+    const url = entry.url.trim();
+    // Preserve explicitly supplied headers (including empty object) for validation.
+    const hasHeadersField = Object.prototype.hasOwnProperty.call(entry, "headers");
+    const headers = hasHeadersField
+      ? asStringRecord(entry.headers, "headers")
+      : undefined;
+    if (headers && Object.keys(headers).length > 0) {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        throw new Error("Invalid remote MCP url");
+      }
+      if (parsed.protocol !== "https:") {
+        throw new Error("Credentialed remote MCP requires an https:// url");
+      }
+    }
+    const out = { type: "remote", enabled, url };
+    if (headers && Object.keys(headers).length) out.headers = headers;
+    return out;
+  }
+  const command = normalizeLocalCommand(entry.command);
+  const hasEnvField = Object.prototype.hasOwnProperty.call(entry, "environment");
+  const environment = hasEnvField
+    ? asStringRecord(entry.environment, "environment")
+    : undefined;
+  const out = { type: "local", enabled, command };
+  if (environment && Object.keys(environment).length) out.environment = environment;
+  return out;
+}
+
 /**
  * Convert one Punch registry entry to a pi-mcp-adapter ServerEntry.
  * @param {object} entry
  * @returns {object|null} null if entry is invalid
  */
 export function punchEntryToAdapter(entry) {
-  if (!entry || typeof entry !== "object") return null;
-  const type = entry.type;
-  const disabled = entry.enabled === false;
-  if (type === "remote") {
-    if (typeof entry.url !== "string" || !entry.url.trim()) return null;
-    const headers = entry.headers
-      ? asStringRecord(entry.headers, "headers")
-      : undefined;
+  try {
+    const normalized = assertPunchEntry(entry);
+    const disabled = normalized.enabled === false;
+    if (normalized.type === "remote") {
+      const out = {
+        url: normalized.url,
+        // Punch Discord sandboxes have no interactive OAuth UI yet.
+        auth: false,
+      };
+      if (normalized.headers) out.headers = normalized.headers;
+      if (disabled) out.disabled = true;
+      return out;
+    }
     const out = {
-      url: entry.url.trim(),
-      // Punch Discord sandboxes have no interactive OAuth UI yet.
-      auth: false,
-    };
-    if (headers && Object.keys(headers).length) out.headers = headers;
-    if (disabled) out.disabled = true;
-    return out;
-  }
-  if (type === "local") {
-    let argv = entry.command;
-    if (typeof argv === "string") argv = splitCommandString(argv);
-    if (!Array.isArray(argv) || argv.length === 0) return null;
-    if (!argv.every((p) => typeof p === "string" && p.length > 0)) return null;
-    const env = entry.environment
-      ? asStringRecord(entry.environment, "environment")
-      : undefined;
-    const out = {
-      command: argv[0],
-      args: argv.slice(1),
+      command: normalized.command[0],
+      args: normalized.command.slice(1),
       cwd: "/work",
     };
-    if (env && Object.keys(env).length) out.env = env;
+    if (normalized.environment) out.env = normalized.environment;
     if (disabled) out.disabled = true;
     return out;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
@@ -108,7 +157,9 @@ export function punchEntryToAdapter(entry) {
  */
 export function punchRegistryToMcpServers(registry) {
   const mcpServers = {};
-  if (!registry || typeof registry !== "object") return mcpServers;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    return mcpServers;
+  }
   for (const [name, entry] of Object.entries(registry)) {
     if (!/^[a-zA-Z0-9_-]+$/.test(name)) continue;
     try {

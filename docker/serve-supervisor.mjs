@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
-import { punchRegistryToAdapterConfig } from "/usr/local/lib/mcp-config.mjs";
+import { punchRegistryToAdapterConfig, assertPunchEntry } from "/usr/local/lib/mcp-config.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
@@ -1425,7 +1425,8 @@ const apiServer = createServer((req, res) => {
     req.on("data", c => body += c);
     req.on("end", () => {
       try {
-        const { name, type, url: mcpUrl, command, environment, headers, enabled = true } = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        const { name, type, url: mcpUrl, command, environment, headers, enabled = true } = parsed;
         if (!name || !type) {
           res.writeHead(400).end(JSON.stringify({ error: "Missing name or type" }));
           return;
@@ -1434,29 +1435,23 @@ const apiServer = createServer((req, res) => {
           res.writeHead(400).end(JSON.stringify({ error: "Invalid name (letters, digits, _ and - only)" }));
           return;
         }
-        const entry = { type, enabled: !!enabled };
+        // Preserve explicitly supplied fields (including falsy) so assertPunchEntry can reject them.
+        const candidate = { type, enabled: !!enabled };
         if (type === "remote") {
-          if (!mcpUrl) { res.writeHead(400).end(JSON.stringify({ error: "Missing url for remote MCP" })); return; }
-          entry.url = mcpUrl;
-          if (headers) entry.headers = headers;
+          candidate.url = mcpUrl;
+          if (Object.prototype.hasOwnProperty.call(parsed, "headers")) candidate.headers = headers;
         } else if (type === "local") {
-          if (!Array.isArray(command) || command.length === 0) {
-            res.writeHead(400).end(JSON.stringify({ error: "Missing command array for local MCP" }));
-            return;
-          }
-          entry.command = command;
-          if (environment) entry.environment = environment;
-        } else {
-          res.writeHead(400).end(JSON.stringify({ error: "type must be 'local' or 'remote'" }));
-          return;
+          candidate.command = command;
+          if (Object.prototype.hasOwnProperty.call(parsed, "environment")) candidate.environment = environment;
         }
+        const entry = assertPunchEntry(candidate);
         const mcp = loadJSON(MCP_FILE);
         mcp[name] = entry;
         saveJSON(MCP_FILE, mcp);
         syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, name }));
-        log(`mcp added: ${name} (${type})`);
+        log(`mcp added: ${name} (${entry.type})`);
       } catch (e) {
         res.writeHead(400).end(JSON.stringify({ error: e?.message || "Invalid JSON" }));
       }

@@ -4136,15 +4136,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.reply({ content: "No sandbox assigned. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
       return;
     }
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const supervisorUsername = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+    const auth = "Basic " + Buffer.from(`${supervisorUsername}:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
     const sub = interaction.options.getSubcommand();
+    await interaction.deferReply({ ephemeral: true });
     try {
       if (sub === "auth" || sub === "logout") {
-        await interaction.reply({
+        await interaction.editReply({
           content:
             "**MCP OAuth is not available yet.** " +
             "Pass tokens with `/mcp add` `headers` (remote) or `environment` (local), then remove/re-add to rotate them.",
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -4154,7 +4155,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { mcp } = await res.json();
         const names = Object.keys(mcp || {});
         if (!names.length) {
-          await interaction.reply({ content: "No MCP servers configured. Add one with `/mcp add`.", flags: MessageFlags.Ephemeral });
+          await interaction.editReply({ content: "No MCP servers configured. Add one with `/mcp add`." });
           return;
         }
         const lines = names.map((name) => {
@@ -4164,7 +4165,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const cmd = Array.isArray(e.command) ? e.command.join(" ") : String(e.command || "");
           return `${on} **${name}** (local) \`${cmd}\``.slice(0, 200);
         });
-        await interaction.reply({ content: `**MCP servers:**\n${lines.join("\n")}`.slice(0, 1900), flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: `**MCP servers:**\n${lines.join("\n")}`.slice(0, 1900) });
         return;
       }
       if (sub === "remove") {
@@ -4176,7 +4177,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
-        await interaction.reply({ content: `Removed MCP server \`${name}\`. Restarting Pi…`, flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: `Removed MCP server \`${name}\`. Restarting Pi…` });
         return;
       }
       if (sub === "add") {
@@ -4232,14 +4233,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
-        await interaction.reply({
+        await interaction.editReply({
           content: `Added MCP server \`${name}\` (${type}). Restarting Pi so the \`mcp\` tool can use it.`,
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
     } catch (err) {
-      await interaction.reply({ content: `⚠️ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `⚠️ Error: ${err.message}` });
     }
     return;
   }
