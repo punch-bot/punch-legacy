@@ -89,21 +89,22 @@ export function assertPunchEntry(entry) {
       throw new Error("Missing url for remote MCP");
     }
     const url = entry.url.trim();
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error("Invalid remote MCP url");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Remote MCP url must use http:// or https://");
+    }
     // Preserve explicitly supplied headers (including empty object) for validation.
     const hasHeadersField = Object.prototype.hasOwnProperty.call(entry, "headers");
     const headers = hasHeadersField
       ? asStringRecord(entry.headers, "headers")
       : undefined;
-    if (headers && Object.keys(headers).length > 0) {
-      let parsed;
-      try {
-        parsed = new URL(url);
-      } catch {
-        throw new Error("Invalid remote MCP url");
-      }
-      if (parsed.protocol !== "https:") {
-        throw new Error("Credentialed remote MCP requires an https:// url");
-      }
+    if (headers && Object.keys(headers).length > 0 && parsed.protocol !== "https:") {
+      throw new Error("Credentialed remote MCP requires an https:// url");
     }
     const out = { type: "remote", enabled, url };
     if (headers && Object.keys(headers).length) out.headers = headers;

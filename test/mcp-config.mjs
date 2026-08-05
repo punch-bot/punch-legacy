@@ -114,6 +114,18 @@ test("rejects credentialed http remote MCP; allows https and plain http", () => 
   );
 });
 
+test("rejects malformed and non-http remote URLs", () => {
+  assert.throws(
+    () => assertPunchEntry({ type: "remote", url: "not a URL" }),
+    /Invalid remote MCP url/,
+  );
+  assert.throws(
+    () => assertPunchEntry({ type: "remote", url: "ftp://files.example/mcp" }),
+    /http:\/\/ or https:\/\//,
+  );
+  assert.equal(punchEntryToAdapter({ type: "remote", url: "not a URL" }), null);
+});
+
 test("assertPunchEntry rejects bad headers and command shapes", () => {
   assert.throws(
     () => assertPunchEntry({ type: "remote", url: "https://x.test/mcp", headers: ["nope"] }),
