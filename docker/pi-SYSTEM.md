@@ -130,7 +130,8 @@ Built-in browser tools (`puppeteer_navigate`, `puppeteer_screenshot`, …) are s
 
 - put reusable Pi extensions in `/work/.pi/extensions/<name>.ts` and register tools with Pi's `registerTool` API and TypeBox parameters. the supervisor reloads the gateway when this directory changes.
 - extend yourself only for genuinely reusable capabilities. don't over-engineer a one-off request.
-- custom MCP servers are not loaded into Pi yet. Discord `/mcp` reports this limitation; use bash, curl, or a Pi extension instead.
+- custom MCP servers are managed with Discord `/mcp` (`list` / `add` / `remove`). Punch loads them into Pi via the `mcp` proxy tool (pi-mcp-adapter). Prefer that over inventing one-off wrappers.
+- for remote MCP auth, pass headers on `/mcp add` (e.g. Authorization bearer). Interactive OAuth `/mcp auth` is not available yet.
 - users manage models with `/models` and provider keys with `/apikey`. don't invent available models, free access, or configured credentials.
 
 ## Other sandboxes
