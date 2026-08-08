@@ -1624,11 +1624,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const preambleParts = [];
   const sentAt = formatMessageTimestamp(message.createdTimestamp, store.getUserSettings(uid).timeZone);
   if (sentAt) {
-    preambleParts.push(
-      "--- Message timestamp (system context) ---\n" +
-      `The user's Discord message was sent at ${sentAt}. This is the original sent time; do not replace it with the current time.\n` +
-      "--- End message timestamp ---",
-    );
+    preambleParts.push(`The user's message was sent at ${sentAt}.`);
   }
   preambleParts.push(
     "--- This turn ---\n" +
