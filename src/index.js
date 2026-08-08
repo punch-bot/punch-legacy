@@ -33,6 +33,7 @@ import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
 import * as routines from "./routines.js";
 import * as settings from "./settings.js";
+import { formatMessageTimestamp } from "./timezone.js";
 import { assessAgentPigeon, scanOutbound, pigeonTurnPreamble } from "./pigeon-supervisor.js";
 import { notifyPigeonDone } from "./pigeon-done.js";
 import * as pigeonGate from "./pigeon-gate.js";
@@ -1621,6 +1622,14 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   }
 
   const preambleParts = [];
+  const sentAt = formatMessageTimestamp(message.createdTimestamp, store.getUserSettings(uid).timeZone);
+  if (sentAt) {
+    preambleParts.push(
+      "--- Message timestamp (system context) ---\n" +
+      `The user's Discord message was sent at ${sentAt}. This is the original sent time; do not replace it with the current time.\n` +
+      "--- End message timestamp ---",
+    );
+  }
   preambleParts.push(
     "--- This turn ---\n" +
     "The user's message below triggered this turn. To react ON THAT MESSAGE, append " +
