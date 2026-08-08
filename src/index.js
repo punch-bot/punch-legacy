@@ -670,7 +670,7 @@ async function handleCommand(message, cmd, rest) {
     }
 
     case "reset": {
-      store.clearSession(cid);
+      await withUserRunLock(uid, () => store.clearSession(cid));
       await reply(message, "Fresh session. Prior context dropped.");
       return true;
     }
@@ -1635,9 +1635,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     preambleParts.push(pigeonTurnPreamble(opts.pigeonFrom, opts.pigeonHop ?? 0, sbName));
   }
   if (contextMessages.length > 0) preambleParts.push(channelContextBlock(contextMessages));
-  const memory = memoryBlock({ projectMemory, relatedText: pre });
-  if (memory) preambleParts.push(memory);
-  const prompt = assemblePrompt(preambleParts, userTurnLine(uid, speaker, text));
 
   let thinking = existingThinking;
   const allowThinking = useThinking && !store.getUserSettings(uid).noThinking;
@@ -1709,8 +1706,11 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         limit: 3,
         recallSessionId: memoryRecallKey,
       });
+      const memory = memoryBlock({ projectMemory, relatedText: pre });
+      if (memory) preambleParts.push(memory);
+      const prompt = assemblePrompt(preambleParts, userTurnLine(uid, speaker, text));
       console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
-      const result = await runAgent(buildPrompt(pre), currentSession, onProgress, signal, uid, agentAttachments);
+      const result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
       store.moveMemoryRecall(memoryRecallKey, result.sessionId);
       memoryRecallAdopted = true;
       store.setSession(cid, result.sessionId);
@@ -3987,7 +3987,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.commandName === "reset") {
-    store.clearSession(interaction.channelId);
+    await withUserRunLock(interaction.user.id, () => store.clearSession(interaction.channelId));
     await interaction.reply({
       content: "Fresh session. Prior context dropped.",
       flags: MessageFlags.Ephemeral,
@@ -4152,7 +4152,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
       if (sub === "list") {
-        const res = await fetch(`${url}/mcp`, { headers: { authorization: auth } });
+        const res = await fetch(`${url}/mcp`, { headers: { authorization: auth }, signal: AbortSignal.timeout(10_000) });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         const { mcp } = await res.json();
         const names = Object.keys(mcp || {});
@@ -4176,6 +4176,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           method: "POST",
           headers: { "content-type": "application/json", authorization: auth },
           body: JSON.stringify({ name }),
+          signal: AbortSignal.timeout(10_000),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
@@ -4194,8 +4195,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
           if (!mcpUrl) throw new Error("Remote MCP requires `url`");
           payload.url = mcpUrl;
           if (headersStr) {
-            try { payload.headers = JSON.parse(headersStr); }
+            let parsed;
+            try { parsed = JSON.parse(headersStr); }
             catch { throw new Error("`headers` must be valid JSON object"); }
+            if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+              throw new Error("`headers` must be valid JSON object");
+            }
+            payload.headers = parsed;
           }
         } else if (type === "local") {
           if (!commandStr?.trim()) throw new Error("Local MCP requires `command`");
@@ -4232,6 +4238,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           method: "POST",
           headers: { "content-type": "application/json", authorization: auth },
           body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10_000),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
@@ -4241,7 +4248,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return;
       }
     } catch (err) {
-      await interaction.editReply({ content: `⚠️ Error: ${err.message}` });
+      const message2 = err?.name === "TimeoutError" ? "Supervisor request timed out." : `Error: ${err.message}`;
+      await interaction.editReply({ content: `⚠️ ${message2}` });
     }
     return;
   }
