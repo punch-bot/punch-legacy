@@ -10,9 +10,9 @@ An AI agent living in Discord, designed to be a personal assistant
 
 ## What it does
 
-Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, and layered health diagnostics. Discord `/mcp` reports **MCP is not supported yet** for arbitrary user MCP servers.
+Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, layered health diagnostics, and custom MCP servers via Discord `/mcp` (loaded into Pi through `pi-mcp-adapter`).
 
-**Not included:** Composio (`/link`) and arbitrary custom MCP servers. Punch uses Pi, not OpenCode.
+**Not included:** Composio (`/link`). MCP OAuth (`/mcp auth`) is deferred — pass bearer tokens via `/mcp add` headers or environment. Punch uses Pi, not OpenCode.
 
 ## Automations and skills
 

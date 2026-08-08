@@ -18,6 +18,8 @@ const DAILY_DIR = join(DATA_DIR, "memory");
 const DAILY_RETENTION_DAYS = 30;
 const DAILY_MAX_RECORDS = 200;
 const NOTE_PART_MAX_CHARS = 1_000;
+const RECALL_SESSION_CACHE_MAX = 500;
+const recalledCitations = new Map();
 
 function load(file, fallback) {
   try {
@@ -255,10 +257,25 @@ export function preamble(userId, channelId, query = "", options = {}) {
   const maxChars = Math.max(0, Math.min(20_000, Number(options.maxChars ?? 3_500) || 0));
   const limit = Math.max(0, Math.min(100, Number(options.limit ?? 10) || 0));
   if (!maxChars || !limit) return "";
-  const results = searchMemory({ userId, channelId, query, isDm: options.isDm === true, limit });
+  const recallSessionId = options.recallSessionId ? String(options.recallSessionId) : null;
+  let recalled = null;
+  if (recallSessionId) {
+    recalled = recalledCitations.get(recallSessionId);
+    if (!recalled) {
+      recalled = new Set();
+      recalledCitations.set(recallSessionId, recalled);
+      // Recall state is an optimization only; discard oldest sessions first.
+      if (recalledCitations.size > RECALL_SESSION_CACHE_MAX) {
+        recalledCitations.delete(recalledCitations.keys().next().value);
+      }
+    }
+  }
+  // Get enough candidates that recalled entries cannot hide useful ones.
+  const results = searchMemory({ userId, channelId, query, isDm: options.isDm === true, limit: 100 });
   const lines = [];
   let used = 0;
   for (const result of results) {
+    if (recalled?.has(result.citation)) continue;
     let line = `- ${result.citation} ${result.text}`;
     const separator = lines.length ? 1 : 0;
     const available = maxChars - used - separator;
@@ -270,8 +287,26 @@ export function preamble(userId, channelId, query = "", options = {}) {
     }
     lines.push(line);
     used += line.length + separator;
+    recalled?.add(result.citation);
+    if (lines.length >= limit) break;
   }
   return lines.join("\n");
+}
+
+export function moveMemoryRecall(fromSessionId, toSessionId) {
+  const from = String(fromSessionId || "");
+  const to = String(toSessionId || "");
+  if (!from || !to || from === to) return;
+  const recalled = recalledCitations.get(from);
+  if (!recalled) return;
+  const destination = recalledCitations.get(to) || new Set();
+  for (const citation of recalled) destination.add(citation);
+  recalledCitations.set(to, destination);
+  recalledCitations.delete(from);
+}
+
+export function clearMemoryRecall(sessionId) {
+  if (sessionId) recalledCitations.delete(String(sessionId));
 }
 
 function dedupeEntries(entries) {
@@ -457,6 +492,7 @@ export function setSession(channelId, sessionId) {
 }
 
 export function clearSession(channelId) {
+  clearMemoryRecall(sessions[channelId]);
   delete sessions[channelId];
   save(SESSION_FILE, sessions);
 }

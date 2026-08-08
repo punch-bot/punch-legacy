@@ -29,6 +29,7 @@ import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgrou
 import { validateAutoCompressThreshold } from "./context-compression.js";
 import { extractCompressTag } from "./compress-tag.mjs";
 import { filterThreadSubtree } from "./thread-context.js";
+import { isBotDirectlyMentioned } from "./message-mentions.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
 import * as routines from "./routines.js";
@@ -1263,10 +1264,10 @@ client.once(Events.ClientReady, async (c) => {
     description: "Compress (summarize) the conversation in this channel to free up context",
   }, {
     name: "mcp",
-    description: "MCP is not supported yet on Punch",
+    description: "Manage MCP servers loaded into Pi",
     options: [
-      { type: 1, name: "list", description: "MCP is not supported yet" },
-      { type: 1, name: "add", description: "MCP is not supported yet",
+      { type: 1, name: "list", description: "List configured MCP servers" },
+      { type: 1, name: "add", description: "Add a local or remote MCP server",
         options: [
           { type: 3, name: "name", description: "Unique MCP server name", required: true },
           { type: 3, name: "type", description: "local (command) or remote (URL)", required: true,
@@ -1276,11 +1277,11 @@ client.once(Events.ClientReady, async (c) => {
           { type: 3, name: "headers", description: "Remote headers JSON, e.g. {\"Authorization\":\"Bearer x\"}" },
           { type: 3, name: "environment", description: "Local env JSON, e.g. {\"KEY\":\"value\"}" },
         ] },
-      { type: 1, name: "remove", description: "MCP is not supported yet",
+      { type: 1, name: "remove", description: "Remove an MCP server",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
-      { type: 1, name: "auth", description: "MCP is not supported yet",
+      { type: 1, name: "auth", description: "MCP OAuth (not available yet)",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
-      { type: 1, name: "logout", description: "MCP is not supported yet",
+      { type: 1, name: "logout", description: "MCP OAuth logout (not available yet)",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
     ],
   }, {
@@ -1614,11 +1615,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const speakerName = opts.speakerUsername ?? message.author.username;
   const speaker = `${who} (@${speakerName}, id:${uid})`;
   const isDirectMessage = !message.guildId;
-  const pre = store.preamble(uid, cid, memoryUserText, {
-    isDm: isDirectMessage,
-    maxChars: 2_400,
-    limit: 8,
-  });
 
   const { useLifecycle, useThinking } = progressSettingsFor(message);
 
@@ -1646,6 +1642,8 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const startedAt = Date.now();
   let progressState = createProgressState(startedAt);
   let progressRenderer = null;
+  let memoryRecallKey = null;
+  let memoryRecallAdopted = false;
 
   if (allowThinking) {
     const initial = renderProgressLive(progressState, startedAt);
@@ -1701,12 +1699,23 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
       const currentSession = store.getSession(cid);
+      // New sessions get a temporary recall key until Pi returns a session ID.
+      memoryRecallKey = currentSession || `pending:${uid}:${cid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+      const pre = store.preamble(uid, cid, memoryUserText, {
+        isDm: isDirectMessage,
+        maxChars: 1_200,
+        limit: 3,
+        recallSessionId: memoryRecallKey,
+      });
       console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
-      const result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
+      const result = await runAgent(buildPrompt(pre), currentSession, onProgress, signal, uid, agentAttachments);
+      store.moveMemoryRecall(memoryRecallKey, result.sessionId);
+      memoryRecallAdopted = true;
       store.setSession(cid, result.sessionId);
       if (result.sessionId && /<\/?compress\s*\/?\s*>/i.test(result.text)) {
         try {
           await summarizeSession(result.sessionId, uid, signal);
+          store.clearMemoryRecall(result.sessionId);
           compressed = true;
         } catch (error) {
           console.error(`[compress] model-requested failed:`, error.message);
@@ -1834,6 +1843,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
+    if (memoryRecallKey && !memoryRecallAdopted) store.clearMemoryRecall(memoryRecallKey);
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
     const timedOut = /timed out|timeout|stalled|ceiling/i.test(err?.message || "");
     await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
@@ -2645,7 +2655,7 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot && !store.getUserSettings(message.author.id).allowBots) return;
 
   const isDM = !message.guild;
-  const mentioned = message.mentions.has(client.user);
+  const mentioned = isBotDirectlyMentioned(message, client.user);
   const content = message.content.trim();
 
   console.log(
@@ -4025,7 +4035,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
 
     try {
-      await withUserRunLock(uid, () => summarizeSession(store.getSession(cid), uid, ac.signal));
+      await withUserRunLock(uid, async () => {
+        const currentSession = store.getSession(cid);
+        if (!currentSession) throw new Error("Conversation reset before compression started.");
+        await summarizeSession(currentSession, uid, ac.signal);
+        store.clearMemoryRecall(currentSession);
+      });
       clearInterval(iv);
       clearTimeout(to);
       await interaction.editReply(`✅ Conversation compressed.\n${progressBar(100)} 100%\nContext trimmed — fresh headspace for the next turn.`);
@@ -4115,15 +4130,117 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.commandName === "mcp") {
-    // Punch does not load MCP into the agent. Refuse all subcommands —
-    // do not pretend add/list/auth will connect (supervisor registry may remain).
-    await interaction.reply({
-      content:
-        "**MCP is not supported yet** on Punch. " +
-        "Custom MCP servers are not loaded into Pi. " +
-        "Use bash/curl or a Pi extension under `/work/.pi/extensions` instead.",
-      flags: MessageFlags.Ephemeral,
-    });
+    const uid = interaction.user.id;
+    const url = apiUrlFor(uid);
+    if (!url) {
+      await interaction.reply({ content: "No sandbox assigned. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const supervisorUsername = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+    const auth = "Basic " + Buffer.from(`${supervisorUsername}:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+    const sub = interaction.options.getSubcommand();
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      if (sub === "auth" || sub === "logout") {
+        await interaction.editReply({
+          content:
+            "**MCP OAuth is not available yet.** " +
+            "Pass tokens with `/mcp add` `headers` (remote) or `environment` (local), then remove/re-add to rotate them.",
+        });
+        return;
+      }
+      if (sub === "list") {
+        const res = await fetch(`${url}/mcp`, { headers: { authorization: auth } });
+        if (!res.ok) throw new Error(`supervisor API ${res.status}`);
+        const { mcp } = await res.json();
+        const names = Object.keys(mcp || {});
+        if (!names.length) {
+          await interaction.editReply({ content: "No MCP servers configured. Add one with `/mcp add`." });
+          return;
+        }
+        const lines = names.map((name) => {
+          const e = mcp[name] || {};
+          const on = e.enabled === false ? "⏸️" : "✅";
+          if (e.type === "remote") return `${on} **${name}** (remote) \`${e.url || ""}\``;
+          const cmd = Array.isArray(e.command) ? e.command.join(" ") : String(e.command || "");
+          return `${on} **${name}** (local) \`${cmd}\``.slice(0, 200);
+        });
+        await interaction.editReply({ content: `**MCP servers:**\n${lines.join("\n")}`.slice(0, 1900) });
+        return;
+      }
+      if (sub === "remove") {
+        const name = interaction.options.getString("name", true);
+        const res = await fetch(`${url}/mcp/remove`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
+        await interaction.editReply({ content: `Removed MCP server \`${name}\`. Restarting Pi…` });
+        return;
+      }
+      if (sub === "add") {
+        const name = interaction.options.getString("name", true);
+        const type = interaction.options.getString("type", true);
+        const mcpUrl = interaction.options.getString("url");
+        const commandStr = interaction.options.getString("command");
+        const headersStr = interaction.options.getString("headers");
+        const envStr = interaction.options.getString("environment");
+        const payload = { name, type, enabled: true };
+        if (type === "remote") {
+          if (!mcpUrl) throw new Error("Remote MCP requires `url`");
+          payload.url = mcpUrl;
+          if (headersStr) {
+            try { payload.headers = JSON.parse(headersStr); }
+            catch { throw new Error("`headers` must be valid JSON object"); }
+          }
+        } else if (type === "local") {
+          if (!commandStr?.trim()) throw new Error("Local MCP requires `command`");
+          // Simple argv split (supports "quoted" tokens). Same rules as docker/mcp-config.mjs.
+          const argv = [];
+          let cur = "";
+          let quote = null;
+          const s = commandStr.trim();
+          for (let i = 0; i < s.length; i++) {
+            const ch = s[i];
+            if (quote) {
+              if (ch === quote) quote = null;
+              else if (ch === "\\" && i + 1 < s.length) cur += s[++i];
+              else cur += ch;
+              continue;
+            }
+            if (ch === '"' || ch === "'") { quote = ch; continue; }
+            if (/\s/.test(ch)) { if (cur) { argv.push(cur); cur = ""; } continue; }
+            if (ch === "\\" && i + 1 < s.length) { cur += s[++i]; continue; }
+            cur += ch;
+          }
+          if (quote) throw new Error("Unclosed quote in command");
+          if (cur) argv.push(cur);
+          if (!argv.length) throw new Error("Local MCP `command` is empty");
+          payload.command = argv;
+          if (envStr) {
+            try { payload.environment = JSON.parse(envStr); }
+            catch { throw new Error("`environment` must be valid JSON object"); }
+          }
+        } else {
+          throw new Error("type must be local or remote");
+        }
+        const res = await fetch(`${url}/mcp/add`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
+        await interaction.editReply({
+          content: `Added MCP server \`${name}\` (${type}). Restarting Pi so the \`mcp\` tool can use it.`,
+        });
+        return;
+      }
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ Error: ${err.message}` });
+    }
     return;
   }
 
