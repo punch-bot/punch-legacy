@@ -1,4 +1,5 @@
 import * as store from "./memory.js";
+import { normalizeTimeZone } from "./timezone.js";
 
 export function reactionMatches(reaction, configured) {
   if (!configured) return false;
@@ -27,6 +28,7 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
   lines.push("**Personal:**");
   lines.push(trigger ? `- Trigger word: \`${trigger}\`` : "- Trigger word: none");
   lines.push(`- Multitask: ${us.multitaskEnabled ? "on" : "off"}`);
+  lines.push(`- Timezone: \`${us.timeZone}\``);
   lines.push(`- Working pigeons: ${us.workingPigeonsEnabled ? "on" : "off"}`);
   const doneParts = [];
   if (us.pigeonDonePigeon) doneParts.push("pigeon");
@@ -131,6 +133,17 @@ export function setWorkingPigeonsEnabled(userId, enabled) {
   return enabled
     ? "Working pigeons **enabled** — agent pigeons will wake your Punch automatically."
     : "Working pigeons **disabled** — agent pigeons will DM you only (no auto-turn).";
+}
+
+export function setUserTimeZone(userId, timeZone) {
+  const normalized = normalizeTimeZone(timeZone);
+  store.patchUserSettings(userId, { timeZone: normalized });
+  return `Timezone set to **${normalized}**.`;
+}
+
+export function clearUserTimeZone(userId) {
+  store.patchUserSettings(userId, { timeZone: "UTC" });
+  return "Timezone reset to **UTC**.";
 }
 
 const PIGEON_DONE_KEYS = {
@@ -358,6 +371,16 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
     throw new Error(`Usage: \`${prefix}settings multitask on|off|enable|disable\``);
   }
 
+  if (sub === "timezone") {
+    if (sub2 === "set") {
+      const timeZone = tokens.slice(2).join(" ").trim();
+      if (!timeZone) throw new Error(`Usage: \`${prefix}settings timezone set <IANA timezone>\``);
+      return setUserTimeZone(uid, timeZone);
+    }
+    if (sub2 === "clear" || sub2 === "reset") return clearUserTimeZone(uid);
+    throw new Error(`Usage: \`${prefix}settings timezone set <IANA timezone>\` or clear`);
+  }
+
   if (sub === "secret" || sub === "secrets") {
     if (!isDM) throw new Error("DM me to manage secrets — use `/settings secret` in DMs.");
     if (sub === "secrets" || tokens.length === 1) {
@@ -513,6 +536,16 @@ export async function handleSettingsSlash(interaction, { prefix, botUsername, se
       await interaction.reply({ content: setMultitaskEnabled(uid, true) });
     } else if (cmd === "disable") {
       await interaction.reply({ content: setMultitaskEnabled(uid, false) });
+    }
+    return;
+  }
+
+  if (sub === "timezone") {
+    if (cmd === "set") {
+      const timeZone = interaction.options.getString("timezone", true);
+      await interaction.reply({ content: setUserTimeZone(uid, timeZone) });
+    } else {
+      await interaction.reply({ content: clearUserTimeZone(uid) });
     }
     return;
   }
@@ -720,6 +753,20 @@ export function getSlashCommandDefinition() {
         options: [
           { type: 1, name: "enable", description: "Spawn workers instead of queuing when busy" },
           { type: 1, name: "disable", description: "Queue messages until the current turn finishes" },
+        ],
+      },
+      {
+        type: 2,
+        name: "timezone",
+        description: "Timezone used for message timestamps (personal)",
+        options: [
+          {
+            type: 1,
+            name: "set",
+            description: "Set an IANA timezone",
+            options: [{ type: 3, name: "timezone", description: "For example America/New_York", required: true }],
+          },
+          { type: 1, name: "clear", description: "Reset timezone to UTC" },
         ],
       },
       {

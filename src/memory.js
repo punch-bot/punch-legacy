@@ -81,6 +81,7 @@ export const USER_SETTINGS_DEFAULTS = {
   multitaskEnabled: false,
   multitaskWorkersCap: 3,
   autoCompressThreshold: 75,
+  timeZone: "UTC",
 };
 
 let seq = 0;
