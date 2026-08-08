@@ -419,8 +419,8 @@ function shouldUseMultitaskWorker(uid, opts = {}) {
   return isMainChatBusy(uid);
 }
 
-function buildMultitaskPrompt(text, contextMessages = []) {
-  return multitaskPrompt(text, contextMessages);
+function buildMultitaskPrompt(text, contextMessages = [], sentAt) {
+  return multitaskPrompt(text, contextMessages, sentAt);
 }
 
 async function deliverWorkerToChannel(worker, content) {
@@ -443,13 +443,14 @@ async function deliverWorkerToChannel(worker, content) {
   }
 }
 
-async function startMultitaskWorker(uid, { channelId, messageId, text, contextMessages = [], opts = {} }) {
+async function startMultitaskWorker(uid, { channelId, messageId, text, contextMessages = [], opts = {}, messageCreatedAt }) {
   const url = apiUrlFor(uid);
   if (!url) return { ok: false, error: "No sandbox assigned." };
 
   const kind = opts.workerKind || "coding";
   const timeoutMinutes = Math.max(1, Math.min(30, opts.timeoutMinutes || 10));
-  const prompt = buildMultitaskPrompt(text, contextMessages);
+  const sentAt = formatMessageTimestamp(messageCreatedAt, store.getUserSettings(uid).timeZone);
+  const prompt = buildMultitaskPrompt(text, contextMessages, sentAt);
 
   try {
     const res = await fetch(`${url}/workers`, {
@@ -485,6 +486,7 @@ async function trySpawnMultitaskWorker(message, text, contextMessages = [], opts
   const result = await startMultitaskWorker(uid, {
     channelId: message.channelId,
     messageId: message.id,
+    messageCreatedAt: message.createdTimestamp,
     text,
     contextMessages,
     opts,

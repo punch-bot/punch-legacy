@@ -122,6 +122,16 @@ test("multitaskPrompt omits channel context when empty", () => {
   assert.ok(prompt.endsWith("standalone"));
 });
 
+test("multitaskPrompt includes the timestamp line when provided", () => {
+  const prompt = multitaskPrompt("do the thing", [], "Saturday, August 8, 2026 at 3:42:00 PM EDT (America/New_York)");
+  assert.match(prompt, /\n\nThe user's message was sent at Saturday, August 8, 2026 at 3:42:00 PM EDT \(America\/New_York\)\.\n\ndo the thing$/);
+});
+
+test("multitaskPrompt omits the timestamp when absent", () => {
+  assert.doesNotMatch(multitaskPrompt("standalone", []), /was sent at/);
+  assert.doesNotMatch(multitaskPrompt("do the thing", [{ author: "Alice", content: "please" }]), /was sent at/);
+});
+
 test("userTurnLine and assemblePrompt build the final user line", () => {
   assert.equal(userTurnLine("123", "Bob (@bob, id:123)", "hi"), "[user:123] Bob (@bob, id:123): hi");
   assert.equal(assemblePrompt(["a", "", "b"], "[user:123] Bob: hi"), "a\n\nb\n\n[user:123] Bob: hi");

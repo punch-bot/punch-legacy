@@ -61,8 +61,9 @@ export function timestampLine(sentAt) {
   return `The user's message was sent at ${sentAt}.`;
 }
 
-export function multitaskPrompt(text, contextMessages = []) {
-  let prompt = String(text ?? "").trim();
+export function multitaskPrompt(text, contextMessages = [], sentAt) {
+  const body = [sentAt ? timestampLine(sentAt) : "", String(text ?? "").trim()].filter(Boolean).join("\n\n");
+  let prompt = body;
   if (contextMessages.length > 0) {
     prompt = `${channelContextBlock(contextMessages)}\n\n${prompt}`;
   }
