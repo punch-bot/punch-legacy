@@ -97,7 +97,7 @@ Three-part memory management system:
 
 2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
 
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. Punch injects a bounded copy at every turn; model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
+3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (keep `docker/compress_context_extension.ts` `MAX_MEMORY_CHARS` — still used by the `update_memory` tool). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
 
 **Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
 
