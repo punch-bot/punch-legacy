@@ -91,18 +91,14 @@ function compressedSummary(block: PruningState["blocks"][number]) {
 
 export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
-    let memory = "";
-    try {
-      memory = (await readFile("/work/.punch-memory.md", "utf8")).trim().slice(0, MAX_MEMORY_CHARS);
-    } catch {}
     const threshold = Number(event.systemPrompt.match(/PUNCH_CONTEXT_PRUNING_THRESHOLD=(\d+)/)?.[1] || 0);
     const usage = ctx.getContextUsage();
     const nudge = threshold > 0 && usage?.percent != null && usage.percent >= threshold
       ? `\n\n## Context pruning now\nContext is at ${Math.round(usage.percent)}%. Before continuing, selectively compress stale complete ranges with compress_context. Keep current work and recent turns available.`
       : "";
-    if (!memory && !nudge) return;
+    if (!nudge) return;
     return {
-      systemPrompt: `${event.systemPrompt}${memory ? `\n\n## Persistent project memory\nTreat this as durable project context. Update /work/.punch-memory.md when needed.\n\n${memory}` : ""}${nudge}`,
+      systemPrompt: `${event.systemPrompt}${nudge}`,
     };
   });
 

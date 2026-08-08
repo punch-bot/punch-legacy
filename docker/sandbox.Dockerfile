@@ -49,6 +49,7 @@ COPY docker/doctor.mjs /usr/local/lib/doctor.mjs
 COPY docker/pi-gateway.mjs /usr/local/bin/pi-gateway.mjs
 COPY docker/pi-turn-completion.mjs /usr/local/lib/pi-turn-completion.mjs
 COPY docker/pi-progress.mjs /usr/local/lib/pi-progress.mjs
+COPY docker/mcp-config.mjs /usr/local/lib/mcp-config.mjs
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js
 COPY docker/skills-manager.mjs /usr/local/lib/skills-manager.mjs
 COPY docker/worker-manager.mjs /usr/local/lib/worker-manager.mjs
@@ -61,6 +62,8 @@ COPY docker/searxng_extension.ts /opt/pi/extensions/searxng.ts
 COPY docker/webfetch_extension.ts /opt/pi/extensions/webfetch.ts
 COPY docker/report_progress_extension.ts /opt/pi/extensions/report_progress.ts
 COPY docker/compress_context_extension.ts /opt/pi/extensions/compress_context.ts
+COPY docker/mcp_extension.ts /opt/pi/extensions/mcp.ts
+COPY docker/mcp-config.mjs /opt/pi/mcp-config.mjs
 COPY docker/context-pruning-state.mjs /opt/pi/context-pruning-state.mjs
 COPY docker/pi-SYSTEM.md /opt/pi/SYSTEM.md
 COPY docker/skills/ /opt/pi/skills/

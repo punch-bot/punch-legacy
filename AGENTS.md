@@ -41,12 +41,13 @@ Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/pi-gateway.mjs
 |-------------|-----------------|
 | Discord chat turns via Pi gateway | Migrating old non-Pi session DBs (use Pi session files under `/data/pi/sessions`) |
 | Abort / `!stop` (client disconnect → Pi `abort`) | |
-| `/reset` (new session), `/compress` (Pi `compact`) | MCP into Pi — Discord `/mcp` refuses with **not supported yet** (supervisor may still keep an unused registry) |
+| `/reset` (new session), `/compress` (Pi `compact`) | MCP OAuth (`/mcp auth` / `logout`) — use headers/env tokens for now |
 | `/models`, `/env`, `/apikey`, `/secrets`, `/tailscale`, `/doctor`, `/memory`, `/skills`, `/workers`, `/multitask` | Legacy `/work/.opencode/tools` (not loaded; only `/work/.pi/extensions` reload) |
 | Built-in Pi tools: bash, read, write, edit; isolated worker Pi processes | Full multi-session concurrency for main chat gateway (it switches logical sessions) |
 | **Browser** via Pi extension `browser.ts` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
 | Progress SSE → Discord thinking UI | |
 | Routines via Pi extension `/work/.pi/extensions/routines.ts` | |
+| **MCP** via `pi-mcp-adapter` + Discord `/mcp` list/add/remove (`mcp` proxy tool) | |
 
 Self-addendum: `/work/.pi/SYSTEM.md` (Pi identity; legacy `.opencode/SYSTEM.md` is not loaded).  
 Self-extensions: `/work/.pi/extensions/*.ts` (`pi.registerTool`).
@@ -87,7 +88,7 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 
 ## Supervisor API (sandbox `:4097`)
 
-Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (unused registry; Discord `/mcp` says not supported yet), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
+Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (registry + Pi reload via pi-mcp-adapter), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
 
 ## Active Context Pruning (PNCH-6)
 
@@ -97,7 +98,7 @@ Three-part memory management system:
 
 2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
 
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. Punch injects a bounded copy at every turn; model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
+3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (keep `docker/compress_context_extension.ts` `MAX_MEMORY_CHARS` — still used by the `update_memory` tool). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
 
 **Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
 

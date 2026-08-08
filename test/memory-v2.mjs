@@ -58,6 +58,33 @@ test("preamble is bounded, cited on every line, and useful with the legacy call"
   assert.ok(bounded.split("\n").every((line) => /^- \[memory:(?:user|channel):[^\]]+\]/.test(line)));
 });
 
+test("preamble recalls each citation once per Pi session", () => {
+  memory.remember("user", "recall-user", "Uses Python for data analysis");
+  memory.remember("user", "recall-user", "Uses Python for automation");
+  memory.remember("user", "recall-user", "Uses Python for web services");
+  memory.remember("user", "recall-user", "Uses Python for testing");
+
+  const options = { recallSessionId: "pi-session-a", maxChars: 1_000, limit: 3 };
+  const first = memory.preamble("recall-user", "recall-channel", "python", options);
+  const second = memory.preamble("recall-user", "recall-channel", "python", options);
+  assert.equal(first.split("\n").length, 3);
+  assert.equal(second.split("\n").length, 1);
+  assert.ok(second.split("\n").every((line) => !first.includes(line.match(/\[[^\]]+\]/)[0])));
+
+  memory.clearMemoryRecall("pi-session-a");
+  assert.equal(memory.preamble("recall-user", "recall-channel", "python", options).split("\n").length, 3);
+});
+
+test("pending recall state moves to the new Pi session", () => {
+  memory.remember("user", "move-user", "Uses Rust for command-line tools");
+  const pending = { recallSessionId: "pending:move-user:channel", maxChars: 1_000, limit: 3 };
+  assert.match(memory.preamble("move-user", "move-channel", "rust", pending), /Rust/);
+  memory.moveMemoryRecall("pending:move-user:channel", "pi-session-moved");
+  assert.equal(memory.preamble("move-user", "move-channel", "rust", {
+    recallSessionId: "pi-session-moved", maxChars: 1_000, limit: 3,
+  }), "");
+});
+
 test("conversation notes are DM-only and isolated from guild retrieval", () => {
   const skipped = memory.captureConversation({
     userId: "dm-user",
