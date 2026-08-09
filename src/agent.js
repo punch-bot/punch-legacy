@@ -572,7 +572,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       sysPrompt += `\n\n## Context pruning threshold\n\nPUNCH_CONTEXT_PRUNING_THRESHOLD=${settings.autoCompressThreshold}\nAt this usage level, compress stale complete ranges with compress_context before continuing. Whole-session compaction only when explicitly requested.`;
     }
     if (settings.gitCoAuthor) {
-      sysPrompt += `\n\n## Git conventions\n\nAppend to every commit (skip if already present):\n\n\`\`\`text\nCo-Authored-By: Punch <punch@orb.gay>\n\`\`\`\n\nUse \`git commit -m "message\\n\\nCo-Authored-By: Punch <punch@orb.gay>"\` or equivalent so the trailer is on its own line at the end.`;
+      sysPrompt += `\n\n## Git conventions\n\nAppend to every commit (skip if already present):\n\n\`\`\`text\nCo-Authored-By: Punch <punch@orb.gay>\n\`\`\`\n\nUse \`git commit -m "message" -m "Co-Authored-By: Punch <punch@orb.gay>"\` so the trailer is its own paragraph.`;
     }
   }
 

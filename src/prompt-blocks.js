@@ -20,8 +20,8 @@ export function channelContextBlock(contextMessages) {
 export function thisTurnInstructions() {
   return (
     "--- This turn ---\n" +
-    "The message below triggered this turn. To react on it, append " +
-    '<react emoji="..."></react> to your reply — Punch applies reactions automatically. ' +
+    "The message below triggered this turn. To react on that message, append one or more " +
+    '<react emoji="..."></react> tag(s) to your reply — Punch applies them automatically. ' +
     "Do not use Discord API, curl, or ask for channel/message IDs."
   );
 }
