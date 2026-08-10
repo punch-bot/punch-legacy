@@ -3,14 +3,32 @@
  * Registry keeps OpenCode-shaped local/remote entries; adapter wants mcpServers.
  */
 
-/** Env var name for a stored MCP API key (matches supervisor /mcp/auth). */
-export function mcpApiKeyEnvVar(serverName) {
+import { Buffer } from "node:buffer";
+
+/** Legacy env var normalization (collides on hyphen vs underscore). Kept for migration only. */
+export function legacyMcpApiKeyEnvVar(serverName) {
   const safe = String(serverName || "")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "");
   return `MCP_${safe || "SERVER"}_API_KEY`;
+}
+
+/** Collision-free env var for a stored MCP API key (lossless base64url of server name). */
+export function mcpApiKeyEnvVar(serverName) {
+  const raw = String(serverName || "").trim();
+  if (!raw) return "MCP_SERVER_API_KEY";
+  const encoded = Buffer.from(raw, "utf8").toString("base64url");
+  return `MCP_${encoded}_API_KEY`;
+}
+
+/** All env var names that may hold a key for this server (new + legacy). */
+export function mcpApiKeyEnvVarCandidates(serverName) {
+  const candidates = [mcpApiKeyEnvVar(serverName)];
+  const legacy = legacyMcpApiKeyEnvVar(serverName);
+  if (legacy !== candidates[0]) candidates.push(legacy);
+  return candidates;
 }
 
 /** Split a Discord space-separated command string into argv (supports simple quotes). */
@@ -89,19 +107,47 @@ export function usesMcpApiKeyAuth(entry) {
   return usesApiKeyAuth(entry);
 }
 
-function redactHeaderValue(headerName) {
-  const h = String(headerName || "").toLowerCase();
-  return h === "authorization" || h === "x-api-key" || h.endsWith("-api-key") || h.includes("token");
+/** Migrate legacy MCP key env vars to collision-free names. */
+export function migrateMcpApiKeyEnvVars(registry, env) {
+  const out = { ...env };
+  let changed = false;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    return { env: out, changed };
+  }
+  for (const name of Object.keys(registry)) {
+    const newVar = mcpApiKeyEnvVar(name);
+    const legacyVar = legacyMcpApiKeyEnvVar(name);
+    if (legacyVar !== newVar && out[legacyVar] && !out[newVar]) {
+      out[newVar] = out[legacyVar];
+      delete out[legacyVar];
+      changed = true;
+    }
+  }
+  return { env: out, changed };
+}
+
+/** Redact MCP API key values from a public env view. */
+export function redactMcpKeysFromEnvView(env) {
+  const view = { ...env };
+  for (const [k, v] of Object.entries(view)) {
+    if (k.startsWith("MCP_") && k.endsWith("_API_KEY") && v) view[k] = "(set)";
+  }
+  return view;
+}
+
+export function isMcpApiKeyConfigured(env, serverName) {
+  if (!env || typeof env !== "object") return false;
+  return mcpApiKeyEnvVarCandidates(serverName).some((varName) => env[varName]);
 }
 
 /** Public view of a registry entry (no secret headers or inline keys). */
 export function sanitizeMcpEntryForDisplay(entry) {
   if (!entry || typeof entry !== "object") return entry;
   const out = { ...entry };
-    if (out.headers && typeof out.headers === "object") {
+  if (out.headers && typeof out.headers === "object") {
     const headers = { ...out.headers };
     for (const k of Object.keys(headers)) {
-      if (redactHeaderValue(k)) headers[k] = "(set)";
+      if (headers[k]) headers[k] = "(set)";
     }
     out.headers = headers;
   }

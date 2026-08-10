@@ -2,19 +2,45 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertPunchEntry,
+  isMcpApiKeyConfigured,
+  legacyMcpApiKeyEnvVar,
+  migrateMcpApiKeyEnvVars,
   mcpApiKeyEnvVar,
+  mcpApiKeyEnvVarCandidates,
   punchEntryToAdapter,
   punchRegistryToAdapterConfig,
   punchRegistryToMcpServers,
+  redactMcpKeysFromEnvView,
   sanitizeMcpEntryForDisplay,
   splitCommandString,
   usesMcpApiKeyAuth,
 } from "../docker/mcp-config.mjs";
 
-test("mcpApiKeyEnvVar normalizes server names", () => {
-  assert.equal(mcpApiKeyEnvVar("linear"), "MCP_LINEAR_API_KEY");
-  assert.equal(mcpApiKeyEnvVar("my-server"), "MCP_MY_SERVER_API_KEY");
-  assert.equal(mcpApiKeyEnvVar("foo__bar"), "MCP_FOO_BAR_API_KEY");
+test("mcpApiKeyEnvVar uses collision-free base64url encoding", () => {
+  assert.equal(mcpApiKeyEnvVar("linear"), "MCP_bGluZWFy_API_KEY");
+  assert.equal(mcpApiKeyEnvVar("my-server"), "MCP_bXktc2VydmVy_API_KEY");
+  assert.notEqual(mcpApiKeyEnvVar("foo-bar"), mcpApiKeyEnvVar("foo_bar"));
+  assert.notEqual(mcpApiKeyEnvVar("foo_bar"), mcpApiKeyEnvVar("foo__bar"));
+  assert.notEqual(mcpApiKeyEnvVar("Foo"), mcpApiKeyEnvVar("foo"));
+});
+
+test("legacy and new env var names differ for hyphen vs underscore", () => {
+  assert.equal(legacyMcpApiKeyEnvVar("foo-bar"), legacyMcpApiKeyEnvVar("foo_bar"));
+  assert.notEqual(mcpApiKeyEnvVar("foo-bar"), mcpApiKeyEnvVar("foo_bar"));
+  assert.deepEqual(mcpApiKeyEnvVarCandidates("foo-bar"), [
+    mcpApiKeyEnvVar("foo-bar"),
+    legacyMcpApiKeyEnvVar("foo-bar"),
+  ]);
+});
+
+test("migrateMcpApiKeyEnvVars moves legacy keys to collision-free names", () => {
+  const registry = { "foo-bar": { type: "remote", url: "https://x.test/mcp", auth: "api_key" } };
+  const legacyVar = legacyMcpApiKeyEnvVar("foo-bar");
+  const env = { [legacyVar]: "secret-key" };
+  const { env: migrated, changed } = migrateMcpApiKeyEnvVars(registry, env);
+  assert.equal(changed, true);
+  assert.equal(migrated[mcpApiKeyEnvVar("foo-bar")], "secret-key");
+  assert.equal(migrated[legacyVar], undefined);
 });
 
 test("splitCommandString handles spaces and quotes", () => {
@@ -59,7 +85,7 @@ test("api_key auth wires bearer tokens for remote MCP", () => {
     {
       url: "https://mcp.example.com/mcp",
       auth: "bearer",
-      bearerTokenEnv: "MCP_LINEAR_API_KEY",
+      bearerTokenEnv: "MCP_bGluZWFy_API_KEY",
     },
   );
   assert.deepEqual(
@@ -71,7 +97,7 @@ test("api_key auth wires bearer tokens for remote MCP", () => {
     }, "docs"),
     {
       url: "https://mcp.example.com/mcp",
-      headers: { "X-API-Key": "${MCP_DOCS_API_KEY}" },
+      headers: { "X-API-Key": "${MCP_ZG9jcw_API_KEY}" },
     },
   );
 });
@@ -88,7 +114,7 @@ test("api_key auth wires env interpolation for local MCP", () => {
       command: "npx",
       args: ["-y", "some-mcp"],
       cwd: "/work",
-      env: { LINEAR_API_KEY: "${MCP_LINEAR_API_KEY}" },
+      env: { LINEAR_API_KEY: "${MCP_bGluZWFy_API_KEY}" },
     },
   );
 });
@@ -210,14 +236,33 @@ test("assertPunchEntry rejects bad headers and command shapes", () => {
   );
 });
 
-test("sanitizeMcpEntryForDisplay redacts sensitive headers", () => {
+test("sanitizeMcpEntryForDisplay redacts all header values", () => {
   const view = sanitizeMcpEntryForDisplay({
     type: "remote",
     url: "https://x.test/mcp",
-    headers: { Authorization: "Bearer secret", "X-Custom": "ok" },
+    headers: { Authorization: "Bearer secret", "X-Custom-Credential": "tok", "X-Custom": "ok" },
   });
   assert.equal(view.headers.Authorization, "(set)");
-  assert.equal(view.headers["X-Custom"], "ok");
+  assert.equal(view.headers["X-Custom-Credential"], "(set)");
+  assert.equal(view.headers["X-Custom"], "(set)");
+});
+
+test("redactMcpKeysFromEnvView hides MCP key values", () => {
+  const view = redactMcpKeysFromEnvView({
+    POOLSIDE_API_KEY: "pool",
+    MCP_bGluZWFy_API_KEY: "mcp-secret",
+    FOO: "bar",
+  });
+  assert.equal(view.POOLSIDE_API_KEY, "pool");
+  assert.equal(view.MCP_bGluZWFy_API_KEY, "(set)");
+  assert.equal(view.FOO, "bar");
+});
+
+test("isMcpApiKeyConfigured checks legacy and new env var names", () => {
+  const legacyVar = legacyMcpApiKeyEnvVar("foo-bar");
+  assert.equal(isMcpApiKeyConfigured({ [legacyVar]: "x" }, "foo-bar"), true);
+  assert.equal(isMcpApiKeyConfigured({ [mcpApiKeyEnvVar("foo-bar")]: "x" }, "foo-bar"), true);
+  assert.equal(isMcpApiKeyConfigured({}, "foo-bar"), false);
 });
 
 test("adapter root config includes headless settings", () => {

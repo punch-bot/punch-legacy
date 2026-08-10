@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
-import { punchRegistryToAdapterConfig, assertPunchEntry, mcpApiKeyEnvVar, sanitizeMcpEntryForDisplay, usesMcpApiKeyAuth } from "/usr/local/lib/mcp-config.mjs";
+import { punchRegistryToAdapterConfig, assertPunchEntry, mcpApiKeyEnvVar, mcpApiKeyEnvVarCandidates, migrateMcpApiKeyEnvVars, redactMcpKeysFromEnvView, sanitizeMcpEntryForDisplay, usesMcpApiKeyAuth, isMcpApiKeyConfigured } from "/usr/local/lib/mcp-config.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
@@ -588,6 +588,19 @@ if (SANDBOX_USER_ID) {
 // Sync Punch MCP registry → Pi adapter config before the gateway starts.
 (function generateConfig() {
   mkdirSync("/data/pi", { recursive: true });
+  const mcp = loadJSON(MCP_FILE);
+  const env = loadJSON(ENV_FILE);
+  const migrated = migrateMcpApiKeyEnvVars(mcp, env);
+  if (migrated.changed) {
+    saveJSON(ENV_FILE, migrated.env);
+    for (const [k, v] of Object.entries(migrated.env)) {
+      if (k.startsWith("MCP_") && k.endsWith("_API_KEY")) process.env[k] = v;
+    }
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("MCP_") && k.endsWith("_API_KEY") && !migrated.env[k]) delete process.env[k];
+    }
+    log("migrated legacy MCP API key env vars to collision-free names");
+  }
   syncMcpConfig();
   log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"}`);
 })();
@@ -912,7 +925,7 @@ const apiServer = createServer((req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/env") {
-    res.writeHead(200); res.end(JSON.stringify({ env: loadJSON(ENV_FILE) }));
+    res.writeHead(200); res.end(JSON.stringify({ env: redactMcpKeysFromEnvView(loadJSON(ENV_FILE)) }));
     return;
   }
 
@@ -1420,8 +1433,8 @@ const apiServer = createServer((req, res) => {
     for (const [name, entry] of Object.entries(mcp)) {
       const sanitized = sanitizeMcpEntryForDisplay(entry);
       const envVar = mcpApiKeyEnvVar(name);
-      if (usesMcpApiKeyAuth(entry) || env[envVar]) {
-        sanitized.apiKeyConfigured = !!env[envVar];
+      if (usesMcpApiKeyAuth(entry) || isMcpApiKeyConfigured(env, name)) {
+        sanitized.apiKeyConfigured = isMcpApiKeyConfigured(env, name);
         sanitized.apiKeyEnv = envVar;
       }
       view[name] = sanitized;
@@ -1491,13 +1504,14 @@ const apiServer = createServer((req, res) => {
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
-        const envVar = mcpApiKeyEnvVar(name);
         const env = loadJSON(ENV_FILE);
-        if (env[envVar]) {
-          delete env[envVar];
-          delete process.env[envVar];
-          saveJSON(ENV_FILE, env);
+        for (const varName of mcpApiKeyEnvVarCandidates(name)) {
+          if (env[varName]) {
+            delete env[varName];
+            delete process.env[varName];
+          }
         }
+        saveJSON(ENV_FILE, env);
         delete mcp[name];
         saveJSON(MCP_FILE, mcp);
         syncMcpConfig();
@@ -1524,15 +1538,16 @@ const apiServer = createServer((req, res) => {
         }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        const updatedEntry = usesMcpApiKeyAuth(mcp[name])
+          ? mcp[name]
+          : assertPunchEntry({ ...mcp[name], auth: "api_key" });
+        mcp[name] = updatedEntry;
+        saveJSON(MCP_FILE, mcp);
         const envVar = mcpApiKeyEnvVar(name);
         const env = loadJSON(ENV_FILE);
         env[envVar] = key.trim();
         process.env[envVar] = key.trim();
         saveJSON(ENV_FILE, env);
-        if (!usesMcpApiKeyAuth(mcp[name])) {
-          mcp[name] = assertPunchEntry({ ...mcp[name], auth: "api_key" });
-          saveJSON(MCP_FILE, mcp);
-        }
         syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, apiKeyEnv: envVar }));
@@ -1553,13 +1568,14 @@ const apiServer = createServer((req, res) => {
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
-        const envVar = mcpApiKeyEnvVar(name);
         const env = loadJSON(ENV_FILE);
-        if (env[envVar]) {
-          delete env[envVar];
-          delete process.env[envVar];
-          saveJSON(ENV_FILE, env);
+        for (const varName of mcpApiKeyEnvVarCandidates(name)) {
+          if (env[varName]) {
+            delete env[varName];
+            delete process.env[varName];
+          }
         }
+        saveJSON(ENV_FILE, env);
         syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true }));
