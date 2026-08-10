@@ -39,7 +39,7 @@ Discord ──▶ [ punch-bot ] ──HTTP──▶ [ sandbox-<name> ]
 1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
 2. `docker compose up --build -d`
 3. Discord: `/sandbox create <name> <your_discord_user_id>`
-4. `/apikey set anthropic <key>` (or another provider) then mention the bot
+4. `/apikey set anthropic <key>` (or another provider; OpenCode Go: `/apikey set opencode-go <key>`) then mention the bot
 
 Host **4098** = bot HTTP API. Dynamic sandboxes publish **noVNC** from port **16080+** when `VNC_PASSWORD` is set.
 
