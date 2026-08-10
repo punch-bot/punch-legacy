@@ -634,7 +634,7 @@ function contextLimitFor(model) {
   const prefixHit = Object.entries(CONTEXT_LIMITS).find(([k]) => model.startsWith(k) || k.startsWith(model));
   if (prefixHit) return prefixHit[1];
   if (prov === "anthropic") return 200000;
-  if (prov === "opencode") return 200000;
+  if (prov === "opencode" || prov === "opencode-go") return 200000;
   return DEFAULT_CONTEXT_LIMIT;
 }
 

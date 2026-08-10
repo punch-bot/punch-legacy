@@ -27,6 +27,8 @@ docker compose up --build -d
 docker compose logs -f bot
 # Then: /sandbox create <name> <discord_user_id>
 # Set a provider key: /apikey set anthropic <key>  (or /env set ANTHROPIC_API_KEY ...)
+# OpenCode Go models (e.g. opencode-go/kimi-k2.6) use /apikey set opencode-go <key> —
+# same OPENCODE_API_KEY credential as OpenCode Zen.
 ```
 
 More ops detail: `NIGHTLY.md`. Human overview: `README.md`.

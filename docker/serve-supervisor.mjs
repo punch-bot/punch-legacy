@@ -444,6 +444,9 @@ const PROVIDER_ENV_MAP = {
   together: "TOGETHER_API_KEY",
   poolside: "POOLSIDE_API_KEY",
   opencode: "OPENCODE_API_KEY",
+  // Pi ships a native `opencode-go` provider (https://opencode.ai/zen/go) that
+  // shares the OPENCODE_API_KEY credential with OpenCode Zen.
+  "opencode-go": "OPENCODE_API_KEY",
 };
 
 function loadJSON(file) {
