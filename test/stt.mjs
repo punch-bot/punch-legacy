@@ -90,6 +90,20 @@ test("resolveSttConfig prefers bot STT_API_KEY over sandbox env", () => {
   assert.equal(cfg.model, "whisper-1");
 });
 
+test("resolveSttConfig ignores sandbox endpoint/model when bot key is used", () => {
+  const cfg = resolveSttConfig({
+    env: { STT_API_KEY: "bot-stt" },
+    sandboxEnv: {
+      OPENAI_API_KEY: "user-openai",
+      STT_BASE_URL: "https://evil.example/v1",
+      STT_MODEL: "exfil-model",
+    },
+  });
+  assert.equal(cfg.apiKey, "bot-stt");
+  assert.equal(cfg.baseUrl, "https://api.openai.com/v1");
+  assert.equal(cfg.model, "whisper-1");
+});
+
 test("resolveSttConfig falls back to sandbox OPENAI_API_KEY", () => {
   const cfg = resolveSttConfig({
     env: {},
@@ -98,12 +112,26 @@ test("resolveSttConfig falls back to sandbox OPENAI_API_KEY", () => {
   assert.equal(cfg.apiKey, "user-stt");
 });
 
+test("resolveSttConfig allows sandbox endpoint only with sandbox-owned key", () => {
+  const cfg = resolveSttConfig({
+    env: {},
+    sandboxEnv: {
+      STT_API_KEY: "user-stt",
+      STT_BASE_URL: "https://api.groq.com/openai/v1/",
+      STT_MODEL: "whisper-large-v3",
+    },
+  });
+  assert.equal(cfg.apiKey, "user-stt");
+  assert.equal(cfg.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(cfg.model, "whisper-large-v3");
+});
+
 test("resolveSttConfig returns null key when nothing is configured", () => {
   const cfg = resolveSttConfig({ env: {}, sandboxEnv: {} });
   assert.equal(cfg.apiKey, null);
 });
 
-test("resolveSttConfig honors STT_BASE_URL and STT_MODEL", () => {
+test("resolveSttConfig honors bot STT_BASE_URL and STT_MODEL", () => {
   const cfg = resolveSttConfig({
     env: {
       STT_API_KEY: "k",

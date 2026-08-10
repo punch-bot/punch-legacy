@@ -62,20 +62,38 @@ export function mergeTranscriptIntoText(existingText, transcript) {
 }
 
 /**
- * Resolve Whisper-compatible STT settings.
+ * Resolve OpenAI-compatible STT settings (`/audio/transcriptions`).
  * Priority: bot STT_API_KEY → bot OPENAI_API_KEY → sandbox STT_API_KEY → sandbox OPENAI_API_KEY.
+ *
+ * When the bot supplies the API key, base URL/model come only from bot env so a
+ * sandbox cannot redirect the bot credential to an attacker-controlled endpoint.
+ * Sandbox STT_BASE_URL / STT_MODEL apply only with sandbox-owned credentials.
  */
 export function resolveSttConfig({ env = process.env, sandboxEnv = {} } = {}) {
-  const apiKey =
-    env.STT_API_KEY ||
-    env.OPENAI_API_KEY ||
-    sandboxEnv.STT_API_KEY ||
-    sandboxEnv.OPENAI_API_KEY ||
-    null;
-  const rawBase = env.STT_BASE_URL || sandboxEnv.STT_BASE_URL || DEFAULT_BASE_URL;
-  const baseUrl = String(rawBase).replace(/\/$/, "");
-  const model = env.STT_MODEL || sandboxEnv.STT_MODEL || DEFAULT_MODEL;
-  return { apiKey: apiKey || null, baseUrl, model };
+  const botApiKey = env.STT_API_KEY || env.OPENAI_API_KEY || null;
+  const sandboxApiKey = sandboxEnv.STT_API_KEY || sandboxEnv.OPENAI_API_KEY || null;
+
+  if (botApiKey) {
+    return {
+      apiKey: botApiKey,
+      baseUrl: String(env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ""),
+      model: env.STT_MODEL || DEFAULT_MODEL,
+    };
+  }
+
+  if (sandboxApiKey) {
+    return {
+      apiKey: sandboxApiKey,
+      baseUrl: String(sandboxEnv.STT_BASE_URL || env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ""),
+      model: sandboxEnv.STT_MODEL || env.STT_MODEL || DEFAULT_MODEL,
+    };
+  }
+
+  return {
+    apiKey: null,
+    baseUrl: String(env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ""),
+    model: env.STT_MODEL || DEFAULT_MODEL,
+  };
 }
 
 export async function transcribeAudioBuffer({
