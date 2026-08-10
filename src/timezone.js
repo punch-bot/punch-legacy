@@ -99,7 +99,7 @@ export function zonedWallTimeToUtc(
   const zone = normalizeTimeZone(timeZone);
   const desired = Date.UTC(year, month - 1, day, hour, minute, second);
   const offsets = new Set();
-  for (const hours of [-12, -6, -3, -1, 0, 1, 3, 6, 12]) {
+  for (let hours = -15; hours <= 15; hours += 1) {
     offsets.add(getTimeZoneOffsetMinutes(zone, new Date(desired + hours * 3_600_000)));
   }
   const matching = [];

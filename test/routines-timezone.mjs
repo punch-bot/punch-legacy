@@ -64,6 +64,11 @@ test("zonedWallTimeToUtc rejects spring-forward gap and prefers earlier fall-bac
     new Date(tz.zonedWallTimeToUtc({ year: 2026, month: 4, day: 5, hour: 1, minute: 45 }, "Australia/Lord_Howe")).toISOString(),
     "2026-04-04T14:45:00.000Z",
   );
+  // Chatham falls back by 1h between +13:45 and +12:45; earlier 03:00 → 13:15Z.
+  assert.equal(
+    new Date(tz.zonedWallTimeToUtc({ year: 2026, month: 4, day: 5, hour: 3, minute: 0 }, "Pacific/Chatham")).toISOString(),
+    "2026-04-04T13:15:00.000Z",
+  );
 });
 
 test("parseRecurrence daily builds cron fields from the user timezone", () => {
