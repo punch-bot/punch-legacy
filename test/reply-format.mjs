@@ -32,9 +32,9 @@ test("does not close a fence on a shorter run or a different delimiter", () => {
   assert.ok(out.includes("\n**3. after.**"));
 
   const mixed =
-    "a **1. x**\n```js\n~~ **2. not closed**\n```\nb **3. y**";
+    "a **1. x**\n```js\n~~~ **2. not closed**\n```\nb **3. y**";
   const mixedOut = formatReplyNewlines(mixed);
-  assert.ok(mixedOut.includes("```js\n~~ **2. not closed**\n```"));
+  assert.ok(mixedOut.includes("```js\n~~~ **2. not closed**\n```"));
   assert.ok(mixedOut.includes("\n**1. x**"));
   assert.ok(mixedOut.includes("\n**3. y**"));
 });
@@ -61,6 +61,19 @@ test("masks double-backtick inline spans so they are not split", () => {
   assert.ok(out.includes("see ``**1. not a list**`` then\n**2. real item.**"));
 });
 
+test("keeps a shorter backtick run inside a protected span unsplit", () => {
+  const input = "see ``a `tick` **1. inner**`` then **2. real**";
+  const out = formatReplyNewlines(input);
+  assert.ok(out.includes("see ``a `tick` **1. inner**`` then\n**2. real**"));
+  assert.ok(!out.includes("tick`\n"), "span content must not gain a newline");
+});
+
+test("keeps a literal tick before bold text inside a double-backtick span", () => {
+  const input = "see `` `tick **1. inner**`` then **2. real**";
+  const out = formatReplyNewlines(input);
+  assert.ok(out.includes("see `` `tick **1. inner**`` then\n**2. real**"));
+});
+
 test("splits bold list leads glued to prose", () => {
   const input = "some lead-in text **- first bullet.** more text **- second bullet.**";
   const out = formatReplyNewlines(input);
@@ -83,6 +96,13 @@ test("collapses excess blank lines but preserves structure", () => {
   const input = "one\n\n\n\ntwo";
   const out = formatReplyNewlines(input);
   assert.equal(out, "one\n\ntwo");
+});
+
+test("keeps intentional blank lines inside fenced code byte-identical", () => {
+  const input = "```\na\n\n\n\nb\n```\nx **1. y**";
+  const out = formatReplyNewlines(input);
+  assert.ok(out.includes("```\na\n\n\n\nb\n```"));
+  assert.ok(out.includes("\n**1. y**"));
 });
 
 test("empty and non-string input are safe", () => {

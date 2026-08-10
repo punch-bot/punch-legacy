@@ -3,7 +3,7 @@ function splitKeepingFences(text) {
   let buffer = "";
   let open = null;
   for (const line of String(text || "").split("\n")) {
-    const m = line.match(/^(\s*)([`~]+)(.*)$/);
+    const m = line.match(/^(\s*)(`+|~+)(.*)$/);
     const run = m ? m[2] : "";
     if (open) {
       buffer += line + "\n";
@@ -32,7 +32,44 @@ function splitKeepingFences(text) {
 }
 
 function stripInlineCode(text) {
-  return text.replace(/(^|[^`])(`+)([^`\n]*?)\2(?=$|[^`])/g, (match, pre, ticks, inner) => pre + "\u0000".repeat((ticks + inner + ticks).length));
+  const s = String(text || "");
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] !== "`") {
+      out += s[i];
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j < s.length && s[j] === "`") j += 1;
+    const openLen = j - i;
+    let k = j;
+    let closed = false;
+    while (k < s.length) {
+      if (s[k] === "\n") break;
+      if (s[k] === "`") {
+        let m = k;
+        while (m < s.length && s[m] === "`") m += 1;
+        if (m - k === openLen) {
+          closed = true;
+          k = m;
+          break;
+        }
+        k = m;
+      } else {
+        k += 1;
+      }
+    }
+    if (closed) {
+      out += "\u0000".repeat(k - i);
+      i = k;
+    } else {
+      out += s.slice(i, j);
+      i = j;
+    }
+  }
+  return out;
 }
 
 const ITEM_MARKER = /(\*\*\d+[.)])|(\*\*[-•]|\*\*\w[^*]*:)/g;
@@ -66,9 +103,15 @@ export function formatReplyNewlines(text) {
   const source = String(text || "");
   const parts = splitKeepingFences(source);
   const out = parts
-    .map((part) => (part.code ? part.text : part.text.split("\n").map(formatLine).join("\n")))
-    .join("")
-    .replace(/\n{3,}/g, "\n\n");
+    .map((part) => {
+      if (part.code) return part.text;
+      return part.text
+        .split("\n")
+        .map(formatLine)
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n");
+    })
+    .join("");
   if (!source.endsWith("\n")) return out.replace(/\n+$/, "");
   return out;
 }
