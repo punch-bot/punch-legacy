@@ -66,6 +66,8 @@ import {
   isVoiceMessage,
   mergeTranscriptIntoText,
   resolveSttConfig,
+  shouldAcceptChatTurn,
+  STT_USER_ERROR_GENERIC,
   transcribeVoiceMessage,
 } from "./stt.js";
 
@@ -1587,9 +1589,15 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
     const stt = await transcribeVoiceMessage(message, {
       resolveConfig: () => resolveSttConfigForUser(uid),
+      signal,
     });
+    if (stt.aborted || signal?.aborted) {
+      activeTurns.delete(uid);
+      return;
+    }
     if (!stt.ok) {
-      const errMsg = stt.error || "Could not transcribe voice memo.";
+      if (stt.error) console.error(`[stt] uid=${uid} ${stt.error}`);
+      const errMsg = stt.userError || STT_USER_ERROR_GENERIC;
       if (existingThinking) {
         await existingThinking.edit({ content: errMsg, allowedMentions: { parse: [] } }).catch(() => {});
       } else {
@@ -2730,13 +2738,18 @@ client.on(Events.MessageCreate, async (message) => {
 
   const summonWord = (!isDM && message.guild) ? (store.getUserTrigger(message.author.id) || store.getSummonWord(message.guild.id)) : null;
   if (!isDM && !mentioned && !message.content.startsWith(PREFIX)) {
-    // Voice memos can't carry an @mention; allow them when replying to Punch.
-    if (voiceMemo && (await isReplyToBot(message))) {
-      // addressed via reply
-    } else if (summonWord) {
-      const words = content.toLowerCase().split(/\s+/);
-      if (!words.includes(summonWord)) return;
-    } else {
+    const replyToBot = voiceMemo ? await isReplyToBot(message) : false;
+    const summonMatched = summonWord
+      ? content.toLowerCase().split(/\s+/).includes(summonWord)
+      : false;
+    if (!shouldAcceptChatTurn({
+      isDM,
+      mentioned,
+      contentStartsWithPrefix: false,
+      voiceMemo,
+      replyToBot,
+      summonMatched,
+    })) {
       return;
     }
   }

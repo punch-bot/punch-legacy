@@ -6,6 +6,9 @@ import {
   isVoiceMessage,
   mergeTranscriptIntoText,
   resolveSttConfig,
+  shouldAcceptChatTurn,
+  STT_USER_ERROR_GENERIC,
+  STT_USER_ERROR_NO_KEY,
   transcribeAudioBuffer,
   transcribeVoiceMessage,
 } from "../src/stt.js";
@@ -278,4 +281,135 @@ test("transcribeVoiceMessage returns config error when no API key", async () => 
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /API key/i);
+  assert.equal(result.userError, STT_USER_ERROR_NO_KEY);
+});
+
+test("transcribeVoiceMessage sanitizes provider failures for users", async () => {
+  const message = mockMessage({
+    flags: VOICE_FLAG,
+    attachments: [mockAttachment()],
+  });
+  const result = await transcribeVoiceMessage(message, {
+    resolveConfig: async () => ({
+      apiKey: "sk",
+      baseUrl: "https://api.openai.com/v1",
+      model: "whisper-1",
+    }),
+    fetchImpl: async (url) => {
+      if (String(url).includes("cdn.discordapp.com")) {
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => Buffer.from("audio").buffer,
+        };
+      }
+      return {
+        ok: false,
+        status: 500,
+        text: async () => "internal secret details",
+        json: async () => ({}),
+      };
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.userError, STT_USER_ERROR_GENERIC);
+  assert.match(result.error, /STT API 500/);
+  assert.equal(result.userError.includes("secret"), false);
+});
+
+test("transcribeVoiceMessage aborts when signal fires during download", async () => {
+  const message = mockMessage({
+    flags: VOICE_FLAG,
+    attachments: [mockAttachment()],
+  });
+  const ac = new AbortController();
+  const result = await transcribeVoiceMessage(message, {
+    signal: ac.signal,
+    resolveConfig: async () => ({
+      apiKey: "sk",
+      baseUrl: "https://api.openai.com/v1",
+      model: "whisper-1",
+    }),
+    fetchImpl: async (_url, opts) => {
+      ac.abort();
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      // Mimic fetch rejecting on abort
+      if (opts?.signal?.aborted) throw err;
+      throw err;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.aborted, true);
+  assert.equal(result.userError, null);
+});
+
+test("transcribeAudioBuffer passes abort signal to provider fetch", async () => {
+  const ac = new AbortController();
+  let sawSignal = false;
+  await assert.rejects(
+    () =>
+      transcribeAudioBuffer({
+        buffer: Buffer.from("ogg"),
+        filename: "voice.ogg",
+        apiKey: "sk",
+        signal: ac.signal,
+        fetchImpl: async (_url, opts) => {
+          sawSignal = !!opts.signal;
+          ac.abort();
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          throw err;
+        },
+      }),
+    (err) => err.name === "AbortError",
+  );
+  assert.equal(sawSignal, true);
+});
+
+test("shouldAcceptChatTurn allows DM voice without mention", () => {
+  assert.equal(
+    shouldAcceptChatTurn({ isDM: true, voiceMemo: true }),
+    true,
+  );
+});
+
+test("shouldAcceptChatTurn allows guild voice only when reply-to-bot", () => {
+  assert.equal(
+    shouldAcceptChatTurn({
+      isDM: false,
+      mentioned: false,
+      voiceMemo: true,
+      replyToBot: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAcceptChatTurn({
+      isDM: false,
+      mentioned: false,
+      voiceMemo: true,
+      replyToBot: false,
+    }),
+    false,
+  );
+});
+
+test("shouldAcceptChatTurn rejects unrelated guild voice (no STT path)", () => {
+  assert.equal(
+    shouldAcceptChatTurn({
+      isDM: false,
+      mentioned: false,
+      contentStartsWithPrefix: false,
+      voiceMemo: true,
+      replyToBot: false,
+      summonMatched: false,
+    }),
+    false,
+  );
+});
+
+test("mergeTranscriptIntoText merges spoken text once", () => {
+  assert.equal(mergeTranscriptIntoText("extra", "hello"), "hello\n\nextra");
+  assert.equal(mergeTranscriptIntoText("", "hello"), "hello");
 });
