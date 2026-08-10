@@ -62,6 +62,15 @@ import {
   reduceProgressEvent,
   renderProgressLive,
 } from "./progress-ui.js";
+import {
+  discardThinkingMessage,
+  isVoiceMessage,
+  mergeTranscriptIntoText,
+  resolveSttConfig,
+  shouldAcceptChatTurn,
+  STT_USER_ERROR_GENERIC,
+  transcribeVoiceMessage,
+} from "./stt.js";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const PREFIX = process.env.PREFIX || "!";
@@ -615,7 +624,7 @@ async function handleCommand(message, cmd, rest) {
     case "help": {
       const embed = new EmbedBuilder()
         .setTitle("punch — Discord → Pi bridge")
-        .setDescription("Mention me or DM me to chat with the LLM. Commands:")
+        .setDescription("Mention me, DM me, or send a voice memo in a DM or as a reply to me in a server. Commands:")
         .addFields(
           { name: "Memory", value: `\`\`${PREFIX}remember <text>\`\` — save a fact about you\n\`\`${PREFIX}remember-channel <text>\`\` — save a fact for this channel\n\`\`${PREFIX}memories\`\` — list your + channel memories\n\`\`${PREFIX}forget <id>\`\` — delete a memory by id`, inline: true },
           { name: "Session", value: `\`\`${PREFIX}reset\`\` — start a fresh Pi session here`, inline: true },
@@ -624,7 +633,7 @@ async function handleCommand(message, cmd, rest) {
           { name: "\u200B", value: "\u200B" },
           { name: "Channel Settings", value: "`/settings` — summon word, channel lock, reaction summon, progress mode\n`/settings view` to see current values\n`!setup` / `!forget-channel` — channel lock aliases", inline: true },
           { name: "Routines", value: `\`\`${PREFIX}remind <when> <text>\`\` — one-shot reminder\n\`\`${PREFIX}routine list\`\` — list your routines\n\`\`${PREFIX}routine history [id]\`\` — recent runs and errors\n\`\`${PREFIX}routine remove <id>\`\` — delete a routine\n\`\`${PREFIX}routine pause/resume <id>\`\` — toggle a routine\n\`\`${PREFIX}routine daily <time> <text>\`\` — daily reminder\n\`\`${PREFIX}routine auto <when> <prompt>\`\` — LLM automation`, inline: true },
-          { name: "Slash Commands", value: "`/settings` — configure Punch\n`/reset` — start a fresh Pi session\n`/logs` — sandbox + Pi gateway logs\n`/routine add` — schedule a routine\n`/remind` — quick one-shot reminder\nReact with the summon emoji on a message to invoke Punch on it\n**Pigeons:** permission DM, rate limits, optional buffer (`/settings pigeon`)", inline: true }
+          { name: "Slash Commands", value: "`/settings` — configure Punch\n`/reset` — start a fresh Pi session\n`/logs` — sandbox + Pi gateway logs\n`/routine add` — schedule a routine\n`/remind` — quick one-shot reminder\nReact with the summon emoji on a message to invoke Punch on it\n**Voice memos:** DM me, or reply to me in a server (free: `GROQ_API_KEY` / `/apikey set groq`)\n**Pigeons:** permission DM, rate limits, optional buffer (`/settings pigeon`)", inline: true }
         )
         .setColor(0x0099ff)
         .setFooter({ text: "poolside/poolside/laguna-m.1" });
@@ -1569,6 +1578,42 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     return;
   }
 
+  // Discord voice memos → transcript, then treat as normal chat text.
+  if (isVoiceMessage(message)) {
+    turn.phase = "transcribing";
+    turn.detail = "transcribing voice memo";
+    if (existingThinking) {
+      await existingThinking.edit({
+        content: "🎧 Transcribing voice memo…",
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
+    }
+    const stt = await transcribeVoiceMessage(message, {
+      resolveConfig: () => resolveSttConfigForUser(uid),
+      signal,
+    });
+    if (stt.aborted || signal?.aborted) {
+      await discardThinkingMessage(existingThinking);
+      activeTurns.delete(uid);
+      return;
+    }
+    if (!stt.ok) {
+      if (stt.error) console.error(`[stt] uid=${uid} ${stt.error}`);
+      const errMsg = stt.userError || STT_USER_ERROR_GENERIC;
+      if (existingThinking) {
+        await existingThinking.edit({ content: errMsg, allowedMentions: { parse: [] } }).catch(() => {});
+      } else {
+        await reply(message, errMsg);
+      }
+      activeTurns.delete(uid);
+      return;
+    }
+    if (stt.text) {
+      text = mergeTranscriptIntoText(text, stt.text);
+      console.log(`[stt] uid=${uid} transcribed ${stt.text.length} chars`);
+    }
+  }
+
   const cid = message.channelId;
   const memoryUserText = text;
 
@@ -1615,11 +1660,11 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   if (!text.trim() && agentAttachments.length === 0) {
     if (existingThinking) {
       await existingThinking.edit({
-        content: "Say something after the mention.",
+        content: "Say something after the mention (or send a voice memo).",
         allowedMentions: { parse: [] },
       }).catch(() => {});
     } else {
-      await reply(message, "Say something after the mention.");
+      await reply(message, "Say something after the mention (or send a voice memo).");
     }
     activeTurns.delete(uid);
     return;
@@ -2674,9 +2719,10 @@ client.on(Events.MessageCreate, async (message) => {
   const isDM = !message.guild;
   const mentioned = isBotDirectlyMentioned(message, client.user);
   const content = message.content.trim();
+  const voiceMemo = isVoiceMessage(message);
 
   console.log(
-    `[msg] dm=${isDM} mention=${mentioned} len=${content.length} from=${message.author.username}`,
+    `[msg] dm=${isDM} mention=${mentioned} voice=${voiceMemo} len=${content.length} from=${message.author.username}`,
   );
 
   if (content.startsWith(PREFIX)) {
@@ -2694,10 +2740,18 @@ client.on(Events.MessageCreate, async (message) => {
 
   const summonWord = (!isDM && message.guild) ? (store.getUserTrigger(message.author.id) || store.getSummonWord(message.guild.id)) : null;
   if (!isDM && !mentioned && !message.content.startsWith(PREFIX)) {
-    if (summonWord) {
-      const words = content.toLowerCase().split(/\s+/);
-      if (!words.includes(summonWord)) return;
-    } else {
+    const replyToBot = voiceMemo ? await isReplyToBot(message) : false;
+    const summonMatched = summonWord
+      ? content.toLowerCase().split(/\s+/).includes(summonWord)
+      : false;
+    if (!shouldAcceptChatTurn({
+      isDM,
+      mentioned,
+      contentStartsWithPrefix: false,
+      voiceMemo,
+      replyToBot,
+      summonMatched,
+    })) {
       return;
     }
   }
@@ -2721,6 +2775,31 @@ client.on(Events.MessageCreate, async (message) => {
   await enqueueChat(message, text, contextMessages, repliedTo ? { repliedTo } : {});
 });
 
+async function resolveSttConfigForUser(userId) {
+  let sandboxEnv = {};
+  try {
+    if (apiUrlFor(userId)) {
+      const data = await getEnv(userId);
+      sandboxEnv = data?.env && typeof data.env === "object" ? data.env : {};
+    }
+  } catch (err) {
+    console.error("[stt] failed to load sandbox env for keys:", err.message);
+  }
+  return resolveSttConfig({ env: process.env, sandboxEnv });
+}
+
+async function isReplyToBot(message) {
+  if (!message.reference?.messageId || !client.user) return false;
+  try {
+    const refMsg = message.referencedMessage
+      || await message.channel.messages.fetch(message.reference.messageId);
+    return refMsg?.author?.id === client.user.id;
+  } catch (err) {
+    console.error("[stt] failed to fetch replied message for voice gate:", err.message);
+    return false;
+  }
+}
+
 async function buildRepliedToContext(message) {
   if (!message.reference?.messageId) return null;
   try {
@@ -2728,7 +2807,9 @@ async function buildRepliedToContext(message) {
     if (!refMsg) return null;
     const authorName = refMsg.member?.displayName || refMsg.author.username;
     let content = refMsg.content.replace(/<@!?\d+>/g, "").trim();
-    if (!content && refMsg.attachments.size > 0) {
+    if (!content && isVoiceMessage(refMsg)) {
+      content = "(voice memo)";
+    } else if (!content && refMsg.attachments.size > 0) {
       content = `(message has ${refMsg.attachments.size} attachment(s))`;
     }
     if (!content) content = "(empty message)";
@@ -2784,7 +2865,9 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 
     const authorName = targetMessage.member?.displayName || targetMessage.author.username;
     let content = targetMessage.content.replace(/<@!?\d+>/g, "").trim();
-    if (!content && targetMessage.attachments.size > 0) {
+    if (!content && isVoiceMessage(targetMessage)) {
+      content = "(voice memo — Punch will transcribe it)";
+    } else if (!content && targetMessage.attachments.size > 0) {
       content = `(message has ${targetMessage.attachments.size} attachment(s))`;
     }
     if (!content) content = "(empty message)";
