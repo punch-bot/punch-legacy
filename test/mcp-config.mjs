@@ -178,6 +178,23 @@ test("punchRegistryToMcpServers wires api_key auth with server names", () => {
   assert.equal(servers.worker.env.TOKEN, `\${${mcpApiKeyEnvVar("worker")}}`);
 });
 
+test("api_key auth strips inline credential headers before bearer wiring", () => {
+  assert.deepEqual(
+    punchEntryToAdapter({
+      type: "remote",
+      url: "https://mcp.example.com/mcp",
+      auth: "api_key",
+      headers: { Authorization: "Bearer inline", "X-Custom": "ok" },
+    }, "linear"),
+    {
+      url: "https://mcp.example.com/mcp",
+      auth: "bearer",
+      bearerTokenEnv: "MCP_bGluZWFy_API_KEY",
+      headers: { "X-Custom": "ok" },
+    },
+  );
+});
+
 test("converts local Punch entries", () => {
   assert.deepEqual(
     punchEntryToAdapter({

@@ -266,6 +266,10 @@ export function assertPunchEntry(entry) {
 function applyApiKeyAuthToAdapter(out, entry, serverName) {
   const envVar = mcpApiKeyEnvVar(serverName);
   const ref = `\${${envVar}}`;
+  if (out.headers) {
+    out.headers = stripCredentialHeaders(out.headers);
+    if (!Object.keys(out.headers).length) delete out.headers;
+  }
   if (entry.type === "remote") {
     const headerName = entry.apiKeyHeader ? String(entry.apiKeyHeader).trim() : "";
     if (headerName && headerName.toLowerCase() !== "authorization") {
@@ -278,6 +282,17 @@ function applyApiKeyAuthToAdapter(out, entry, serverName) {
   }
   const targetEnv = entry.apiKeyEnv ? String(entry.apiKeyEnv).trim() : "API_KEY";
   out.env = { ...(out.env || {}), [targetEnv]: ref };
+  return out;
+}
+
+function stripCredentialHeaders(headers) {
+  const out = { ...headers };
+  for (const k of Object.keys(out)) {
+    const h = k.toLowerCase();
+    if (h === "authorization" || h === "x-api-key" || h.endsWith("-api-key") || h.includes("token")) {
+      delete out[k];
+    }
+  }
   return out;
 }
 

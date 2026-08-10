@@ -1453,10 +1453,9 @@ const apiServer = createServer((req, res) => {
     const view = {};
     for (const [name, entry] of Object.entries(mcp)) {
       const sanitized = sanitizeMcpEntryForDisplay(entry);
-      const envVar = mcpApiKeyEnvVar(name);
-      if (usesMcpApiKeyAuth(entry) || isMcpApiKeyConfigured(env, name, mcp)) {
+      if (usesMcpApiKeyAuth(entry)) {
         sanitized.apiKeyConfigured = isMcpApiKeyConfigured(env, name, mcp);
-        sanitized.apiKeyEnv = envVar;
+        sanitized.apiKeyEnv = mcpApiKeyEnvVar(name);
       }
       view[name] = sanitized;
     }
@@ -1501,14 +1500,19 @@ const apiServer = createServer((req, res) => {
         }
         const entry = assertPunchEntry(candidate);
         const mcp = loadJSON(MCP_FILE);
-        mcp[name] = entry;
         const env = loadJSON(ENV_FILE);
+        mcp[name] = entry;
         let envVar = null;
-        if (apiKeyValue) {
+        let envChanged = false;
+        if (!usesMcpApiKeyAuth(entry)) {
+          clearMcpEnvVars(mcpApiKeyEnvVarsToClear(name, mcp), env);
+          envChanged = true;
+        } else if (apiKeyValue) {
           envVar = mcpApiKeyEnvVar(name);
           env[envVar] = apiKeyValue;
+          envChanged = true;
         }
-        if (envVar) persistMcpRegistryAndEnv(mcp, env);
+        if (envChanged) persistMcpRegistryAndEnv(mcp, env);
         else saveJSON(MCP_FILE, mcp);
         if (envVar) process.env[envVar] = apiKeyValue;
         syncMcpConfig();
