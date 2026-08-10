@@ -621,7 +621,7 @@ async function handleCommand(message, cmd, rest) {
     case "help": {
       const embed = new EmbedBuilder()
         .setTitle("punch — Discord → Pi bridge")
-        .setDescription("Mention me, DM me, or send a voice memo to chat with the LLM. Commands:")
+        .setDescription("Mention me, DM me, or send a voice memo in a DM or as a reply to me in a server. Commands:")
         .addFields(
           { name: "Memory", value: `\`\`${PREFIX}remember <text>\`\` — save a fact about you\n\`\`${PREFIX}remember-channel <text>\`\` — save a fact for this channel\n\`\`${PREFIX}memories\`\` — list your + channel memories\n\`\`${PREFIX}forget <id>\`\` — delete a memory by id`, inline: true },
           { name: "Session", value: `\`\`${PREFIX}reset\`\` — start a fresh Pi session here`, inline: true },
@@ -630,7 +630,7 @@ async function handleCommand(message, cmd, rest) {
           { name: "\u200B", value: "\u200B" },
           { name: "Channel Settings", value: "`/settings` — summon word, channel lock, reaction summon, progress mode\n`/settings view` to see current values\n`!setup` / `!forget-channel` — channel lock aliases", inline: true },
           { name: "Routines", value: `\`\`${PREFIX}remind <when> <text>\`\` — one-shot reminder\n\`\`${PREFIX}routine list\`\` — list your routines\n\`\`${PREFIX}routine history [id]\`\` — recent runs and errors\n\`\`${PREFIX}routine remove <id>\`\` — delete a routine\n\`\`${PREFIX}routine pause/resume <id>\`\` — toggle a routine\n\`\`${PREFIX}routine daily <time> <text>\`\` — daily reminder\n\`\`${PREFIX}routine auto <when> <prompt>\`\` — LLM automation`, inline: true },
-          { name: "Slash Commands", value: "`/settings` — configure Punch\n`/reset` — start a fresh Pi session\n`/logs` — sandbox + Pi gateway logs\n`/routine add` — schedule a routine\n`/remind` — quick one-shot reminder\nReact with the summon emoji on a message to invoke Punch on it\n**Voice memos:** DM me a voice message, or reply to me with one (free: `GROQ_API_KEY` / `/apikey set groq`)\n**Pigeons:** permission DM, rate limits, optional buffer (`/settings pigeon`)", inline: true }
+          { name: "Slash Commands", value: "`/settings` — configure Punch\n`/reset` — start a fresh Pi session\n`/logs` — sandbox + Pi gateway logs\n`/routine add` — schedule a routine\n`/remind` — quick one-shot reminder\nReact with the summon emoji on a message to invoke Punch on it\n**Voice memos:** DM me, or reply to me in a server (free: `GROQ_API_KEY` / `/apikey set groq`)\n**Pigeons:** permission DM, rate limits, optional buffer (`/settings pigeon`)", inline: true }
         )
         .setColor(0x0099ff)
         .setFooter({ text: "poolside/poolside/laguna-m.1" });
