@@ -94,7 +94,7 @@ export default function (pi: ExtensionAPI) {
     const threshold = Number(event.systemPrompt.match(/PUNCH_CONTEXT_PRUNING_THRESHOLD=(\d+)/)?.[1] || 0);
     const usage = ctx.getContextUsage();
     const nudge = threshold > 0 && usage?.percent != null && usage.percent >= threshold
-      ? `\n\n## Context pruning now\nContext is at ${Math.round(usage.percent)}%. Before continuing, selectively compress stale complete ranges with compress_context. Keep current work and recent turns available.`
+      ? `\n\n## Context pruning now\nUsage ${Math.round(usage.percent)}% — compress stale complete ranges with compress_context before continuing. Keep current work and recent turns raw.`
       : "";
     if (!nudge) return;
     return {

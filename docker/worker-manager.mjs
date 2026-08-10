@@ -74,8 +74,12 @@ export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_
   const all = records(); all.push(record); save(all);
   const [provider, modelId] = modelParts(safeModel);
   const toolList = kind === "research" ? "read,grep,find,ls" : kind === "browser" ? "puppeteer_navigate,puppeteer_screenshot,puppeteer_click,puppeteer_fill,puppeteer_select,puppeteer_hover" : "bash,read,write,edit";
-  const policy = kind === "research" ? "Use read-only investigation. Do not modify files or use browser." : kind === "browser" ? "Use browser only for research. Do not modify files." : "Work only within /work. Make focused changes and report them.";
-  const bootstrap = `You are isolated Punch worker (${kind}). ${policy} Return concise findings/results. Do not spawn subagents, install extensions, access secrets, send messages, or bypass tool restrictions.`;
+  const policy = kind === "research"
+    ? "Read-only investigation in /work. No writes, bash, or browser."
+    : kind === "browser"
+      ? "Browser research only. No file writes or bash."
+      : "Focused changes in /work only. Report what you changed.";
+  const bootstrap = `Isolated Punch worker (${kind}). ${policy}\nReturn concise findings or results. No subagents, extensions, secrets, outbound messages, or extra tools.`;
   const args = ["/usr/local/bin/pi-worker-runner.mjs", provider, modelId, sessionDir, toolList, `${bootstrap}\n\nTask:\n${prompt}`];
   const child = spawn("node", args, { cwd: "/work", env: { ...process.env, PUNCH_WORKER_TIMEOUT_MS: String(record.timeoutMs) }, stdio: ["ignore", "pipe", "pipe"] });
   active.set(id, child);
