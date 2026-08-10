@@ -66,6 +66,7 @@ COPY docker/mcp_extension.ts /opt/pi/extensions/mcp.ts
 COPY docker/mcp-config.mjs /opt/pi/mcp-config.mjs
 COPY docker/context-pruning-state.mjs /opt/pi/context-pruning-state.mjs
 COPY docker/pi-SYSTEM.md /opt/pi/SYSTEM.md
+COPY docker/skills/ /opt/pi/skills/
 # API keys for Pi come from supervisor /env and /apikey (provider env vars).
 RUN echo '{}' > /opt/picfg/seed-auth.json
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh

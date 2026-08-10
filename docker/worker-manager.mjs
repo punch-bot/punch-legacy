@@ -58,7 +58,7 @@ export function stopWorker(id) {
   return update(id, { status: "stopping", phase: "stopping", detail: "Stopping worker", lastUpdateAt: Date.now() });
 }
 
-export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, notify, notifyProgress }) {
+export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, channelId = null, messageId = null, source = null, notify, notifyProgress }) {
   const cap = getWorkerCap();
   if (active.size >= cap) throw new Error(`Worker limit reached (${cap})`);
   if (!["research", "coding", "browser"].includes(kind)) throw new Error("kind must be research, coding, or browser");
