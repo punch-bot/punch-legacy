@@ -180,4 +180,19 @@ test("progress fingerprints ignore unchanged snapshots but accept explicit heart
     }),
     null,
   );
+
+  const first = agent.classifyIdleWatchdogEvent(base, "");
+  assert.equal(first.resetMeaningful, true);
+  const same = agent.classifyIdleWatchdogEvent(later, first.fingerprint);
+  assert.equal(same.resetMeaningful, false);
+  const thinkingBeat = agent.classifyIdleWatchdogEvent({
+    ...later,
+    properties: { ...later.properties, heartbeat: true },
+  }, first.fingerprint);
+  assert.equal(thinkingBeat.resetKeepalive, true);
+  const workingBeat = agent.classifyIdleWatchdogEvent({
+    type: "session.progress",
+    properties: { phase: "working", status: "running", current: "Working", heartbeat: true },
+  }, first.fingerprint);
+  assert.equal(workingBeat.resetKeepalive, false);
 });

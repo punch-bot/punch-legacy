@@ -1235,11 +1235,11 @@ client.once(Events.ClientReady, async (c) => {
     ],
   }, {
     name: "timeout",
-    description: "Toggle the 90s idle timeout that aborts stalled Pi turns",
+    description: "Toggle idle/stale timeouts that abort hung Pi turns",
     options: [
-      { type: 1, name: "disable", description: "Disable the 90s idle timeout for your turns" },
-      { type: 1, name: "enable", description: "Re-enable the 90s idle timeout (default)" },
-      { type: 1, name: "status", description: "Show whether the idle timeout is disabled" },
+      { type: 1, name: "disable", description: "Disable idle/stale timeouts for your turns (hard ceiling still applies)" },
+      { type: 1, name: "enable", description: "Re-enable idle/stale timeouts (default)" },
+      { type: 1, name: "status", description: "Show whether idle/stale timeouts are disabled" },
     ],
   }, {
     name: "reset",
@@ -1862,7 +1862,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
     if (memoryRecallKey && !memoryRecallAdopted) store.clearMemoryRecall(memoryRecallKey);
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
-    const timedOut = /timed out|timeout|stalled|ceiling/i.test(err?.message || "");
+    const timedOut = /timed out|timeout|stalled|ceiling|silent for|turn hung/i.test(err?.message || "");
     await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
     if (useLifecycle) {
       const endEmoji = aborted ? "🛑" : "⚠️";
@@ -1897,7 +1897,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     let note = "";
     if (timedOut) {
       store.clearSession(cid);
-      note = " (session was stuck — reset it, try again)";
+      note = " (hung turn aborted + Pi restart requested — try again)";
     }
     // A previous session stored inline `file` parts (zip/jpg/etc.) that the
     // model now rejects. Clear the poisoned session so the next turn starts
@@ -3909,13 +3909,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const uid = interaction.user.id;
     if (sub === "disable") {
       store.patchUserSettings(uid, { disableIdleTimeout: true });
-      await interaction.reply({ content: "⏱️ Idle timeout disabled — long turns won't be aborted for no progress (the 30m hard ceiling still applies).", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "⏱️ Idle/stale timeouts disabled — hung turns won't be aborted for silence or heartbeat-only working (the hard ceiling still applies).", flags: MessageFlags.Ephemeral });
     } else if (sub === "enable") {
       store.patchUserSettings(uid, { disableIdleTimeout: false });
-      await interaction.reply({ content: "⏱️ Idle timeout re-enabled (90s).", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "⏱️ Idle/stale timeouts re-enabled (90s silence / ~3m stuck tool-or-working).", flags: MessageFlags.Ephemeral });
     } else {
       const us = store.getUserSettings(uid);
-      await interaction.reply({ content: `⏱️ Idle timeout is currently **${us.disableIdleTimeout ? "disabled" : "enabled (90s)"}**.`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `⏱️ Idle/stale timeouts are currently **${us.disableIdleTimeout ? "disabled" : "enabled (90s silence / ~3m stuck working)"}**.`, flags: MessageFlags.Ephemeral });
     }
     return;
   }
