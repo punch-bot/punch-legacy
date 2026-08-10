@@ -6,8 +6,13 @@
  */
 
 const IS_VOICE_MESSAGE = 1 << 13; // discord.js MessageFlags.IsVoiceMessage
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
-const DEFAULT_MODEL = "whisper-1";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_OPENAI_MODEL = "whisper-1";
+/** Groq free-tier Whisper; OpenAI-compatible /audio/transcriptions. */
+const DEFAULT_GROQ_MODEL = "whisper-large-v3-turbo";
+const DEFAULT_BASE_URL = DEFAULT_OPENAI_BASE_URL;
+const DEFAULT_MODEL = DEFAULT_OPENAI_MODEL;
 const MAX_VOICE_BYTES = (Number(process.env.STT_MAX_BYTES) || 25) * 1024 * 1024;
 
 function flagHas(message, bit) {
@@ -63,38 +68,62 @@ export function mergeTranscriptIntoText(existingText, transcript) {
 
 /**
  * Resolve OpenAI-compatible STT settings (`/audio/transcriptions`).
- * Priority: bot STT_API_KEY → bot OPENAI_API_KEY → sandbox STT_API_KEY → sandbox OPENAI_API_KEY.
  *
- * Endpoint (`STT_BASE_URL`) is always operator-controlled (bot env only). Sandbox
- * users may supply their own API key (and optional STT_MODEL), but cannot redirect
- * bot-side HTTP to an arbitrary URL (credential exfil / SSRF).
+ * Credential priority (bot env, then sandbox env):
+ *   STT_API_KEY → GROQ_API_KEY → OPENAI_API_KEY
+ *
+ * `GROQ_API_KEY` is the recommended free path (Groq Whisper free tier).
+ * Endpoint (`STT_BASE_URL`) is always operator-controlled (bot env only) so
+ * sandboxes cannot redirect bot-side HTTP (SSRF / key exfil).
  */
 export function resolveSttConfig({ env = process.env, sandboxEnv = {} } = {}) {
-  const botApiKey = env.STT_API_KEY || env.OPENAI_API_KEY || null;
-  const sandboxApiKey = sandboxEnv.STT_API_KEY || sandboxEnv.OPENAI_API_KEY || null;
-  const baseUrl = String(env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, "");
+  const botRaw = pickSttCredential(env);
+  const sandboxRaw = pickSttCredential(sandboxEnv);
+  const cred = botRaw
+    ? { ...botRaw, source: "bot" }
+    : sandboxRaw
+      ? { ...sandboxRaw, source: "sandbox" }
+      : null;
+  const operatorBase = env.STT_BASE_URL
+    ? String(env.STT_BASE_URL).replace(/\/$/, "")
+    : null;
 
-  if (botApiKey) {
+  if (!cred) {
     return {
-      apiKey: botApiKey,
-      baseUrl,
+      apiKey: null,
+      baseUrl: operatorBase || DEFAULT_BASE_URL,
       model: env.STT_MODEL || DEFAULT_MODEL,
+      provider: null,
     };
   }
 
-  if (sandboxApiKey) {
-    return {
-      apiKey: sandboxApiKey,
-      baseUrl,
-      model: sandboxEnv.STT_MODEL || env.STT_MODEL || DEFAULT_MODEL,
-    };
-  }
+  const defaults = defaultsForProvider(cred.provider);
+  const modelOverride =
+    cred.source === "bot"
+      ? env.STT_MODEL
+      : sandboxEnv.STT_MODEL || env.STT_MODEL;
 
   return {
-    apiKey: null,
-    baseUrl,
-    model: env.STT_MODEL || DEFAULT_MODEL,
+    apiKey: cred.apiKey,
+    baseUrl: operatorBase || defaults.baseUrl,
+    model: modelOverride || defaults.model,
+    provider: cred.provider,
   };
+}
+
+function pickSttCredential(bag) {
+  if (!bag || typeof bag !== "object") return null;
+  if (bag.STT_API_KEY) return { apiKey: bag.STT_API_KEY, provider: "stt" };
+  if (bag.GROQ_API_KEY) return { apiKey: bag.GROQ_API_KEY, provider: "groq" };
+  if (bag.OPENAI_API_KEY) return { apiKey: bag.OPENAI_API_KEY, provider: "openai" };
+  return null;
+}
+
+function defaultsForProvider(provider) {
+  if (provider === "groq") {
+    return { baseUrl: DEFAULT_GROQ_BASE_URL, model: DEFAULT_GROQ_MODEL };
+  }
+  return { baseUrl: DEFAULT_OPENAI_BASE_URL, model: DEFAULT_OPENAI_MODEL };
 }
 
 export async function transcribeAudioBuffer({
@@ -159,8 +188,8 @@ export async function transcribeVoiceMessage(message, {
       ok: false,
       text: null,
       error:
-        "Voice memos need an STT API key. Set `STT_API_KEY` or `OPENAI_API_KEY` on the bot, " +
-        "or `/apikey set openai <key>` / `/env set OPENAI_API_KEY <key>` in your sandbox.",
+        "Voice memos need an STT API key. Free option: set `GROQ_API_KEY` on the bot " +
+        "(or `/apikey set groq <key>`). Paid: `STT_API_KEY` / `OPENAI_API_KEY`.",
     };
   }
 

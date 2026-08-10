@@ -88,6 +88,37 @@ test("resolveSttConfig prefers bot STT_API_KEY over sandbox env", () => {
   assert.equal(cfg.apiKey, "bot-stt");
   assert.equal(cfg.baseUrl, "https://api.openai.com/v1");
   assert.equal(cfg.model, "whisper-1");
+  assert.equal(cfg.provider, "stt");
+});
+
+test("resolveSttConfig uses Groq free-tier defaults for GROQ_API_KEY", () => {
+  const cfg = resolveSttConfig({
+    env: { GROQ_API_KEY: "gsk-free" },
+    sandboxEnv: {},
+  });
+  assert.equal(cfg.apiKey, "gsk-free");
+  assert.equal(cfg.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(cfg.model, "whisper-large-v3-turbo");
+  assert.equal(cfg.provider, "groq");
+});
+
+test("resolveSttConfig prefers GROQ_API_KEY over OPENAI_API_KEY", () => {
+  const cfg = resolveSttConfig({
+    env: { GROQ_API_KEY: "gsk", OPENAI_API_KEY: "sk" },
+    sandboxEnv: {},
+  });
+  assert.equal(cfg.provider, "groq");
+  assert.equal(cfg.apiKey, "gsk");
+});
+
+test("resolveSttConfig uses sandbox GROQ_API_KEY with Groq endpoint", () => {
+  const cfg = resolveSttConfig({
+    env: {},
+    sandboxEnv: { GROQ_API_KEY: "gsk-user" },
+  });
+  assert.equal(cfg.apiKey, "gsk-user");
+  assert.equal(cfg.baseUrl, "https://api.groq.com/openai/v1");
+  assert.equal(cfg.model, "whisper-large-v3-turbo");
 });
 
 test("resolveSttConfig ignores sandbox endpoint/model when bot key is used", () => {
@@ -134,7 +165,7 @@ test("resolveSttConfig returns null key when nothing is configured", () => {
 test("resolveSttConfig honors bot STT_BASE_URL and STT_MODEL", () => {
   const cfg = resolveSttConfig({
     env: {
-      STT_API_KEY: "k",
+      GROQ_API_KEY: "k",
       STT_BASE_URL: "https://api.groq.com/openai/v1/",
       STT_MODEL: "whisper-large-v3",
     },
