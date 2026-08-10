@@ -65,18 +65,19 @@ export function mergeTranscriptIntoText(existingText, transcript) {
  * Resolve OpenAI-compatible STT settings (`/audio/transcriptions`).
  * Priority: bot STT_API_KEY → bot OPENAI_API_KEY → sandbox STT_API_KEY → sandbox OPENAI_API_KEY.
  *
- * When the bot supplies the API key, base URL/model come only from bot env so a
- * sandbox cannot redirect the bot credential to an attacker-controlled endpoint.
- * Sandbox STT_BASE_URL / STT_MODEL apply only with sandbox-owned credentials.
+ * Endpoint (`STT_BASE_URL`) is always operator-controlled (bot env only). Sandbox
+ * users may supply their own API key (and optional STT_MODEL), but cannot redirect
+ * bot-side HTTP to an arbitrary URL (credential exfil / SSRF).
  */
 export function resolveSttConfig({ env = process.env, sandboxEnv = {} } = {}) {
   const botApiKey = env.STT_API_KEY || env.OPENAI_API_KEY || null;
   const sandboxApiKey = sandboxEnv.STT_API_KEY || sandboxEnv.OPENAI_API_KEY || null;
+  const baseUrl = String(env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, "");
 
   if (botApiKey) {
     return {
       apiKey: botApiKey,
-      baseUrl: String(env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ""),
+      baseUrl,
       model: env.STT_MODEL || DEFAULT_MODEL,
     };
   }
@@ -84,14 +85,14 @@ export function resolveSttConfig({ env = process.env, sandboxEnv = {} } = {}) {
   if (sandboxApiKey) {
     return {
       apiKey: sandboxApiKey,
-      baseUrl: String(sandboxEnv.STT_BASE_URL || env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ""),
+      baseUrl,
       model: sandboxEnv.STT_MODEL || env.STT_MODEL || DEFAULT_MODEL,
     };
   }
 
   return {
     apiKey: null,
-    baseUrl: String(env.STT_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, ""),
+    baseUrl,
     model: env.STT_MODEL || DEFAULT_MODEL,
   };
 }
