@@ -57,7 +57,7 @@ Successful DM turns create bounded daily notes for cross-session recall and extr
 ## Feature differences
 
 - Composio remains absent.
-- Custom MCP servers work via Discord `/mcp` (list/add/remove) and `pi-mcp-adapter` inside the sandbox. OAuth auth/logout is deferred.
+- Custom MCP servers work via Discord `/mcp` (list/add/remove/auth) and `pi-mcp-adapter` inside the sandbox. OAuth is deferred; API keys use `/mcp auth`.
 - Tailscale is included with persistent per-sandbox state.
 - Nightly uses Pi through internal `pi-gateway`.
 - Browser tools come from built-in Pi extension.

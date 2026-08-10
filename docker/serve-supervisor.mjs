@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
-import { punchRegistryToAdapterConfig, assertPunchEntry } from "/usr/local/lib/mcp-config.mjs";
+import { punchRegistryToAdapterConfig, assertPunchEntry, mcpApiKeyEnvVar, mcpApiKeyEnvVarsToClear, migrateMcpApiKeyEnvVars, redactMcpKeysFromEnvView, sanitizeMcpEntryForDisplay, usesMcpApiKeyAuth, isMcpApiKeyConfigured } from "/usr/local/lib/mcp-config.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
@@ -520,6 +520,27 @@ function saveJSON(file, obj) {
   writeFileSync(file, JSON.stringify(obj, null, 2));
 }
 
+/** Save MCP registry and env together; restore prior file contents on failure. */
+function persistMcpRegistryAndEnv(mcp, env) {
+  const prevMcpRaw = existsSync(MCP_FILE) ? readFileSync(MCP_FILE, "utf8") : null;
+  const prevEnvRaw = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : null;
+  try {
+    saveJSON(MCP_FILE, mcp);
+    saveJSON(ENV_FILE, env);
+  } catch (e) {
+    if (prevMcpRaw != null) writeFileSync(MCP_FILE, prevMcpRaw);
+    if (prevEnvRaw != null) writeFileSync(ENV_FILE, prevEnvRaw);
+    throw e;
+  }
+}
+
+function clearMcpEnvVars(varNames, env) {
+  for (const varName of varNames) {
+    if (env[varName]) delete env[varName];
+    delete process.env[varName];
+  }
+}
+
 /** Pi auth shape: { type: "api_key", key } under provider id. */
 function syncAuthProvider(provider, key) {
   const id = provider.toLowerCase();
@@ -588,6 +609,19 @@ if (SANDBOX_USER_ID) {
 // Sync Punch MCP registry → Pi adapter config before the gateway starts.
 (function generateConfig() {
   mkdirSync("/data/pi", { recursive: true });
+  const mcp = loadJSON(MCP_FILE);
+  const env = loadJSON(ENV_FILE);
+  const migrated = migrateMcpApiKeyEnvVars(mcp, env);
+  if (migrated.changed) {
+    saveJSON(ENV_FILE, migrated.env);
+    for (const [k, v] of Object.entries(migrated.env)) {
+      if (k.startsWith("MCP_") && k.endsWith("_API_KEY")) process.env[k] = v;
+    }
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("MCP_") && k.endsWith("_API_KEY") && !migrated.env[k]) delete process.env[k];
+    }
+    log("migrated legacy MCP API key env vars to collision-free names");
+  }
   syncMcpConfig();
   log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"}`);
 })();
@@ -912,7 +946,7 @@ const apiServer = createServer((req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/env") {
-    res.writeHead(200); res.end(JSON.stringify({ env: loadJSON(ENV_FILE) }));
+    res.writeHead(200); res.end(JSON.stringify({ env: redactMcpKeysFromEnvView(loadJSON(ENV_FILE)) }));
     return;
   }
 
@@ -1415,8 +1449,18 @@ const apiServer = createServer((req, res) => {
   // ops; pi-mcp-adapter extension loads the Punch registry into Pi on gateway start.
   if (req.method === "GET" && url.pathname === "/mcp") {
     const mcp = loadJSON(MCP_FILE);
+    const env = loadJSON(ENV_FILE);
+    const view = {};
+    for (const [name, entry] of Object.entries(mcp)) {
+      const sanitized = sanitizeMcpEntryForDisplay(entry);
+      if (usesMcpApiKeyAuth(entry)) {
+        sanitized.apiKeyConfigured = isMcpApiKeyConfigured(env, name, mcp);
+        sanitized.apiKeyEnv = mcpApiKeyEnvVar(name);
+      }
+      view[name] = sanitized;
+    }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ mcp }));
+    res.end(JSON.stringify({ mcp: view }));
     return;
   }
 
@@ -1426,7 +1470,13 @@ const apiServer = createServer((req, res) => {
     req.on("end", () => {
       try {
         const parsed = JSON.parse(body);
-        const { name, type, url: mcpUrl, command, environment, headers, enabled = true } = parsed;
+        const { name, type, url: mcpUrl, command, environment, headers, enabled = true, auth, apiKeyEnv, apiKeyHeader } = parsed;
+        if (Object.prototype.hasOwnProperty.call(parsed, "apiKey")
+          && parsed.apiKey != null
+          && typeof parsed.apiKey !== "string") {
+          throw new Error("apiKey must be a string");
+        }
+        const apiKeyValue = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
         if (!name || !type) {
           res.writeHead(400).end(JSON.stringify({ error: "Missing name or type" }));
           return;
@@ -1437,6 +1487,10 @@ const apiServer = createServer((req, res) => {
         }
         // Preserve explicitly supplied fields (including falsy) so assertPunchEntry can reject them.
         const candidate = { type, enabled: !!enabled };
+        if (auth === "api_key" || auth === "apikey" || apiKeyValue) candidate.auth = "api_key";
+        else if (Object.prototype.hasOwnProperty.call(parsed, "auth")) candidate.auth = auth;
+        if (Object.prototype.hasOwnProperty.call(parsed, "apiKeyEnv")) candidate.apiKeyEnv = apiKeyEnv;
+        if (Object.prototype.hasOwnProperty.call(parsed, "apiKeyHeader")) candidate.apiKeyHeader = apiKeyHeader;
         if (type === "remote") {
           candidate.url = mcpUrl;
           if (Object.prototype.hasOwnProperty.call(parsed, "headers")) candidate.headers = headers;
@@ -1446,8 +1500,21 @@ const apiServer = createServer((req, res) => {
         }
         const entry = assertPunchEntry(candidate);
         const mcp = loadJSON(MCP_FILE);
+        const env = loadJSON(ENV_FILE);
         mcp[name] = entry;
-        saveJSON(MCP_FILE, mcp);
+        let envVar = null;
+        let envChanged = false;
+        if (!usesMcpApiKeyAuth(entry)) {
+          clearMcpEnvVars(mcpApiKeyEnvVarsToClear(name, mcp), env);
+          envChanged = true;
+        } else if (apiKeyValue) {
+          envVar = mcpApiKeyEnvVar(name);
+          env[envVar] = apiKeyValue;
+          envChanged = true;
+        }
+        if (envChanged) persistMcpRegistryAndEnv(mcp, env);
+        else saveJSON(MCP_FILE, mcp);
+        if (envVar) process.env[envVar] = apiKeyValue;
         syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, name }));
@@ -1468,8 +1535,11 @@ const apiServer = createServer((req, res) => {
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        const env = loadJSON(ENV_FILE);
+        const varsToClear = mcpApiKeyEnvVarsToClear(name, mcp);
+        clearMcpEnvVars(varsToClear, env);
         delete mcp[name];
-        saveJSON(MCP_FILE, mcp);
+        persistMcpRegistryAndEnv(mcp, env);
         syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true }));
@@ -1480,20 +1550,74 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
-  // Interactive OAuth for MCP is deferred (no Discord browser OAuth UX yet).
-  // Use remote headers or local environment for bearer/API tokens.
+  // API key auth for MCP (OAuth deferred). Keys live in env.json as MCP_<NAME>_API_KEY.
   if (req.method === "POST" && url.pathname === "/mcp/auth") {
-    res.writeHead(501, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      error: "MCP OAuth not available yet — pass Authorization via /mcp add headers (remote) or environment (local)",
-    }));
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name, key } = JSON.parse(body);
+        if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        if (typeof key !== "string" || !key.trim()) {
+          res.writeHead(400).end(JSON.stringify({ error: "Missing API key" }));
+          return;
+        }
+        const mcp = loadJSON(MCP_FILE);
+        if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        mcp[name] = assertPunchEntry({ ...mcp[name], auth: "api_key" });
+        const envVar = mcpApiKeyEnvVar(name);
+        const env = loadJSON(ENV_FILE);
+        env[envVar] = key.trim();
+        persistMcpRegistryAndEnv(mcp, env);
+        process.env[envVar] = key.trim();
+        syncMcpConfig();
+        forceRestart();
+        res.writeHead(200).end(JSON.stringify({ success: true, apiKeyEnv: envVar }));
+        log(`mcp api key set for: ${name}`);
+      } catch (e) {
+        res.writeHead(400).end(JSON.stringify({ error: e?.message || "Invalid JSON" }));
+      }
+    });
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/mcp/logout") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name } = JSON.parse(body);
+        if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        const mcp = loadJSON(MCP_FILE);
+        if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        const env = loadJSON(ENV_FILE);
+        clearMcpEnvVars(mcpApiKeyEnvVarsToClear(name, mcp), env);
+        saveJSON(ENV_FILE, env);
+        syncMcpConfig();
+        forceRestart();
+        res.writeHead(200).end(JSON.stringify({ success: true }));
+        log(`mcp api key removed for: ${name}`);
+      } catch {
+        res.writeHead(400).end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
+
+  // Interactive OAuth for MCP is deferred (no Discord browser OAuth UX yet).
+  // Use /mcp auth for API keys, or remote headers / local environment for custom tokens.
+  if (req.method === "POST" && url.pathname === "/mcp/oauth") {
     res.writeHead(501, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      error: "MCP OAuth logout not available yet — remove Authorization headers/env or /mcp remove the server",
+      error: "MCP OAuth not available yet — use /mcp auth for API keys, or pass custom headers/environment on add",
+    }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/mcp/oauth/logout") {
+    res.writeHead(501, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      error: "MCP OAuth logout not available yet — use /mcp logout for API keys",
     }));
     return;
   }

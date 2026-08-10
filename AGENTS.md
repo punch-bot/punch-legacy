@@ -41,7 +41,7 @@ Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/pi-gateway.mjs
 |-------------|-----------------|
 | Discord chat turns via Pi gateway | Migrating old non-Pi session DBs (use Pi session files under `/data/pi/sessions`) |
 | Abort / `!stop` (client disconnect → Pi `abort`) | |
-| `/reset` (new session), `/compress` (Pi `compact`) | MCP OAuth (`/mcp auth` / `logout`) — use headers/env tokens for now |
+| `/reset` (new session), `/compress` (Pi `compact`) | MCP OAuth — use `/mcp auth` for API keys or headers/env for custom tokens |
 | `/models`, `/env`, `/apikey`, `/secrets`, `/tailscale`, `/doctor`, `/memory`, `/skills`, `/workers`, `/multitask` | Legacy `/work/.opencode/tools` (not loaded; only `/work/.pi/extensions` reload) |
 | Built-in Pi tools: bash, read, write, edit; isolated worker Pi processes | Full multi-session concurrency for main chat gateway (it switches logical sessions) |
 | **Browser** via Pi extension `browser.ts` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
