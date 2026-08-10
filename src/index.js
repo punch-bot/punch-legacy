@@ -30,6 +30,7 @@ import { validateAutoCompressThreshold } from "./context-compression.js";
 import { extractCompressTag } from "./compress-tag.mjs";
 import { filterThreadSubtree } from "./thread-context.js";
 import { isBotDirectlyMentioned } from "./message-mentions.js";
+import { formatReplyNewlines } from "./reply-format.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
 import * as routines from "./routines.js";
@@ -1816,7 +1817,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
     const { clean: textAfterEmbeds, embeds, errors: embedErrors } = extractEmbeds(out);
     const { clean: textAfterQuestions, questions } = extractQuestions(textAfterEmbeds);
-    out = textAfterQuestions || "";
+    out = formatReplyNewlines(textAfterQuestions || "");
 
     let capturedMemory = { notesAdded: 0, factsAdded: 0, facts: [] };
     if (isDirectMessage && !message.author.bot && !opts.pigeonFrom) {
