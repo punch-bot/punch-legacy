@@ -23,11 +23,42 @@ test("leaves fenced code blocks untouched", () => {
   assert.ok(out.includes("\n**3. back to lists.**"));
 });
 
+test("does not close a fence on a shorter run or a different delimiter", () => {
+  const fourFence =
+    "start **1. real.**\n````text\n**2. inside four**\n```not a closer\n````\n**3. after.**";
+  const out = formatReplyNewlines(fourFence);
+  assert.ok(out.includes("````text\n**2. inside four**\n```not a closer\n````"));
+  assert.ok(out.includes("\n**1. real.**"));
+  assert.ok(out.includes("\n**3. after.**"));
+
+  const mixed =
+    "a **1. x**\n```js\n~~ **2. not closed**\n```\nb **3. y**";
+  const mixedOut = formatReplyNewlines(mixed);
+  assert.ok(mixedOut.includes("```js\n~~ **2. not closed**\n```"));
+  assert.ok(mixedOut.includes("\n**1. x**"));
+  assert.ok(mixedOut.includes("\n**3. y**"));
+});
+
+test("keeps a four-backtick block with nested triple fence and double-backtick span intact", () => {
+  const input =
+    "before **1. a**\n````\n``` **2. mid**\n`` still **3. inner**\n````\nafter **4. b**";
+  const out = formatReplyNewlines(input);
+  assert.ok(out.includes("````\n``` **2. mid**\n`` still **3. inner**\n````"));
+  assert.ok(out.includes("\n**1. a**"));
+  assert.ok(out.includes("\n**4. b**"));
+});
+
 test("leaves inline code spans untouched", () => {
   const input = "run `**1. this is not a list**` and also **1. real item.** ok";
   const out = formatReplyNewlines(input);
   assert.ok(out.includes("`**1. this is not a list**`"));
   assert.ok(out.includes("\n**1. real item.**"));
+});
+
+test("masks double-backtick inline spans so they are not split", () => {
+  const input = "see ``**1. not a list**`` then **2. real item.**";
+  const out = formatReplyNewlines(input);
+  assert.ok(out.includes("see ``**1. not a list**`` then\n**2. real item.**"));
 });
 
 test("splits bold list leads glued to prose", () => {

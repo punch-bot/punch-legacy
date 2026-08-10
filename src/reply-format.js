@@ -1,30 +1,38 @@
 function splitKeepingFences(text) {
   const parts = [];
   let buffer = "";
-  let inFence = false;
+  let open = null;
   for (const line of String(text || "").split("\n")) {
-    const m = line.match(/^\s*(```+|~~~+)/);
-    if (m) {
-      if (inFence) {
-        buffer += line + "\n";
+    const m = line.match(/^(\s*)([`~]+)(.*)$/);
+    const run = m ? m[2] : "";
+    if (open) {
+      buffer += line + "\n";
+      const closed =
+        run &&
+        run[0] === open.char &&
+        run.length >= open.length &&
+        m[3].trim() === "";
+      if (closed) {
         parts.push({ code: true, text: buffer });
         buffer = "";
-        inFence = false;
-      } else {
-        if (buffer) parts.push({ code: false, text: buffer });
-        buffer = line + "\n";
-        inFence = true;
+        open = null;
       }
+      continue;
+    }
+    if (m && run.length >= 3 && !m[3].includes(run[0])) {
+      if (buffer) parts.push({ code: false, text: buffer });
+      open = { char: run[0], length: run.length };
+      buffer = line + "\n";
       continue;
     }
     buffer += line + "\n";
   }
-  if (buffer) parts.push({ code: inFence, text: buffer });
+  if (buffer) parts.push({ code: Boolean(open), text: buffer });
   return parts;
 }
 
 function stripInlineCode(text) {
-  return text.replace(/`[^`\n]*`/g, (code) => "\u0000".repeat(code.length));
+  return text.replace(/(^|[^`])(`+)([^`\n]*?)\2(?=$|[^`])/g, (match, pre, ticks, inner) => pre + "\u0000".repeat((ticks + inner + ticks).length));
 }
 
 const ITEM_MARKER = /(\*\*\d+[.)])|(\*\*[-•]|\*\*\w[^*]*:)/g;
