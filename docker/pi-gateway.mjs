@@ -49,6 +49,10 @@ const TURN_MAX_MS =
   (Number(process.env.PI_GATEWAY_TURN_MAX_MS) ||
     Number(process.env.OPENCODE_HARD_TIMEOUT) ||
     300) * 1000;
+const TURN_IDLE_MS =
+  (Number(process.env.PI_GATEWAY_TURN_IDLE_MS) ||
+    Number(process.env.OPENCODE_IDLE_TIMEOUT) ||
+    120) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
 
@@ -463,7 +467,9 @@ function enabledSkillInstructions() {
       } catch {}
     }
   }
-  return sections.length ? `\n\n--- Enabled instruction skills ---\n${sections.join("\n\n")}\n--- End instruction skills ---` : "";
+  return sections.length
+    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
+    : "";
 }
 
 function buildUserPrompt(session, text, system) {
@@ -731,12 +737,28 @@ async function promptAndWait(promptText, signal) {
     throw Object.assign(new Error("aborted"), { name: "AbortError" });
   }
   const turnP = waitTurn(signal);
+  let lastPiEventAt = Date.now();
+  const onPiActivity = (msg) => {
+    if (!msg?.type) return;
+    // RPC responses and agent lifecycle both prove Pi is alive.
+    lastPiEventAt = Date.now();
+  };
+  eventWaiters.add(onPiActivity);
   let turnTimer;
+  let idleIv;
   const turnMax = new Promise((_, reject) => {
     turnTimer = setTimeout(
       () => reject(new Error(`turn exceeded ${TURN_MAX_MS / 1000}s hard cap`)),
       TURN_MAX_MS,
     );
+  });
+  const turnIdle = new Promise((_, reject) => {
+    idleIv = setInterval(() => {
+      if (signal?.aborted) return;
+      if (Date.now() - lastPiEventAt > TURN_IDLE_MS) {
+        reject(new Error(`pi silent for ${Math.round(TURN_IDLE_MS / 1000)}s (turn hung)`));
+      }
+    }, 5_000);
   });
   try {
     await rpc("prompt", { message: promptText, streamingBehavior: "followUp" }, 60000);
@@ -746,7 +768,7 @@ async function promptAndWait(promptText, signal) {
     throw e;
   }
   try {
-    await Promise.race([turnP, turnMax]);
+    await Promise.race([turnP, turnMax, turnIdle]);
   } catch (e) {
     turnP.cancel(e);
     if (!signal?.aborted) {
@@ -755,6 +777,8 @@ async function promptAndWait(promptText, signal) {
     throw e;
   } finally {
     clearTimeout(turnTimer);
+    clearInterval(idleIv);
+    eventWaiters.delete(onPiActivity);
   }
 }
 

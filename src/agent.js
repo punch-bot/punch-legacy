@@ -135,7 +135,7 @@ async function api(path, body, baseUrl, signal = null) {
   const srv = baseUrl;
   const url = `${srv}${path}`;
   let lastCode;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
      let res;
      try {
         res = await fetch(url, {
@@ -158,7 +158,7 @@ async function api(path, body, baseUrl, signal = null) {
        if (!res.ok) {
           const t = await res.text().catch(() => "");
           const transient = res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t);
-          if (transient && attempt < 3) {
+          if (transient && attempt < 7) {
             await abortableSleep(1500, signal);
             continue;
           }
@@ -174,12 +174,13 @@ const CEIL_MS = (Number(process.env.OPENCODE_MAX) || 1800) * 1000;
 const HARD_MS = (Number(process.env.OPENCODE_HARD_TIMEOUT) || 300) * 1000;
 
 export function isStuckTurnError(message) {
-  return /timed out|stalled|ceiling|hard timeout|hard cap/i.test(String(message || ""));
+  return /timed out|stalled|ceiling|hard timeout|hard cap|silent for|turn hung/i.test(String(message || ""));
 }
 
 export async function restartPiGateway(userId, reason = "stuck turn") {
   const name = sandboxNameForUser(userId);
   const apiUrl = apiUrlFor(userId);
+  const baseUrl = serverFor(userId);
   if (!name || !apiUrl) return false;
   try {
     const auth =
@@ -199,6 +200,23 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
     console.log(
       `[pi] gateway restart (${reason}) uid=${userId}: ${ok ? "ok" : res.status} ${body.message || ""}`.trim(),
     );
+    if (ok && baseUrl) {
+      // Wait out the Pi respawn so the next Discord turn doesn't immediately
+      // land on "pi not ready" after a stall/abort.
+      for (let i = 0; i < 20; i++) {
+        await abortableSleep(500);
+        try {
+          const health = await fetch(`${baseUrl}/health`, {
+            headers: headers(),
+            signal: AbortSignal.timeout(2_000),
+          });
+          if (health.ok) {
+            console.log(`[pi] gateway healthy again uid=${userId} after ${i + 1} poll(s)`);
+            break;
+          }
+        } catch {}
+      }
+    }
     return ok;
   } catch (err) {
     console.error(`[pi] gateway restart failed uid=${userId}:`, err.message);
@@ -207,8 +225,10 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
 }
 
 async function recoverStuckGateway(sessionId, userId, reason) {
-  void abortSession(sessionId, userId);
-  void restartPiGateway(userId, reason);
+  try {
+    await abortSession(sessionId, userId);
+  } catch {}
+  await restartPiGateway(userId, reason);
 }
 
 function idleThresholdMs(userId) {
@@ -305,6 +325,49 @@ export function progressEventFingerprint(event) {
   ]);
 }
 
+const KEEPALIVE_PHASES = new Set(["thinking", "writing", "compacting", "retrying", "working", "tool", "milestone"]);
+
+/**
+ * Decide whether an SSE event should keep the idle watchdog alive.
+ * - Meaningful progress (new fingerprint, tool start/end, text) always resets.
+ * - Heartbeats keep the silence timer alive (including working/tool) so the
+ *   longer TOOL_STALE_MS path can fire instead of the 90s silence abort.
+ * - Heartbeat-only working/tool still goes stale after TOOL_STALE_MS.
+ */
+export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
+  if (!event || typeof event !== "object") {
+    return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
+  }
+
+  if (event.type === "session.progress") {
+    const phase = String(event.properties?.phase || "").toLowerCase() || null;
+    if (event.properties?.heartbeat === true) {
+      return {
+        resetMeaningful: false,
+        resetKeepalive: KEEPALIVE_PHASES.has(phase),
+        fingerprint: lastFingerprint,
+        phase,
+      };
+    }
+    const fingerprint = progressEventFingerprint(event);
+    if (fingerprint != null && fingerprint !== lastFingerprint) {
+      return { resetMeaningful: true, resetKeepalive: true, fingerprint, phase };
+    }
+    return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase };
+  }
+
+  if (event.type === "message.part.updated" && event.properties?.part?.type === "tool") {
+    return { resetMeaningful: true, resetKeepalive: true, fingerprint: lastFingerprint, phase: "tool" };
+  }
+  if (event.type === "message.part.delta") {
+    return { resetMeaningful: true, resetKeepalive: true, fingerprint: lastFingerprint, phase: "writing" };
+  }
+
+  return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
+}
+
+const TOOL_STALE_MS = (Number(process.env.OPENCODE_TOOL_STALE_TIMEOUT) || 180) * 1000;
+
 async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
   if (!baseUrl) throw new Error("No sandbox server assigned for this user");
   const srv = baseUrl;
@@ -324,10 +387,17 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
     }
   }
   const start = Date.now();
-  let last = Date.now();
+  let lastMeaningful = Date.now();
+  let lastKeepalive = Date.now();
   let lastProgressFingerprint = "";
+  let lastPhase = "starting";
   let recoveryReason = null;
-  const bump = () => { last = Date.now(); };
+  const bumpMeaningful = () => {
+    const now = Date.now();
+    lastMeaningful = now;
+    lastKeepalive = now;
+  };
+  const bumpKeepalive = () => { lastKeepalive = Date.now(); };
 
   let resolveSseReady;
   const sseReady = new Promise((resolve) => { resolveSseReady = resolve; });
@@ -336,10 +406,13 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
     sseAC.abort();
   }, 5000);
   void consumeEvents(sid, sseAC.signal, (ev) => {
-    const fingerprint = progressEventFingerprint(ev);
-    if (fingerprint == null || fingerprint !== lastProgressFingerprint) {
-      bump();
-      if (fingerprint != null) lastProgressFingerprint = fingerprint;
+    const decision = classifyIdleWatchdogEvent(ev, lastProgressFingerprint);
+    if (decision.phase) lastPhase = decision.phase;
+    if (decision.resetMeaningful) {
+      bumpMeaningful();
+      lastProgressFingerprint = decision.fingerprint;
+    } else if (decision.resetKeepalive) {
+      bumpKeepalive();
     }
     if (onProgress) {
       try { onProgress(ev); } catch {}
@@ -352,14 +425,22 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   let idleIv;
   let hardTimer;
   const idleMs = idleThresholdMs(userId);
+  const toolStaleMs = idleMs === Infinity ? Infinity : TOOL_STALE_MS;
   const idle = new Promise((_, reject) => {
      idleIv = setInterval(() => {
         if (postAC.signal.aborted) return;
         const now = Date.now();
-        if (now - last > idleMs) {
+        const silentFor = now - lastKeepalive;
+        const staleFor = now - lastMeaningful;
+        const toolLike = lastPhase === "tool" || lastPhase === "working" || lastPhase === "milestone";
+        if (silentFor > idleMs) {
           recoveryReason = "stall";
           postAC.abort();
-          reject(new Error(`pi stalled: no progress for ${idleMs / 1000}s (session stuck)`));
+          reject(new Error(`pi stalled: no progress for ${Math.round(idleMs / 1000)}s (session stuck)`));
+        } else if (toolLike && staleFor > toolStaleMs) {
+          recoveryReason = "stall";
+          postAC.abort();
+          reject(new Error(`pi stalled: ${lastPhase} hung for ${Math.round(toolStaleMs / 1000)}s without real progress`));
         } else if (now - start > CEIL_MS) {
           recoveryReason = "ceiling";
           postAC.abort();
@@ -381,7 +462,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
     // prevents fast turns from completing before their progress stream exists.
     await sseReady;
     let lastCode;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       let res;
       try {
         res = await fetch(url, {
@@ -393,15 +474,15 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
       } catch (err) {
         if (postAC.signal.aborted) throw err;
         lastCode = err.cause?.code || err.code || err.message;
-        bump();
+        bumpKeepalive();
         await abortableSleep(2000, postAC.signal);
         if (postAC.signal.aborted) throw new Error("aborted");
         continue;
       }
       if (!res.ok) {
         const t = await res.text().catch(() => "");
-        if (res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t) && attempt < 3) {
-          bump();
+        if (res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t) && attempt < 7) {
+          bumpKeepalive();
           await abortableSleep(1500, postAC.signal);
           if (postAC.signal.aborted) throw new Error("aborted");
           continue;

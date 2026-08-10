@@ -34,7 +34,7 @@ import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
 import * as routines from "./routines.js";
 import * as settings from "./settings.js";
-import { formatMessageTimestamp } from "./timezone.js";
+import { formatInTimeZone, formatMessageTimestamp } from "./timezone.js";
 import { assessAgentPigeon, scanOutbound, pigeonTurnPreamble } from "./pigeon-supervisor.js";
 import {
   channelContextBlock,
@@ -537,7 +537,7 @@ async function activeStatusText(uid) {
   return lines.join("\n");
 }
 
-function splitWhenAndText(rest) {
+function splitWhenAndText(rest, timeZone = null) {
   const words = rest.trim().split(/\s+/);
   if (words.length < 2) {
     throw new Error("Need a time and message, e.g. `30m take meds`");
@@ -546,7 +546,7 @@ function splitWhenAndText(rest) {
     const whenPart = words.slice(0, i).join(" ");
     const textPart = words.slice(i).join(" ");
     try {
-      routines.parseTime(whenPart);
+      routines.parseTime(whenPart, new Date(), timeZone);
       return { when: whenPart, text: textPart };
     } catch {
       continue;
@@ -571,6 +571,10 @@ function routineContextFromInteraction(interaction) {
   };
 }
 
+function userTimeZone(userId) {
+  return store.getUserSettings(userId).timeZone || "UTC";
+}
+
 function statisticsExtrasForUser(userId) {
   const sandboxName = sandbox.loadUsers().find((entry) => entry.userId === userId)?.name || null;
   const activeRoutines = routines.listRoutines(userId).filter((routine) => routine.enabled !== false).length;
@@ -579,8 +583,9 @@ function statisticsExtrasForUser(userId) {
 }
 
 async function createRoutineReply(message, opts) {
-  const routine = routines.addRoutine(opts);
-  const when = new Date(routine.nextRunAt).toLocaleString();
+  const timezone = opts.timezone || userTimeZone(opts.userId || message.author.id);
+  const routine = routines.addRoutine({ ...opts, timezone });
+  const when = formatInTimeZone(routine.nextRunAt, routine.timezone || timezone) || new Date(routine.nextRunAt).toISOString();
   await reply(message, `⏰ Scheduled (\`${routine.id}\`) — fires ${when}`);
   return routine;
 }
@@ -888,12 +893,14 @@ async function handleCommand(message, cmd, rest) {
     case "remind": {
       if (!rest) return void (await reply(message, `Usage: \`${PREFIX}remind <when> <text>\` — e.g. \`${PREFIX}remind 30m take meds\``)), true;
       try {
-        const { when, text } = splitWhenAndText(rest);
+        const zone = userTimeZone(uid);
+        const { when, text } = splitWhenAndText(rest, zone);
         await createRoutineReply(message, {
           ...routineContextFromMessage(message),
           type: "message",
           payload: text,
-          schedule: { kind: "once", at: routines.parseTime(when) },
+          timezone: zone,
+          schedule: { kind: "once", at: routines.parseTime(when, new Date(), zone) },
         });
       } catch (err) {
         await reply(message, `⚠️ ${err.message}`);
@@ -939,12 +946,14 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "daily") {
         if (!tailRest) return void (await reply(message, `Usage: \`${PREFIX}routine daily <time> <text>\` — e.g. \`${PREFIX}routine daily 9am standup\``)), true;
         try {
-          const { when, text } = splitWhenAndText(tailRest);
+          const zone = userTimeZone(uid);
+          const { when, text } = splitWhenAndText(tailRest, zone);
           await createRoutineReply(message, {
             ...routineContextFromMessage(message),
             type: "message",
             payload: text,
-            schedule: routines.parseDailyTime(when),
+            timezone: zone,
+            schedule: routines.parseDailyTime(when, zone),
           });
         } catch (err) {
           await reply(message, `⚠️ ${err.message}`);
@@ -962,6 +971,7 @@ async function handleCommand(message, cmd, rest) {
             ...routineContextFromMessage(message),
             type: "message",
             payload: intervalMatch[2].trim(),
+            timezone: userTimeZone(uid),
             schedule: routines.parseEveryInterval(intervalMatch[1]),
           });
         } catch (err) {
@@ -973,12 +983,14 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "auto") {
         if (!tailRest) return void (await reply(message, `Usage: \`${PREFIX}routine auto <when> <prompt>\` — e.g. \`${PREFIX}routine auto 2m summarize /work\``)), true;
         try {
-          const { when, text } = splitWhenAndText(tailRest);
+          const zone = userTimeZone(uid);
+          const { when, text } = splitWhenAndText(tailRest, zone);
           await createRoutineReply(message, {
             ...routineContextFromMessage(message),
             type: "llm",
             payload: text,
-            schedule: { kind: "once", at: routines.parseTime(when) },
+            timezone: zone,
+            schedule: { kind: "once", at: routines.parseTime(when, new Date(), zone) },
           });
         } catch (err) {
           await reply(message, `⚠️ ${err.message}`);
@@ -1229,11 +1241,11 @@ client.once(Events.ClientReady, async (c) => {
     ],
   }, {
     name: "timeout",
-    description: "Toggle the 90s idle timeout that aborts stalled Pi turns",
+    description: "Toggle idle/stale timeouts that abort hung Pi turns",
     options: [
-      { type: 1, name: "disable", description: "Disable the 90s idle timeout for your turns" },
-      { type: 1, name: "enable", description: "Re-enable the 90s idle timeout (default)" },
-      { type: 1, name: "status", description: "Show whether the idle timeout is disabled" },
+      { type: 1, name: "disable", description: "Disable idle/stale timeouts for your turns (hard ceiling still applies)" },
+      { type: 1, name: "enable", description: "Re-enable idle/stale timeouts (default)" },
+      { type: 1, name: "status", description: "Show whether idle/stale timeouts are disabled" },
     ],
   }, {
     name: "reset",
@@ -1743,7 +1755,10 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       });
       const memory = memoryBlock({ projectMemory, relatedText: pre });
       if (memory) preambleParts.push(memory);
-      const prompt = assemblePrompt(preambleParts, userTurnLine(uid, speaker, text));
+      const prompt = assemblePrompt(
+        preambleParts,
+        userTurnLine(uid, speaker, text, { channelId: cid, timeZone: store.getUserSettings(uid).timeZone }),
+      );
       console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
       const result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
       store.moveMemoryRecall(memoryRecallKey, result.sessionId);
@@ -1882,7 +1897,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
     if (memoryRecallKey && !memoryRecallAdopted) store.clearMemoryRecall(memoryRecallKey);
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
-    const timedOut = /timed out|timeout|stalled|ceiling/i.test(err?.message || "");
+    const timedOut = /timed out|timeout|stalled|ceiling|silent for|turn hung/i.test(err?.message || "");
     await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
     if (useLifecycle) {
       const endEmoji = aborted ? "🛑" : "⚠️";
@@ -1917,7 +1932,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     let note = "";
     if (timedOut) {
       store.clearSession(cid);
-      note = " (session was stuck — reset it, try again)";
+      note = " (hung turn aborted + Pi restart requested — try again)";
     }
     // A previous session stored inline `file` parts (zip/jpg/etc.) that the
     // model now rejects. Clear the poisoned session so the next turn starts
@@ -3366,7 +3381,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const data = await res.json();
         const entries = sub === "list" ? data.skills : data.proposals;
         const body = !entries?.length ? (sub === "list" ? "No instruction skills installed." : "No skill proposals pending review.") : sub === "list"
-          ? `**Instruction skills:**\n${entries.map((skill) => `${skill.enabled ? "✅" : "⏸️"} **${skill.name}** (${skill.source})${skill.description ? ` — ${skill.description}` : ""}${skill.requirements?.missingEnv?.length || skill.requirements?.missingBinaries?.length ? ` [missing: ${[...(skill.requirements?.missingEnv || []), ...(skill.requirements?.missingBinaries || [])].join(", ")}]` : ""}`).join("\n")}`
+          ? `**Instruction skills** (enabled skills auto-apply every Discord turn — no \`/skill-name\` or \`pi --skill\` needed):\n${entries.map((skill) => `${skill.enabled ? "✅" : "⏸️"} **${skill.name}** (${skill.source})${skill.description ? ` — ${skill.description}` : ""}${skill.requirements?.missingEnv?.length || skill.requirements?.missingBinaries?.length ? ` [missing: ${[...(skill.requirements?.missingEnv || []), ...(skill.requirements?.missingBinaries || [])].join(", ")}]` : ""}`).join("\n")}`
           : `**Pending skill proposals:**\n${entries.map((proposal) => `\`${proposal.id}\` **${proposal.name}** (${proposal.size}B)`).join("\n")}`;
         await interaction.reply({ content: body.slice(0, 1_900), flags: MessageFlags.Ephemeral });
         return;
@@ -3376,7 +3391,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const res = await fetch(`${url}/skills/proposals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify({ approve: sub === "approve" }) });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         const { result } = await res.json();
-        await interaction.reply({ content: result.approved ? `Installed instruction skill \`${result.name}\`. Applies next turn without Pi restart.` : `Rejected skill proposal \`${result.name}\`.`, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: result.approved ? `Installed instruction skill \`${result.name}\`. It is enabled and applies on the next Discord turn — no Pi restart or slash invoke needed.` : `Rejected skill proposal \`${result.name}\`.`, flags: MessageFlags.Ephemeral });
         return;
       }
       const name = interaction.options.getString("name", true);
@@ -3384,12 +3399,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const res = await fetch(`${url}/skills/${encodeURIComponent(name)}`, { headers: { authorization: auth } });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         const { skill } = await res.json();
-        await interaction.reply({ content: `**${skill.name}** (${skill.source}, ${skill.enabled ? "enabled" : "disabled"})\n\`\`\`\n${skill.content.slice(0, 1_700)}\n\`\`\``, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: `**${skill.name}** (${skill.source}, ${skill.enabled ? "enabled" : "disabled"})\nIn Discord, enabled skills are injected every turn — ignore any \`/${skill.name}\` or \`pi --${skill.name}\` notes inside the skill.\n\`\`\`\n${skill.content.slice(0, 1_500)}\n\`\`\``, flags: MessageFlags.Ephemeral });
         return;
       }
       const res = await fetch(`${url}/skills/${encodeURIComponent(name)}`, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify({ enabled: sub === "enable" }) });
       if (!res.ok) throw new Error(`supervisor API ${res.status}`);
-      await interaction.reply({ content: `${sub === "enable" ? "Enabled" : "Disabled"} skill \`${name}\`. Instruction changes apply next turn; Pi does not restart.`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({
+        content: sub === "enable"
+          ? `Enabled skill \`${name}\`. It now applies automatically on every Discord turn — you do **not** need \`/${name}\`, \`pi --${name}\`, or a Pi restart.`
+          : `Disabled skill \`${name}\`. It will stop applying on the next turn.`,
+        flags: MessageFlags.Ephemeral,
+      });
     } catch (error) {
       await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral });
     }
@@ -3896,11 +3916,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const text = interaction.options.getString("text", true);
       const recurrence = interaction.options.getString("recurrence") || "once";
       try {
-        const timezone = interaction.options.getString("timezone") || null;
+        const userZone = userTimeZone(ctx.userId);
+        const timezone = interaction.options.getString("timezone") || userZone;
         const activeStart = interaction.options.getInteger("active_start");
         const activeEnd = interaction.options.getInteger("active_end");
         const activeHours = activeStart === null || activeEnd === null ? null : { start: activeStart, end: activeEnd, timezone };
-        const schedule = routines.parseRecurrence(when, recurrence);
+        const schedule = routines.parseRecurrence(when, recurrence, timezone);
         const routine = routines.addRoutine({
           ...ctx,
           channelId: type === "heartbeat" ? null : ctx.channelId,
@@ -3909,8 +3930,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
         const label = type === "heartbeat" ? "💓 Heartbeat" : "⏰ Scheduled";
         const note = type === "heartbeat" ? "\nI'll DM you the results each time." : "";
+        const whenLabel = formatInTimeZone(routine.nextRunAt, routine.timezone || timezone) || new Date(routine.nextRunAt).toISOString();
         await interaction.reply({
-          content: `${label} (\`${routine.id}\`) — fires ${new Date(routine.nextRunAt).toLocaleString()}${note}`,
+          content: `${label} (\`${routine.id}\`) — fires ${whenLabel}${note}`,
           flags: MessageFlags.Ephemeral,
         });
       } catch (err) {
@@ -3955,13 +3977,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const uid = interaction.user.id;
     if (sub === "disable") {
       store.patchUserSettings(uid, { disableIdleTimeout: true });
-      await interaction.reply({ content: "⏱️ Idle timeout disabled — long turns won't be aborted for no progress (the 30m hard ceiling still applies).", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "⏱️ Idle/stale timeouts disabled — hung turns won't be aborted for silence or heartbeat-only working (the hard ceiling still applies).", flags: MessageFlags.Ephemeral });
     } else if (sub === "enable") {
       store.patchUserSettings(uid, { disableIdleTimeout: false });
-      await interaction.reply({ content: "⏱️ Idle timeout re-enabled (90s).", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "⏱️ Idle/stale timeouts re-enabled (90s silence / ~3m stuck tool-or-working).", flags: MessageFlags.Ephemeral });
     } else {
       const us = store.getUserSettings(uid);
-      await interaction.reply({ content: `⏱️ Idle timeout is currently **${us.disableIdleTimeout ? "disabled" : "enabled (90s)"}**.`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `⏱️ Idle/stale timeouts are currently **${us.disableIdleTimeout ? "disabled" : "enabled (90s silence / ~3m stuck working)"}**.`, flags: MessageFlags.Ephemeral });
     }
     return;
   }
@@ -4008,14 +4030,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const message = interaction.options.getString("message", true);
     const ctx = routineContextFromInteraction(interaction);
     try {
+      const zone = userTimeZone(ctx.userId);
       const routine = routines.addRoutine({
         ...ctx,
         type: "message",
         payload: message,
-        schedule: { kind: "once", at: routines.parseTime(when) },
+        timezone: zone,
+        schedule: { kind: "once", at: routines.parseTime(when, new Date(), zone) },
       });
+      const whenLabel = formatInTimeZone(routine.nextRunAt, zone) || new Date(routine.nextRunAt).toISOString();
       await interaction.reply({
-        content: `⏰ Scheduled (\`${routine.id}\`) — fires ${new Date(routine.nextRunAt).toLocaleString()}`,
+        content: `⏰ Scheduled (\`${routine.id}\`) — fires ${whenLabel}`,
         flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
@@ -4134,13 +4159,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const when = interaction.options.getString("when", true);
       const prompt = interaction.options.getString("prompt", true);
       try {
-        const schedule = routines.parseRecurrence(when, "once");
+        const zone = userTimeZone(uid);
+        const schedule = routines.parseRecurrence(when, "once", zone);
         const routine = routines.addRoutine({
           userId: uid, channelId: null, guildId: interaction.guild?.id || null,
-          type: "heartbeat", payload: prompt, schedule,
+          type: "heartbeat", payload: prompt, schedule, timezone: zone,
         });
+        const whenLabel = formatInTimeZone(routine.nextRunAt, zone) || new Date(routine.nextRunAt).toISOString();
         await interaction.reply({
-          content: `💓 Heartbeat scheduled (\`${routine.id}\`) — fires ${new Date(routine.nextRunAt).toLocaleString()}\nI'll DM you the results each time.`,
+          content: `💓 Heartbeat scheduled (\`${routine.id}\`) — fires ${whenLabel}\nI'll DM you the results each time.`,
           flags: MessageFlags.Ephemeral,
         });
       } catch (err) {
@@ -4851,9 +4878,10 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing channelId (required for non-heartbeat types)" }));
         }
+        const timezone = body.timezone || userTimeZone(userId);
         let schedule = body.schedule;
         if (body.when) {
-          schedule = routines.parseRecurrence(body.when, body.recurrence || "once");
+          schedule = routines.parseRecurrence(body.when, body.recurrence || "once", timezone);
         }
         if (!schedule) {
           res.writeHead(400, { "content-type": "application/json" });
@@ -4866,6 +4894,7 @@ const botHttpServer = createServer(async (req, res) => {
           type: body.type,
           payload: body.payload,
           schedule,
+          timezone,
         });
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routine }));

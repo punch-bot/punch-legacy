@@ -35,6 +35,7 @@ export default tool({
     when: tool.schema.string().optional().describe("When to run (e.g. 30m, tomorrow 9am, every 6h)"),
     text: tool.schema.string().optional().describe("Reminder text or LLM prompt"),
     recurrence: tool.schema.string().optional().describe("once, daily, weekly, every 30m, every 2h, or cron expression"),
+    timezone: tool.schema.string().optional().describe("IANA timezone for interpreting when (e.g. America/New_York)"),
     id: tool.schema.string().optional().describe("Routine id for remove/pause/resume"),
   },
   async execute(args) {
@@ -93,6 +94,7 @@ export default tool({
         payload: args.text,
         when: args.when,
         recurrence: args.recurrence || "once",
+        timezone: args.timezone || null,
       }),
     });
     return JSON.stringify(data.routine, null, 2);
