@@ -85,13 +85,12 @@ function wallFieldsMatch(parts, year, month, day, hour, minute, second) {
 
 /**
  * Convert a wall-clock local datetime in an IANA zone to a UTC epoch ms.
- * Iterates so the offset used matches the target date (DST-safe), not the
- * reference instant's offset.
  *
  * Policy:
  * - Nonexistent times in a DST spring-forward gap throw.
  * - Ambiguous times in a fall-back overlap resolve to the earlier UTC instant
- *   (still on daylight time when both exist).
+ *   (still on the pre-transition offset when both exist). Offset deltas are
+ *   discovered from the zone (not assumed to be 60 minutes).
  */
 export function zonedWallTimeToUtc(
   { year, month, day, hour = 0, minute = 0, second = 0 },
@@ -99,35 +98,24 @@ export function zonedWallTimeToUtc(
 ) {
   const zone = normalizeTimeZone(timeZone);
   const desired = Date.UTC(year, month - 1, day, hour, minute, second);
-  let guess = desired;
-  for (let i = 0; i < 4; i++) {
-    const parts = localDateParts(guess, zone);
-    const asUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second,
-    );
-    const delta = desired - asUtc;
-    if (delta === 0) break;
-    guess += delta;
+  const offsets = new Set();
+  for (const hours of [-12, -6, -3, -1, 0, 1, 3, 6, 12]) {
+    offsets.add(getTimeZoneOffsetMinutes(zone, new Date(desired + hours * 3_600_000)));
   }
-  const resolved = localDateParts(guess, zone);
-  if (!wallFieldsMatch(resolved, year, month, day, hour, minute, second)) {
+  const matching = [];
+  for (const offsetMinutes of offsets) {
+    const candidate = desired - offsetMinutes * 60_000;
+    if (wallFieldsMatch(localDateParts(candidate, zone), year, month, day, hour, minute, second)) {
+      matching.push(candidate);
+    }
+  }
+  if (!matching.length) {
     const pad = (n) => String(n).padStart(2, "0");
     throw new Error(
       `Local time ${year}-${pad(month)}-${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)} does not exist in ${zone}`,
     );
   }
-  // Prefer the earlier UTC instant when the wall clock is repeated (fall-back).
-  const earlier = guess - 60 * 60 * 1000;
-  const earlierParts = localDateParts(earlier, zone);
-  if (wallFieldsMatch(earlierParts, year, month, day, hour, minute, second)) {
-    return earlier;
-  }
-  return guess;
+  return Math.min(...matching);
 }
 
 export function formatInTimeZone(timestamp, timeZone = DEFAULT_TIME_ZONE) {
