@@ -107,14 +107,10 @@ export function usesMcpApiKeyAuth(entry) {
   return usesApiKeyAuth(entry);
 }
 
-/** Migrate legacy MCP key env vars to collision-free names. */
-export function migrateMcpApiKeyEnvVars(registry, env) {
-  const out = { ...env };
-  let changed = false;
-  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
-    return { env: out, changed };
-  }
+/** Map legacy env var names to registry server names that share them. */
+export function legacyMcpApiKeyOwners(registry) {
   const legacyOwners = {};
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) return legacyOwners;
   for (const name of Object.keys(registry)) {
     const legacyVar = legacyMcpApiKeyEnvVar(name);
     const newVar = mcpApiKeyEnvVar(name);
@@ -122,6 +118,17 @@ export function migrateMcpApiKeyEnvVars(registry, env) {
     if (!legacyOwners[legacyVar]) legacyOwners[legacyVar] = [];
     legacyOwners[legacyVar].push(name);
   }
+  return legacyOwners;
+}
+
+/** Migrate legacy MCP key env vars to collision-free names. */
+export function migrateMcpApiKeyEnvVars(registry, env) {
+  const out = { ...env };
+  let changed = false;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    return { env: out, changed };
+  }
+  const legacyOwners = legacyMcpApiKeyOwners(registry);
   for (const name of Object.keys(registry)) {
     const newVar = mcpApiKeyEnvVar(name);
     const legacyVar = legacyMcpApiKeyEnvVar(name);
@@ -145,9 +152,17 @@ export function redactMcpKeysFromEnvView(env) {
   return view;
 }
 
-export function isMcpApiKeyConfigured(env, serverName) {
+export function isMcpApiKeyConfigured(env, serverName, registry) {
   if (!env || typeof env !== "object") return false;
-  return mcpApiKeyEnvVarCandidates(serverName).some((varName) => env[varName]);
+  const newVar = mcpApiKeyEnvVar(serverName);
+  if (env[newVar]) return true;
+  const legacyVar = legacyMcpApiKeyEnvVar(serverName);
+  if (legacyVar === newVar) return false;
+  if (registry) {
+    const owners = legacyMcpApiKeyOwners(registry)[legacyVar];
+    if ((owners?.length || 0) > 1) return false;
+  }
+  return !!env[legacyVar];
 }
 
 /** Public view of a registry entry (no secret headers or inline keys). */

@@ -1433,8 +1433,8 @@ const apiServer = createServer((req, res) => {
     for (const [name, entry] of Object.entries(mcp)) {
       const sanitized = sanitizeMcpEntryForDisplay(entry);
       const envVar = mcpApiKeyEnvVar(name);
-      if (usesMcpApiKeyAuth(entry) || isMcpApiKeyConfigured(env, name)) {
-        sanitized.apiKeyConfigured = isMcpApiKeyConfigured(env, name);
+      if (usesMcpApiKeyAuth(entry) || isMcpApiKeyConfigured(env, name, mcp)) {
+        sanitized.apiKeyConfigured = isMcpApiKeyConfigured(env, name, mcp);
         sanitized.apiKeyEnv = envVar;
       }
       view[name] = sanitized;
