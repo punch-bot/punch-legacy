@@ -135,7 +135,7 @@ async function api(path, body, baseUrl, signal = null) {
   const srv = baseUrl;
   const url = `${srv}${path}`;
   let lastCode;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 8; attempt++) {
      let res;
      try {
         res = await fetch(url, {
@@ -158,7 +158,7 @@ async function api(path, body, baseUrl, signal = null) {
        if (!res.ok) {
           const t = await res.text().catch(() => "");
           const transient = res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t);
-          if (transient && attempt < 3) {
+          if (transient && attempt < 7) {
             await abortableSleep(1500, signal);
             continue;
           }
@@ -180,6 +180,7 @@ export function isStuckTurnError(message) {
 export async function restartPiGateway(userId, reason = "stuck turn") {
   const name = sandboxNameForUser(userId);
   const apiUrl = apiUrlFor(userId);
+  const baseUrl = serverFor(userId);
   if (!name || !apiUrl) return false;
   try {
     const auth =
@@ -199,6 +200,23 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
     console.log(
       `[pi] gateway restart (${reason}) uid=${userId}: ${ok ? "ok" : res.status} ${body.message || ""}`.trim(),
     );
+    if (ok && baseUrl) {
+      // Wait out the Pi respawn so the next Discord turn doesn't immediately
+      // land on "pi not ready" after a stall/abort.
+      for (let i = 0; i < 20; i++) {
+        await abortableSleep(500);
+        try {
+          const health = await fetch(`${baseUrl}/health`, {
+            headers: headers(),
+            signal: AbortSignal.timeout(2_000),
+          });
+          if (health.ok) {
+            console.log(`[pi] gateway healthy again uid=${userId} after ${i + 1} poll(s)`);
+            break;
+          }
+        } catch {}
+      }
+    }
     return ok;
   } catch (err) {
     console.error(`[pi] gateway restart failed uid=${userId}:`, err.message);
@@ -207,8 +225,10 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
 }
 
 async function recoverStuckGateway(sessionId, userId, reason) {
-  void abortSession(sessionId, userId);
-  void restartPiGateway(userId, reason);
+  try {
+    await abortSession(sessionId, userId);
+  } catch {}
+  await restartPiGateway(userId, reason);
 }
 
 function idleThresholdMs(userId) {
@@ -381,7 +401,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
     // prevents fast turns from completing before their progress stream exists.
     await sseReady;
     let lastCode;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
       let res;
       try {
         res = await fetch(url, {
@@ -400,7 +420,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
       }
       if (!res.ok) {
         const t = await res.text().catch(() => "");
-        if (res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t) && attempt < 3) {
+        if (res.status >= 500 && /pi not ready|pi not running|pi restarted/i.test(t) && attempt < 7) {
           bump();
           await abortableSleep(1500, postAC.signal);
           if (postAC.signal.aborted) throw new Error("aborted");

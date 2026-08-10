@@ -68,6 +68,12 @@ export default function (pi: ExtensionAPI) {
             "once, daily, weekly, every 30m, every 2h, or cron expression",
         }),
       ),
+      timezone: Type.Optional(
+        Type.String({
+          description:
+            "IANA timezone for interpreting when (e.g. America/New_York). Prefer the user's /settings timezone.",
+        }),
+      ),
       id: Type.Optional(
         Type.String({ description: "Routine id for remove/pause/resume" }),
       ),
@@ -158,6 +164,7 @@ export default function (pi: ExtensionAPI) {
           payload: args.text,
           when: args.when,
           recurrence: args.recurrence || "once",
+          timezone: args.timezone || null,
         }),
       });
       return {

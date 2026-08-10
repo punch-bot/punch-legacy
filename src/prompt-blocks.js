@@ -74,8 +74,13 @@ export function multitaskPrompt(text, contextMessages = [], sentAt) {
   );
 }
 
-export function userTurnLine(uid, speaker, text) {
-  return `[user:${uid}] ${speaker}: ${text}`;
+export function userTurnLine(uid, speaker, text, { channelId = null, timeZone = null } = {}) {
+  const meta = [
+    channelId ? `channel:${channelId}` : null,
+    timeZone ? `tz:${timeZone}` : null,
+  ].filter(Boolean);
+  const prefix = meta.length ? `[user:${uid} ${meta.join(" ")}]` : `[user:${uid}]`;
+  return `${prefix} ${speaker}: ${text}`;
 }
 
 export function assemblePrompt(parts, userLine) {

@@ -463,7 +463,9 @@ function enabledSkillInstructions() {
       } catch {}
     }
   }
-  return sections.length ? `\n\n--- Enabled instruction skills ---\n${sections.join("\n\n")}\n--- End instruction skills ---` : "";
+  return sections.length
+    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
+    : "";
 }
 
 function buildUserPrompt(session, text, system) {

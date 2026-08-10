@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "
 import { dirname, join } from "node:path";
 import * as chrono from "chrono-node";
 import cronParser from "cron-parser";
+import { DEFAULT_TIME_ZONE, formatInTimeZone, getTimeZoneOffsetMinutes, localDateParts, normalizeTimeZone } from "./timezone.js";
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 const ROUTINES_FILE = join(DATA_DIR, "routines.json");
@@ -113,23 +114,41 @@ function parseShorthand(when) {
   return Date.now() + (unit.startsWith("m") ? n * 60_000 : unit.startsWith("h") ? n * 3_600_000 : n * 86_400_000);
 }
 
-export function parseTime(when, refDate = new Date()) {
+function chronoReference(refDate = new Date(), timeZone = null) {
+  const instant = refDate instanceof Date ? refDate : new Date(refDate);
+  if (!timeZone) return instant;
+  const normalized = normalizeTimeZone(timeZone);
+  return {
+    instant,
+    // chrono-node accepts numeric UTC offsets, not IANA names.
+    timezone: getTimeZoneOffsetMinutes(normalized, instant),
+  };
+}
+
+export function parseTime(when, refDate = new Date(), timeZone = null) {
   const trimmed = String(when || "").trim();
   const shorthand = parseShorthand(trimmed);
   if (shorthand) return shorthand;
-  const parsed = chrono.parseDate(trimmed, refDate, { forwardDate: true });
+  const parsed = chrono.parseDate(trimmed, chronoReference(refDate, timeZone), { forwardDate: true });
   if (parsed) return parsed.getTime();
   const iso = Date.parse(trimmed);
   if (!Number.isNaN(iso)) return iso;
   throw new Error(`Could not parse time: "${when}"`);
 }
 
-export function parseRecurrence(when, recurrence) {
+export function parseRecurrence(when, recurrence, timeZone = null) {
   const lower = String(recurrence || "once").toLowerCase().trim();
-  if (lower === "once") return { kind: "once", at: parseTime(when) };
+  const zone = timeZone ? normalizeTimeZone(timeZone) : null;
+  if (lower === "once") return { kind: "once", at: parseTime(when, new Date(), zone) };
   if (lower === "daily" || lower === "weekly") {
-    const date = new Date(parseTime(when));
-    return { kind: "cron", cron: lower === "daily" ? `${date.getMinutes()} ${date.getHours()} * * *` : `${date.getMinutes()} ${date.getHours()} * * ${date.getDay()}` };
+    const at = parseTime(when, new Date(), zone);
+    const parts = localDateParts(at, zone || DEFAULT_TIME_ZONE);
+    return {
+      kind: "cron",
+      cron: lower === "daily"
+        ? `${parts.minute} ${parts.hour} * * *`
+        : `${parts.minute} ${parts.hour} * * ${parts.weekday}`,
+    };
   }
   const interval = lower.match(/^every\s+(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$/i);
   if (interval) return parseEveryInterval(`${interval[1]}${interval[2]}`);
@@ -137,9 +156,11 @@ export function parseRecurrence(when, recurrence) {
   throw new Error(`Unknown recurrence: "${recurrence}"`);
 }
 
-export function parseDailyTime(timeStr) {
-  const date = new Date(parseTime(timeStr));
-  return { kind: "cron", cron: `${date.getMinutes()} ${date.getHours()} * * *` };
+export function parseDailyTime(timeStr, timeZone = null) {
+  const zone = timeZone ? normalizeTimeZone(timeZone) : null;
+  const at = parseTime(timeStr, new Date(), zone);
+  const parts = localDateParts(at, zone || DEFAULT_TIME_ZONE);
+  return { kind: "cron", cron: `${parts.minute} ${parts.hour} * * *` };
 }
 
 export function parseEveryInterval(intervalStr) {
@@ -179,7 +200,8 @@ export function computeNextRun(schedule, afterMs = Date.now(), timezone = null, 
   else if (schedule.kind === "interval") next = afterMs + schedule.everyMs;
   else if (schedule.kind === "cron") {
     try {
-      next = cronParser.parse(schedule.cron, { currentDate: new Date(afterMs), ...(timezone ? { tz: timezone } : {}) }).next().getTime();
+      const parser = cronParser.CronExpressionParser || cronParser;
+      next = parser.parse(schedule.cron, { currentDate: new Date(afterMs), ...(timezone ? { tz: timezone } : {}) }).next().getTime();
     } catch (error) {
       throw new Error(`Invalid cron expression "${schedule.cron}": ${error.message}`);
     }
@@ -190,7 +212,11 @@ export function computeNextRun(schedule, afterMs = Date.now(), timezone = null, 
 export function addRoutine({ userId, channelId, guildId, type, payload, schedule, timezone = null, activeHours = null, isolatedSession = false }) {
   if (!new Set(["message", "llm", "heartbeat"]).has(type)) throw new Error("Invalid routine type");
   const normalizedHours = normalizeActiveHours(activeHours);
-  const normalizedTimezone = validTimezone(timezone) ? timezone : normalizedHours?.timezone || null;
+  // Prefer explicit timezone, then active-hours zone, then UTC for cron schedules so
+  // "9am" means the user's 9am rather than the bot host's local clock.
+  const normalizedTimezone = validTimezone(timezone)
+    ? timezone
+    : normalizedHours?.timezone || (schedule?.kind === "cron" ? DEFAULT_TIME_ZONE : null);
   const nextRunAt = computeNextRun(schedule, Date.now(), normalizedTimezone, normalizedHours);
   if (nextRunAt === null) throw new Error("Scheduled time is in the past");
   const routine = { id: newId(), userId: String(userId), channelId: channelId || null, guildId: guildId || null, type, payload: String(payload), schedule, timezone: normalizedTimezone, activeHours: normalizedHours, isolatedSession: isolatedSession === true, nextRunAt, lastRunAt: null, enabled: true, state: "queued", attempts: 0, createdAt: Date.now(), lastError: null };
@@ -292,7 +318,13 @@ export function markFired(routine) {
 export function formatRoutine(routine) {
   const label = routine.type === "heartbeat" ? "heartbeat" : routine.type === "llm" ? "auto" : "remind";
   const schedule = routine.schedule;
-  const scheduleLabel = schedule.kind === "once" ? `once @ ${new Date(schedule.at).toLocaleString()}` : schedule.kind === "cron" ? `cron \`${schedule.cron}\`${routine.timezone ? ` (${routine.timezone})` : ""}` : `every ${Math.round(schedule.everyMs / 60_000)}m`;
+  const zone = routine.timezone || DEFAULT_TIME_ZONE;
+  const next = formatInTimeZone(routine.nextRunAt, zone);
+  const scheduleLabel = schedule.kind === "once"
+    ? `once @ ${formatInTimeZone(schedule.at, zone) || new Date(schedule.at).toISOString()}`
+    : schedule.kind === "cron"
+      ? `cron \`${schedule.cron}\` (${zone})${next ? ` next ${next}` : ""}`
+      : `every ${Math.round(schedule.everyMs / 60_000)}m${next ? ` next ${next}` : ""}`;
   const preview = routine.payload.length > 60 ? `${routine.payload.slice(0, 57)}...` : routine.payload;
   const state = routine.enabled ? "" : ` (${routine.state === "failed" ? "failed" : "paused"})`;
   return `\`${routine.id}\` [${label}] ${scheduleLabel}${state} — ${preview}`;
