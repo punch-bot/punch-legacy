@@ -72,6 +72,35 @@ export function localDateParts(timestamp, timeZone = DEFAULT_TIME_ZONE) {
   };
 }
 
+/**
+ * Convert a wall-clock local datetime in an IANA zone to a UTC epoch ms.
+ * Iterates so the offset used matches the target date (DST-safe), not the
+ * reference instant's offset.
+ */
+export function zonedWallTimeToUtc(
+  { year, month, day, hour = 0, minute = 0, second = 0 },
+  timeZone = DEFAULT_TIME_ZONE,
+) {
+  const zone = normalizeTimeZone(timeZone);
+  const desired = Date.UTC(year, month - 1, day, hour, minute, second);
+  let guess = desired;
+  for (let i = 0; i < 4; i++) {
+    const parts = localDateParts(guess, zone);
+    const asUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+    const delta = desired - asUtc;
+    if (delta === 0) break;
+    guess += delta;
+  }
+  return guess;
+}
+
 export function formatInTimeZone(timestamp, timeZone = DEFAULT_TIME_ZONE) {
   if (!Number.isFinite(timestamp)) return null;
   const normalized = normalizeTimeZone(timeZone);

@@ -44,7 +44,7 @@ const heartbeatWorking = {
 };
 const hbWork = classifyIdleWatchdogEvent(heartbeatWorking, first.fingerprint);
 assert.equal(hbWork.resetMeaningful, false);
-assert.equal(hbWork.resetKeepalive, false, "working heartbeats must not dodge the stale timer");
+assert.equal(hbWork.resetKeepalive, true, "working heartbeats keep silence alive so TOOL_STALE_MS can fire");
 
 const toolStart = {
   type: "session.progress",
@@ -59,7 +59,8 @@ const heartbeatTool = {
   properties: { phase: "tool", status: "running", current: "Running a command", toolCalls: 2, heartbeat: true },
 };
 const hbTool = classifyIdleWatchdogEvent(heartbeatTool, tool.fingerprint);
-assert.equal(hbTool.resetKeepalive, false, "tool heartbeats alone are not meaningful progress");
+assert.equal(hbTool.resetMeaningful, false, "tool heartbeats alone are not meaningful progress");
+assert.equal(hbTool.resetKeepalive, true, "tool heartbeats keep silence alive so TOOL_STALE_MS can fire");
 
 const delta = classifyIdleWatchdogEvent({
   type: "message.part.delta",

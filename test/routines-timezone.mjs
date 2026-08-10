@@ -22,10 +22,31 @@ test("parseTime interprets wall clock times in the user timezone", () => {
   assert.equal(new Date(at).toISOString(), "2026-08-11T13:00:00.000Z");
 });
 
+test("parseTime resolves spring-forward DST with target-date offset", () => {
+  // 2026-03-08 00:00 EDT is after the spring-forward; ref is still EST (-5).
+  const ref = new Date("2026-03-08T04:00:00.000Z");
+  const at = routines.parseTime("tomorrow 9am", ref, "America/New_York");
+  assert.equal(new Date(at).toISOString(), "2026-03-08T13:00:00.000Z");
+});
+
+test("parseTime resolves fall-back DST with target-date offset", () => {
+  // 2026-11-01 00:00 EDT; tomorrow 9am is EST (-5) → 14:00Z.
+  const ref = new Date("2026-11-01T04:00:00.000Z");
+  const at = routines.parseTime("tomorrow 9am", ref, "America/New_York");
+  assert.equal(new Date(at).toISOString(), "2026-11-02T14:00:00.000Z");
+});
+
 test("parseRecurrence daily builds cron fields from the user timezone", () => {
   const schedule = routines.parseRecurrence("9am", "daily", "America/New_York");
   assert.equal(schedule.kind, "cron");
   assert.equal(schedule.cron, "0 9 * * *");
+});
+
+test("daily recurrence cron stays wall-clock across DST transitions", () => {
+  const spring = routines.parseRecurrence("9am", "daily", "America/New_York");
+  const fall = routines.parseRecurrence("9am", "daily", "America/New_York");
+  assert.equal(spring.cron, "0 9 * * *");
+  assert.equal(fall.cron, "0 9 * * *");
 });
 
 test("daily routines store timezone and fire at the local wall clock", () => {

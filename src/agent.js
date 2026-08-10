@@ -325,13 +325,14 @@ export function progressEventFingerprint(event) {
   ]);
 }
 
-const STREAMING_PHASES = new Set(["thinking", "writing", "compacting", "retrying"]);
+const KEEPALIVE_PHASES = new Set(["thinking", "writing", "compacting", "retrying", "working", "tool", "milestone"]);
 
 /**
  * Decide whether an SSE event should keep the idle watchdog alive.
  * - Meaningful progress (new fingerprint, tool start/end, text) always resets.
- * - Heartbeats only keep streaming phases alive; stuck "working"/"tool" with
- *   heartbeat-only chatter must not dodge the stall timer forever.
+ * - Heartbeats keep the silence timer alive (including working/tool) so the
+ *   longer TOOL_STALE_MS path can fire instead of the 90s silence abort.
+ * - Heartbeat-only working/tool still goes stale after TOOL_STALE_MS.
  */
 export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
   if (!event || typeof event !== "object") {
@@ -343,7 +344,7 @@ export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
     if (event.properties?.heartbeat === true) {
       return {
         resetMeaningful: false,
-        resetKeepalive: STREAMING_PHASES.has(phase),
+        resetKeepalive: KEEPALIVE_PHASES.has(phase),
         fingerprint: lastFingerprint,
         phase,
       };

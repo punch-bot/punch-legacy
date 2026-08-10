@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "
 import { dirname, join } from "node:path";
 import * as chrono from "chrono-node";
 import cronParser from "cron-parser";
-import { DEFAULT_TIME_ZONE, formatInTimeZone, getTimeZoneOffsetMinutes, localDateParts, normalizeTimeZone } from "./timezone.js";
+import { DEFAULT_TIME_ZONE, formatInTimeZone, getTimeZoneOffsetMinutes, localDateParts, normalizeTimeZone, zonedWallTimeToUtc } from "./timezone.js";
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 const ROUTINES_FILE = join(DATA_DIR, "routines.json");
@@ -120,7 +120,9 @@ function chronoReference(refDate = new Date(), timeZone = null) {
   const normalized = normalizeTimeZone(timeZone);
   return {
     instant,
-    // chrono-node accepts numeric UTC offsets, not IANA names.
+    // chrono-node accepts numeric UTC offsets, not IANA names. This offset is
+    // only used to resolve relative phrases; parseTime re-resolves the target
+    // wall clock with the offset that applies on that local date (DST-safe).
     timezone: getTimeZoneOffsetMinutes(normalized, instant),
   };
 }
@@ -129,8 +131,27 @@ export function parseTime(when, refDate = new Date(), timeZone = null) {
   const trimmed = String(when || "").trim();
   const shorthand = parseShorthand(trimmed);
   if (shorthand) return shorthand;
-  const parsed = chrono.parseDate(trimmed, chronoReference(refDate, timeZone), { forwardDate: true });
-  if (parsed) return parsed.getTime();
+  const zone = timeZone ? normalizeTimeZone(timeZone) : null;
+  if (!zone) {
+    const parsed = chrono.parseDate(trimmed, refDate, { forwardDate: true });
+    if (parsed) return parsed.getTime();
+  } else {
+    const results = chrono.parse(trimmed, chronoReference(refDate, zone), { forwardDate: true });
+    const start = results[0]?.start;
+    if (start) {
+      return zonedWallTimeToUtc(
+        {
+          year: start.get("year"),
+          month: start.get("month"),
+          day: start.get("day"),
+          hour: start.get("hour") ?? 0,
+          minute: start.get("minute") ?? 0,
+          second: start.get("second") ?? 0,
+        },
+        zone,
+      );
+    }
+  }
   const iso = Date.parse(trimmed);
   if (!Number.isNaN(iso)) return iso;
   throw new Error(`Could not parse time: "${when}"`);

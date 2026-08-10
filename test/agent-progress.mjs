@@ -194,5 +194,6 @@ test("progress fingerprints ignore unchanged snapshots but accept explicit heart
     type: "session.progress",
     properties: { phase: "working", status: "running", current: "Working", heartbeat: true },
   }, first.fingerprint);
-  assert.equal(workingBeat.resetKeepalive, false);
+  assert.equal(workingBeat.resetMeaningful, false);
+  assert.equal(workingBeat.resetKeepalive, true);
 });
