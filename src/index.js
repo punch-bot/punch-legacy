@@ -1292,14 +1292,20 @@ client.once(Events.ClientReady, async (c) => {
             choices: [{ name: "local", value: "local" }, { name: "remote", value: "remote" }] },
           { type: 3, name: "url", description: "Remote MCP URL (required for remote)" },
           { type: 3, name: "command", description: "Local command, space-separated (required for local, e.g. 'npx -y <pkg>')" },
-          { type: 3, name: "headers", description: "Remote headers JSON, e.g. {\"Authorization\":\"Bearer x\"}" },
-          { type: 3, name: "environment", description: "Local env JSON, e.g. {\"KEY\":\"value\"}" },
+          { type: 3, name: "key", description: "API key (Bearer auth for remote; env for local — use api_key_env to name it)" },
+          { type: 3, name: "api_key_env", description: "Local env var name the MCP reads (default API_KEY)" },
+          { type: 3, name: "api_key_header", description: "Remote header name for the key (default Authorization Bearer)" },
+          { type: 3, name: "headers", description: "Remote headers JSON (non-auth headers only; use key for API keys)" },
+          { type: 3, name: "environment", description: "Local env JSON (non-secret vars only)" },
         ] },
       { type: 1, name: "remove", description: "Remove an MCP server",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
-      { type: 1, name: "auth", description: "MCP OAuth (not available yet)",
-        options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
-      { type: 1, name: "logout", description: "MCP OAuth logout (not available yet)",
+      { type: 1, name: "auth", description: "Set or rotate an MCP server's API key",
+        options: [
+          { type: 3, name: "name", description: "MCP server name", required: true },
+          { type: 3, name: "key", description: "API key", required: true },
+        ] },
+      { type: 1, name: "logout", description: "Remove stored API key for an MCP server",
         options: [{ type: 3, name: "name", description: "MCP server name", required: true }] },
     ],
   }, {
@@ -4243,11 +4249,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const sub = interaction.options.getSubcommand();
     await interaction.deferReply({ ephemeral: true });
     try {
-      if (sub === "auth" || sub === "logout") {
+      if (sub === "auth") {
+        const name = interaction.options.getString("name", true);
+        const key = interaction.options.getString("key", true);
+        const res = await fetch(`${url}/mcp/auth`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name, key }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
         await interaction.editReply({
-          content:
-            "**MCP OAuth is not available yet.** " +
-            "Pass tokens with `/mcp add` `headers` (remote) or `environment` (local), then remove/re-add to rotate them.",
+          content: `API key stored for MCP server \`${name}\`. Restarting Pi…`,
+        });
+        return;
+      }
+      if (sub === "logout") {
+        const name = interaction.options.getString("name", true);
+        const res = await fetch(`${url}/mcp/logout`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: auth },
+          body: JSON.stringify({ name }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
+        await interaction.editReply({
+          content: `Removed stored API key for MCP server \`${name}\`. Restarting Pi…`,
         });
         return;
       }
@@ -4263,9 +4292,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const lines = names.map((name) => {
           const e = mcp[name] || {};
           const on = e.enabled === false ? "⏸️" : "✅";
-          if (e.type === "remote") return `${on} **${name}** (remote) \`${e.url || ""}\``;
+          const keyMark = e.apiKeyConfigured ? " 🔑" : "";
+          if (e.type === "remote") return `${on} **${name}**${keyMark} (remote) \`${e.url || ""}\``;
           const cmd = Array.isArray(e.command) ? e.command.join(" ") : String(e.command || "");
-          return `${on} **${name}** (local) \`${cmd}\``.slice(0, 200);
+          return `${on} **${name}**${keyMark} (local) \`${cmd}\``.slice(0, 200);
         });
         await interaction.editReply({ content: `**MCP servers:**\n${lines.join("\n")}`.slice(0, 1900) });
         return;
@@ -4288,9 +4318,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const type = interaction.options.getString("type", true);
         const mcpUrl = interaction.options.getString("url");
         const commandStr = interaction.options.getString("command");
+        const apiKey = interaction.options.getString("key");
+        const apiKeyEnv = interaction.options.getString("api_key_env");
+        const apiKeyHeader = interaction.options.getString("api_key_header");
         const headersStr = interaction.options.getString("headers");
         const envStr = interaction.options.getString("environment");
         const payload = { name, type, enabled: true };
+        if (apiKey) {
+          payload.auth = "api_key";
+          payload.apiKey = apiKey;
+        }
+        if (apiKeyEnv) payload.apiKeyEnv = apiKeyEnv;
+        if (apiKeyHeader) payload.apiKeyHeader = apiKeyHeader;
         if (type === "remote") {
           if (!mcpUrl) throw new Error("Remote MCP requires `url`");
           payload.url = mcpUrl;

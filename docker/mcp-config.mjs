@@ -3,6 +3,16 @@
  * Registry keeps OpenCode-shaped local/remote entries; adapter wants mcpServers.
  */
 
+/** Env var name for a stored MCP API key (matches supervisor /mcp/auth). */
+export function mcpApiKeyEnvVar(serverName) {
+  const safe = String(serverName || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  return `MCP_${safe || "SERVER"}_API_KEY`;
+}
+
 /** Split a Discord space-separated command string into argv (supports simple quotes). */
 export function splitCommandString(input) {
   const s = String(input || "").trim();
@@ -71,6 +81,34 @@ function normalizeLocalCommand(command) {
   return argv;
 }
 
+function usesApiKeyAuth(entry) {
+  return entry.auth === "api_key" || entry.auth === "apikey" || entry.apiKey === true;
+}
+
+export function usesMcpApiKeyAuth(entry) {
+  return usesApiKeyAuth(entry);
+}
+
+function redactHeaderValue(headerName) {
+  const h = String(headerName || "").toLowerCase();
+  return h === "authorization" || h === "x-api-key" || h.endsWith("-api-key") || h.includes("token");
+}
+
+/** Public view of a registry entry (no secret headers or inline keys). */
+export function sanitizeMcpEntryForDisplay(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  const out = { ...entry };
+    if (out.headers && typeof out.headers === "object") {
+    const headers = { ...out.headers };
+    for (const k of Object.keys(headers)) {
+      if (redactHeaderValue(k)) headers[k] = "(set)";
+    }
+    out.headers = headers;
+  }
+  delete out.apiKey;
+  return out;
+}
+
 /**
  * Strict validation for /mcp/add. Throws on invalid shapes.
  * Returns a normalized Punch registry entry ready to persist.
@@ -84,6 +122,21 @@ export function assertPunchEntry(entry) {
     throw new Error("type must be 'local' or 'remote'");
   }
   const enabled = entry.enabled !== false;
+  const authMode = entry.auth;
+  const apiKeyAuth = authMode === "api_key" || authMode === "apikey" || entry.apiKey === true;
+  if (authMode != null && authMode !== "api_key" && authMode !== "apikey") {
+    throw new Error("auth must be 'api_key' when set");
+  }
+  if (entry.apiKeyEnv != null) {
+    const envName = String(entry.apiKeyEnv || "").trim();
+    if (!envName || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
+      throw new Error("apiKeyEnv must be a valid env var name (letters, digits, underscore)");
+    }
+  }
+  if (entry.apiKeyHeader != null) {
+    const headerName = String(entry.apiKeyHeader || "").trim();
+    if (!headerName) throw new Error("apiKeyHeader must be a non-empty header name");
+  }
   if (type === "remote") {
     if (typeof entry.url !== "string" || !entry.url.trim()) {
       throw new Error("Missing url for remote MCP");
@@ -106,7 +159,12 @@ export function assertPunchEntry(entry) {
     if (headers && Object.keys(headers).length > 0 && parsed.protocol !== "https:") {
       throw new Error("Credentialed remote MCP requires an https:// url");
     }
+    if (apiKeyAuth && parsed.protocol !== "https:") {
+      throw new Error("API key auth for remote MCP requires an https:// url");
+    }
     const out = { type: "remote", enabled, url };
+    if (apiKeyAuth) out.auth = "api_key";
+    if (entry.apiKeyHeader) out.apiKeyHeader = String(entry.apiKeyHeader).trim();
     if (headers && Object.keys(headers).length) out.headers = headers;
     return out;
   }
@@ -116,35 +174,64 @@ export function assertPunchEntry(entry) {
     ? asStringRecord(entry.environment, "environment")
     : undefined;
   const out = { type: "local", enabled, command };
+  if (apiKeyAuth) out.auth = "api_key";
+  if (entry.apiKeyEnv) out.apiKeyEnv = String(entry.apiKeyEnv).trim();
   if (environment && Object.keys(environment).length) out.environment = environment;
+  return out;
+}
+
+function applyApiKeyAuthToAdapter(out, entry, serverName) {
+  const envVar = mcpApiKeyEnvVar(serverName);
+  const ref = `\${${envVar}}`;
+  if (entry.type === "remote") {
+    const headerName = entry.apiKeyHeader ? String(entry.apiKeyHeader).trim() : "";
+    if (headerName && headerName.toLowerCase() !== "authorization") {
+      out.headers = { ...(out.headers || {}), [headerName]: ref };
+      return out;
+    }
+    out.auth = "bearer";
+    out.bearerTokenEnv = envVar;
+    return out;
+  }
+  const targetEnv = entry.apiKeyEnv ? String(entry.apiKeyEnv).trim() : "API_KEY";
+  out.env = { ...(out.env || {}), [targetEnv]: ref };
   return out;
 }
 
 /**
  * Convert one Punch registry entry to a pi-mcp-adapter ServerEntry.
  * @param {object} entry
+ * @param {string} [serverName] registry key (required for api_key auth wiring)
  * @returns {object|null} null if entry is invalid
  */
-export function punchEntryToAdapter(entry) {
+export function punchEntryToAdapter(entry, serverName) {
   try {
     const normalized = assertPunchEntry(entry);
     const disabled = normalized.enabled === false;
     if (normalized.type === "remote") {
-      const out = {
+      let out = {
         url: normalized.url,
-        // Punch Discord sandboxes have no interactive OAuth UI yet.
-        auth: false,
       };
+      if (!usesApiKeyAuth(normalized)) {
+        // Punch Discord sandboxes have no interactive OAuth UI yet.
+        out.auth = false;
+      }
       if (normalized.headers) out.headers = normalized.headers;
+      if (usesApiKeyAuth(normalized) && serverName) {
+        out = applyApiKeyAuthToAdapter(out, normalized, serverName);
+      }
       if (disabled) out.disabled = true;
       return out;
     }
-    const out = {
+    let out = {
       command: normalized.command[0],
       args: normalized.command.slice(1),
       cwd: "/work",
     };
     if (normalized.environment) out.env = normalized.environment;
+    if (usesApiKeyAuth(normalized) && serverName) {
+      out = applyApiKeyAuthToAdapter(out, normalized, serverName);
+    }
     if (disabled) out.disabled = true;
     return out;
   } catch {
@@ -164,7 +251,7 @@ export function punchRegistryToMcpServers(registry) {
   for (const [name, entry] of Object.entries(registry)) {
     if (!/^[a-zA-Z0-9_-]+$/.test(name)) continue;
     try {
-      const adapted = punchEntryToAdapter(entry);
+      const adapted = punchEntryToAdapter(entry, name);
       if (adapted) mcpServers[name] = adapted;
     } catch {
       // Skip malformed entries so one bad server does not block the rest.

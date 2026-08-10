@@ -2,11 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertPunchEntry,
+  mcpApiKeyEnvVar,
   punchEntryToAdapter,
   punchRegistryToAdapterConfig,
   punchRegistryToMcpServers,
+  sanitizeMcpEntryForDisplay,
   splitCommandString,
+  usesMcpApiKeyAuth,
 } from "../docker/mcp-config.mjs";
+
+test("mcpApiKeyEnvVar normalizes server names", () => {
+  assert.equal(mcpApiKeyEnvVar("linear"), "MCP_LINEAR_API_KEY");
+  assert.equal(mcpApiKeyEnvVar("my-server"), "MCP_MY_SERVER_API_KEY");
+  assert.equal(mcpApiKeyEnvVar("foo__bar"), "MCP_FOO_BAR_API_KEY");
+});
 
 test("splitCommandString handles spaces and quotes", () => {
   assert.deepEqual(splitCommandString("npx -y foo"), ["npx", "-y", "foo"]);
@@ -36,6 +45,51 @@ test("converts remote Punch entries", () => {
   assert.deepEqual(
     punchEntryToAdapter({ type: "remote", enabled: false, url: "https://x.test/mcp" }),
     { url: "https://x.test/mcp", auth: false, disabled: true },
+  );
+});
+
+test("api_key auth wires bearer tokens for remote MCP", () => {
+  assert.equal(usesMcpApiKeyAuth({ auth: "api_key" }), true);
+  assert.deepEqual(
+    punchEntryToAdapter({
+      type: "remote",
+      url: "https://mcp.example.com/mcp",
+      auth: "api_key",
+    }, "linear"),
+    {
+      url: "https://mcp.example.com/mcp",
+      auth: "bearer",
+      bearerTokenEnv: "MCP_LINEAR_API_KEY",
+    },
+  );
+  assert.deepEqual(
+    punchEntryToAdapter({
+      type: "remote",
+      url: "https://mcp.example.com/mcp",
+      auth: "api_key",
+      apiKeyHeader: "X-API-Key",
+    }, "docs"),
+    {
+      url: "https://mcp.example.com/mcp",
+      headers: { "X-API-Key": "${MCP_DOCS_API_KEY}" },
+    },
+  );
+});
+
+test("api_key auth wires env interpolation for local MCP", () => {
+  assert.deepEqual(
+    punchEntryToAdapter({
+      type: "local",
+      command: ["npx", "-y", "some-mcp"],
+      auth: "api_key",
+      apiKeyEnv: "LINEAR_API_KEY",
+    }, "linear"),
+    {
+      command: "npx",
+      args: ["-y", "some-mcp"],
+      cwd: "/work",
+      env: { LINEAR_API_KEY: "${MCP_LINEAR_API_KEY}" },
+    },
   );
 });
 
@@ -114,6 +168,17 @@ test("rejects credentialed http remote MCP; allows https and plain http", () => 
   );
 });
 
+test("rejects api_key auth on http remote URLs", () => {
+  assert.throws(
+    () => assertPunchEntry({
+      type: "remote",
+      url: "http://mcp.example.com/mcp",
+      auth: "api_key",
+    }),
+    /https:\/\//,
+  );
+});
+
 test("rejects malformed and non-http remote URLs", () => {
   assert.throws(
     () => assertPunchEntry({ type: "remote", url: "not a URL" }),
@@ -143,6 +208,16 @@ test("assertPunchEntry rejects bad headers and command shapes", () => {
     () => assertPunchEntry({ type: "local", command: [] }),
     /non-empty command/,
   );
+});
+
+test("sanitizeMcpEntryForDisplay redacts sensitive headers", () => {
+  const view = sanitizeMcpEntryForDisplay({
+    type: "remote",
+    url: "https://x.test/mcp",
+    headers: { Authorization: "Bearer secret", "X-Custom": "ok" },
+  });
+  assert.equal(view.headers.Authorization, "(set)");
+  assert.equal(view.headers["X-Custom"], "ok");
 });
 
 test("adapter root config includes headless settings", () => {
