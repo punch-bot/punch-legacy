@@ -43,6 +43,20 @@ test("migrateMcpApiKeyEnvVars moves legacy keys to collision-free names", () => 
   assert.equal(migrated[legacyVar], undefined);
 });
 
+test("migrateMcpApiKeyEnvVars skips ambiguous legacy collisions", () => {
+  const registry = {
+    "foo-bar": { type: "remote", url: "https://a.test/mcp", auth: "api_key" },
+    foo_bar: { type: "remote", url: "https://b.test/mcp", auth: "api_key" },
+  };
+  const legacyVar = legacyMcpApiKeyEnvVar("foo-bar");
+  const env = { [legacyVar]: "shared-secret" };
+  const { env: migrated, changed } = migrateMcpApiKeyEnvVars(registry, env);
+  assert.equal(changed, false);
+  assert.equal(migrated[legacyVar], "shared-secret");
+  assert.equal(migrated[mcpApiKeyEnvVar("foo-bar")], undefined);
+  assert.equal(migrated[mcpApiKeyEnvVar("foo_bar")], undefined);
+});
+
 test("splitCommandString handles spaces and quotes", () => {
   assert.deepEqual(splitCommandString("npx -y foo"), ["npx", "-y", "foo"]);
   assert.deepEqual(splitCommandString(`npx -y "my pkg"`), ["npx", "-y", "my pkg"]);

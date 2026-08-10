@@ -114,10 +114,20 @@ export function migrateMcpApiKeyEnvVars(registry, env) {
   if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
     return { env: out, changed };
   }
+  const legacyOwners = {};
+  for (const name of Object.keys(registry)) {
+    const legacyVar = legacyMcpApiKeyEnvVar(name);
+    const newVar = mcpApiKeyEnvVar(name);
+    if (legacyVar === newVar) continue;
+    if (!legacyOwners[legacyVar]) legacyOwners[legacyVar] = [];
+    legacyOwners[legacyVar].push(name);
+  }
   for (const name of Object.keys(registry)) {
     const newVar = mcpApiKeyEnvVar(name);
     const legacyVar = legacyMcpApiKeyEnvVar(name);
-    if (legacyVar !== newVar && out[legacyVar] && !out[newVar]) {
+    if (legacyVar === newVar) continue;
+    if ((legacyOwners[legacyVar]?.length || 0) > 1) continue;
+    if (out[legacyVar] && !out[newVar]) {
       out[newVar] = out[legacyVar];
       delete out[legacyVar];
       changed = true;
