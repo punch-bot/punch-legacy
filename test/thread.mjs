@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filterThreadSubtree } from "../src/thread-context.js";
+import { filterThreadSubtree } from "../src/chat/context.js";
 
 // Helper to build a minimal message shape for the pure filter.
 const m = (id, referenceMessageId = null) => ({ id, referenceMessageId });

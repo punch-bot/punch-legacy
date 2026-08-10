@@ -5,6 +5,8 @@
  * the transcript is treated as the user's chat text.
  */
 
+import { getEnv, apiUrlFor } from "./agent.js";
+
 const IS_VOICE_MESSAGE = 1 << 13; // discord.js MessageFlags.IsVoiceMessage
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -295,4 +297,18 @@ export async function transcribeVoiceMessage(message, {
       userError: STT_USER_ERROR_GENERIC,
     };
   }
+}
+
+/** Resolve STT config with per-sandbox env merged over bot env. */
+export async function resolveSttConfigForUser(userId) {
+  let sandboxEnv = {};
+  try {
+    if (apiUrlFor(userId)) {
+      const data = await getEnv(userId);
+      sandboxEnv = data?.env && typeof data.env === "object" ? data.env : {};
+    }
+  } catch (err) {
+    console.error("[stt] failed to load sandbox env for keys:", err.message);
+  }
+  return resolveSttConfig({ env: process.env, sandboxEnv });
 }

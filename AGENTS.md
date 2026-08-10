@@ -72,8 +72,16 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 
 | Path | Role |
 |------|------|
-| `src/index.js` | Discord client, chat queue, bot HTTP `:4098` |
+| `src/index.js` | Thin bootstrap: wires client, listeners, slash commands, routine scheduler, bot HTTP `:4098` |
+| `src/core/config.js` | Constants: token, prefix, ports, limits, `MODEL_LIST`, `PROVIDER_NAMES`, auth helpers |
+| `src/core/registry.js` | Shared mutable state: client, queues, dedup keys, question state, run chains |
+| `src/core/discord.js` | Client factory + shared helpers (reactions, progress bar, doctor tokens, reply/chunk) |
+| `src/core/supervisor.js` | `ensureUserSandbox` (per-user sandbox routing/creation) |
 | `src/agent.js` | Pi HTTP client (via pi-gateway), `BASE_SYSTEM`, compress |
+| `src/chat/*` | Chat pipeline: `context.js` (thread fetch/filter, `settingsDeps`), `queue.js` (`enqueueChat`, `withUserRunLock`), `chat.js` (`handleChat`), `attachments.js`, `memory-tags.js`, `embeds-questions.js`, `multitask.js`, `routines-fire.js`, `message-create.js`, `reaction-add.js` |
+| `src/commands/*` | Discord interaction/prefix commands: `interactions.js` (component+slash handlers), `prefix.js` (`handleCommand` + `!`-commands), `questions.js`, `slash.js` (`buildSlashCommands`) |
+| `src/gateway/pigeon.js` | Pigeon DM plumbing: notify, permission prompts, `handleAgentPigeon`, `runApprovedAgentPigeon` |
+| `src/gateway/bot-server.js` | Bot HTTP `:4098`: worker progress/complete, routines/collabs/state APIs, pigeon notify |
 | `src/memory.js` | Selective cited memory retrieval, durable facts, DM-only daily notes, compaction |
 | `src/doctor/index.js` | Bot-side routing, Docker, scheduler, and report diagnostics |
 | `docker/doctor.mjs` | Sandbox-local Pi, provider, browser, Tailscale, storage, and security probes |
