@@ -143,6 +143,10 @@ test("multitaskPrompt omits the timestamp when absent", () => {
 
 test("userTurnLine and assemblePrompt build the final user line", () => {
   assert.equal(userTurnLine("123", "Bob (@bob, id:123)", "hi"), "[user:123] Bob (@bob, id:123): hi");
+  assert.equal(
+    userTurnLine("123", "Bob (@bob, id:123)", "hi", { channelId: "999", timeZone: "America/New_York" }),
+    "[user:123 channel:999 tz:America/New_York] Bob (@bob, id:123): hi",
+  );
   assert.equal(assemblePrompt(["a", "", "b"], "[user:123] Bob: hi"), "a\n\nb\n\n[user:123] Bob: hi");
   assert.equal(assemblePrompt([], "[user:123] Bob: hi"), "[user:123] Bob: hi");
 });

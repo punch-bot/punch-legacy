@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, after } from "node:test";
@@ -26,5 +26,16 @@ describe("multitask settings", () => {
     assert.equal(memory.getUserSettings(uid).multitaskEnabled, true);
     memory.patchUserSettings(uid, { multitaskEnabled: false });
     assert.equal(memory.getUserSettings(uid).multitaskEnabled, false);
+  });
+});
+
+describe("worker channelId regression", () => {
+  it("startWorker accepts channelId/messageId/source without ReferenceError", () => {
+    const source = readFileSync(new URL("../docker/worker-manager.mjs", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /startWorker\(\{\s*prompt,\s*kind = "research",\s*model,\s*timeoutMs = 600_000,\s*maxTokens = 2_000,\s*channelId = null,\s*messageId = null,\s*source = null/,
+    );
+    assert.match(source, /channelId: channelId \? String\(channelId\) : null/);
   });
 });
