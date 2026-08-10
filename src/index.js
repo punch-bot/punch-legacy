@@ -63,6 +63,7 @@ import {
   renderProgressLive,
 } from "./progress-ui.js";
 import {
+  discardThinkingMessage,
   isVoiceMessage,
   mergeTranscriptIntoText,
   resolveSttConfig,
@@ -1592,6 +1593,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       signal,
     });
     if (stt.aborted || signal?.aborted) {
+      await discardThinkingMessage(existingThinking);
       activeTurns.delete(uid);
       return;
     }

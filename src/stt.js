@@ -24,6 +24,13 @@ export const STT_USER_ERROR_TOO_LARGE = (maxMb) =>
 export const STT_USER_ERROR_GENERIC =
   "Couldn't transcribe that voice memo. Please try again.";
 
+/** Remove a queued/progress Discord message (e.g. after !stop during STT). */
+export async function discardThinkingMessage(msg) {
+  if (!msg || typeof msg.delete !== "function") return false;
+  await msg.delete().catch(() => {});
+  return true;
+}
+
 function combineSignals(...signals) {
   const list = signals.filter(Boolean);
   if (!list.length) return undefined;

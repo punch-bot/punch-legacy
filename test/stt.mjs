@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  discardThinkingMessage,
   findVoiceAttachments,
   isVoiceMessage,
   mergeTranscriptIntoText,
@@ -412,4 +413,17 @@ test("shouldAcceptChatTurn rejects unrelated guild voice (no STT path)", () => {
 test("mergeTranscriptIntoText merges spoken text once", () => {
   assert.equal(mergeTranscriptIntoText("extra", "hello"), "hello\n\nextra");
   assert.equal(mergeTranscriptIntoText("", "hello"), "hello");
+});
+
+test("discardThinkingMessage deletes queued progress messages on cancel", async () => {
+  let deleted = 0;
+  const msg = {
+    delete: async () => {
+      deleted += 1;
+    },
+  };
+  assert.equal(await discardThinkingMessage(msg), true);
+  assert.equal(deleted, 1);
+  assert.equal(await discardThinkingMessage(null), false);
+  assert.equal(await discardThinkingMessage({}), false);
 });
