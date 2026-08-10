@@ -20,9 +20,9 @@ export function channelContextBlock(contextMessages) {
 export function thisTurnInstructions() {
   return (
     "--- This turn ---\n" +
-    "The user's message below triggered this turn. To react ON THAT MESSAGE, append " +
-    '<react emoji="..."></react> tag(s) to your reply — the bot applies them automatically. ' +
-    "Do not use Discord API, curl, or ask for channel/message IDs to react."
+    "The message below triggered this turn. To react on that message, append one or more " +
+    '<react emoji="..."></react> tag(s) to your reply — Punch applies them automatically. ' +
+    "Do not use Discord API, curl, or ask for channel/message IDs."
   );
 }
 
@@ -44,13 +44,13 @@ export function memoryBlock({ projectMemory = "", relatedText = "" } = {}) {
   const parts = [];
   if (projectMemory) {
     parts.push(
-      "Project memory (durable, model-maintained — update /work/.punch-memory.md when needed):\n" +
+      "Project memory (update /work/.punch-memory.md when needed):\n" +
         projectMemory.trim(),
     );
   }
   if (relatedText) {
     parts.push(
-      "Related memory (auto-retrieved from past conversations — may be stale; verify before relying on it):\n" +
+      "Related memory (auto-retrieved — may be stale; verify before relying):\n" +
         relatedText.trim(),
     );
   }
@@ -58,7 +58,7 @@ export function memoryBlock({ projectMemory = "", relatedText = "" } = {}) {
 }
 
 export function timestampLine(sentAt) {
-  return `The user's message was sent at ${sentAt}.`;
+  return `Message sent at ${sentAt}.`;
 }
 
 export function multitaskPrompt(text, contextMessages = [], sentAt) {
@@ -69,7 +69,7 @@ export function multitaskPrompt(text, contextMessages = [], sentAt) {
   }
   return (
     "--- Multitask subtask ---\n" +
-    "You are running in parallel to the main Punch chat turn. Work independently; report concise results.\n\n" +
+    "Parallel to the main Punch turn. Work independently; return concise results.\n\n" +
     prompt
   );
 }
