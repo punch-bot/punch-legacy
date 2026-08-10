@@ -139,6 +139,10 @@ export function parseTime(when, refDate = new Date(), timeZone = null) {
     const results = chrono.parse(trimmed, chronoReference(refDate, zone), { forwardDate: true });
     const start = results[0]?.start;
     if (start) {
+      // Explicit Z / numeric offsets are absolute; do not reinterpret in the user zone.
+      if (start.isCertain("timezoneOffset")) {
+        return start.date().getTime();
+      }
       return zonedWallTimeToUtc(
         {
           year: start.get("year"),

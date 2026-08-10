@@ -36,6 +36,31 @@ test("parseTime resolves fall-back DST with target-date offset", () => {
   assert.equal(new Date(at).toISOString(), "2026-11-02T14:00:00.000Z");
 });
 
+test("parseTime preserves explicit Z and numeric offsets", () => {
+  const ref = new Date("2026-04-01T00:00:00.000Z");
+  assert.equal(
+    new Date(routines.parseTime("2026-04-01T09:00:00Z", ref, "America/New_York")).toISOString(),
+    "2026-04-01T09:00:00.000Z",
+  );
+  assert.equal(
+    new Date(routines.parseTime("2026-04-01T09:00:00-05:00", ref, "America/New_York")).toISOString(),
+    "2026-04-01T14:00:00.000Z",
+  );
+});
+
+test("zonedWallTimeToUtc rejects spring-forward gap and prefers earlier fall-back", async () => {
+  const tz = await import("../src/timezone.js");
+  assert.throws(
+    () => tz.zonedWallTimeToUtc({ year: 2026, month: 3, day: 8, hour: 2, minute: 30 }, "America/New_York"),
+    /does not exist in America\/New_York/,
+  );
+  // 01:30 happens twice on 2026-11-01; policy is earlier (still EDT) → 05:30Z.
+  assert.equal(
+    new Date(tz.zonedWallTimeToUtc({ year: 2026, month: 11, day: 1, hour: 1, minute: 30 }, "America/New_York")).toISOString(),
+    "2026-11-01T05:30:00.000Z",
+  );
+});
+
 test("parseRecurrence daily builds cron fields from the user timezone", () => {
   const schedule = routines.parseRecurrence("9am", "daily", "America/New_York");
   assert.equal(schedule.kind, "cron");
