@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
-import { punchRegistryToAdapterConfig, assertPunchEntry, mcpApiKeyEnvVar, mcpApiKeyEnvVarCandidates, migrateMcpApiKeyEnvVars, redactMcpKeysFromEnvView, sanitizeMcpEntryForDisplay, usesMcpApiKeyAuth, isMcpApiKeyConfigured } from "/usr/local/lib/mcp-config.mjs";
+import { punchRegistryToAdapterConfig, assertPunchEntry, mcpApiKeyEnvVar, mcpApiKeyEnvVarsToClear, migrateMcpApiKeyEnvVars, redactMcpKeysFromEnvView, sanitizeMcpEntryForDisplay, usesMcpApiKeyAuth, isMcpApiKeyConfigured } from "/usr/local/lib/mcp-config.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
@@ -1505,7 +1505,7 @@ const apiServer = createServer((req, res) => {
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
         const env = loadJSON(ENV_FILE);
-        for (const varName of mcpApiKeyEnvVarCandidates(name)) {
+        for (const varName of mcpApiKeyEnvVarsToClear(name, mcp)) {
           if (env[varName]) {
             delete env[varName];
             delete process.env[varName];
@@ -1569,7 +1569,7 @@ const apiServer = createServer((req, res) => {
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
         const env = loadJSON(ENV_FILE);
-        for (const varName of mcpApiKeyEnvVarCandidates(name)) {
+        for (const varName of mcpApiKeyEnvVarsToClear(name, mcp)) {
           if (env[varName]) {
             delete env[varName];
             delete process.env[varName];

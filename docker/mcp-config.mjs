@@ -31,6 +31,18 @@ export function mcpApiKeyEnvVarCandidates(serverName) {
   return candidates;
 }
 
+/** Env vars safe to delete for one server (skips ambiguous shared legacy names). */
+export function mcpApiKeyEnvVarsToClear(serverName, registry) {
+  const toClear = [mcpApiKeyEnvVar(serverName)];
+  const legacyVar = legacyMcpApiKeyEnvVar(serverName);
+  const newVar = toClear[0];
+  if (legacyVar !== newVar) {
+    const owners = legacyMcpApiKeyOwners(registry)[legacyVar];
+    if ((owners?.length || 0) <= 1) toClear.push(legacyVar);
+  }
+  return toClear;
+}
+
 /** Split a Discord space-separated command string into argv (supports simple quotes). */
 export function splitCommandString(input) {
   const s = String(input || "").trim();

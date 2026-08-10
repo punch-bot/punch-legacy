@@ -7,6 +7,7 @@ import {
   migrateMcpApiKeyEnvVars,
   mcpApiKeyEnvVar,
   mcpApiKeyEnvVarCandidates,
+  mcpApiKeyEnvVarsToClear,
   punchEntryToAdapter,
   punchRegistryToAdapterConfig,
   punchRegistryToMcpServers,
@@ -58,6 +59,21 @@ test("migrateMcpApiKeyEnvVars skips ambiguous legacy collisions", () => {
   assert.equal(migrated[legacyVar], "shared-secret");
   assert.equal(migrated[mcpApiKeyEnvVar("foo-bar")], undefined);
   assert.equal(migrated[mcpApiKeyEnvVar("foo_bar")], undefined);
+});
+
+test("mcpApiKeyEnvVarsToClear preserves ambiguous legacy keys", () => {
+  const registry = {
+    "foo-bar": { type: "remote", url: "https://a.test/mcp", auth: "api_key" },
+    foo_bar: { type: "remote", url: "https://b.test/mcp", auth: "api_key" },
+  };
+  const legacyVar = legacyMcpApiKeyEnvVar("foo-bar");
+  assert.deepEqual(mcpApiKeyEnvVarsToClear("foo-bar", registry), [mcpApiKeyEnvVar("foo-bar")]);
+  assert.deepEqual(mcpApiKeyEnvVarsToClear("foo_bar", registry), [mcpApiKeyEnvVar("foo_bar")]);
+  const sole = { linear: { type: "remote", url: "https://x.test/mcp", auth: "api_key" } };
+  assert.deepEqual(
+    mcpApiKeyEnvVarsToClear("linear", sole).sort(),
+    [mcpApiKeyEnvVar("linear"), legacyMcpApiKeyEnvVar("linear")].sort(),
+  );
 });
 
 test("splitCommandString handles spaces and quotes", () => {
