@@ -1163,12 +1163,6 @@ client.once(Events.ClientReady, async (c) => {
       { type: 1, name: "clear", description: "Remove your personal trigger word" },
     ],
   }, {
-    name: "memory",
-    description: "View your sandbox project memory (/work/.punch-memory.md)",
-    options: [
-      { type: 1, name: "view", description: "Show your sandbox's .punch-memory.md contents" },
-    ],
-  }, {
     name: "routine",
     description: "Schedule reminders and automations",
     options: [
@@ -1207,8 +1201,9 @@ client.once(Events.ClientReady, async (c) => {
     ],
   }, {
     name: "memory",
-    description: "Search, explain, or compact your Punch memory",
+    description: "Search, view, export, or compact your Punch memory",
     options: [
+      { type: 1, name: "view", description: "Show your sandbox's .punch-memory.md contents" },
       { type: 1, name: "search", description: "Find relevant stored memory",
         options: [{ type: 3, name: "query", description: "What to remember", required: true }] },
       { type: 1, name: "explain", description: "Show why memories matched",
@@ -3195,6 +3190,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
+    if (sub === "view") {
+      try {
+        const file = await getFile("/work/.punch-memory.md", uid);
+        const text = file.buffer.toString("utf8").slice(0, 1900);
+        await interaction.editReply({ content: `**Project memory:**\n\n${text}` });
+      } catch (err) {
+        await interaction.editReply({ content: `\u26a0\ufe0f Could not read memory: ${err.message}` });
+      }
+      return;
+    }
+
     const query = interaction.options.getString("query", true);
     const results = sub === "explain"
       ? store.explainMemory({ userId: uid, channelId: cid, query, isDm, limit: 10 })
@@ -3901,22 +3907,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     } catch (err) {
       await interaction.reply({ content: `⚠️ ${err.message}` });
-    }
-    return;
-  }
-
-  if (interaction.commandName === "memory") {
-    const sub = interaction.options.getSubcommand();
-    const uid = interaction.user.id;
-    if (sub === "view") {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const file = await getFile("/work/.punch-memory.md", uid);
-        const text = file.buffer.toString("utf8").slice(0, 1900);
-        await interaction.editReply({ content: `**Project memory:**\n\n${text}` });
-      } catch (err) {
-        await interaction.editReply({ content: `\u26a0\ufe0f Could not read memory: ${err.message}` });
-      }
     }
     return;
   }
