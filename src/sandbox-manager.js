@@ -96,10 +96,10 @@ function userEnvArgs(name) {
   return [
     "--env", `SANDBOX_NAME=${name}`,
     "--env", `SANDBOX_USER_ID=${user?.userId || ""}`,
-    "--env", `OPENCODE_SERVER_USERNAME=${process.env.OPENCODE_SERVER_USERNAME || "opencode"}`,
-    "--env", `OPENCODE_SERVER_PASSWORD=${process.env.OPENCODE_SERVER_PASSWORD || ""}`,
+    "--env", `PI_SERVER_USERNAME=${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}`,
+    "--env", `PI_SERVER_PASSWORD=${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`,
     "--env", `VNC_PASSWORD=${process.env.VNC_PASSWORD || ""}`,
-    "--env", `OPENCODE_MODEL=${process.env.OPENCODE_MODEL || "opencode/big-pickle"}`,
+    "--env", `PI_MODEL=${process.env.PI_MODEL || process.env.OPENCODE_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
   ];
 }

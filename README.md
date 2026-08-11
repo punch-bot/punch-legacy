@@ -36,7 +36,7 @@ Discord ──▶ [ punch-bot ] ──HTTP──▶ [ sandbox-<name> ]
 
 ## Quick start
 
-1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
+1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`PI_SERVER_PASSWORD`), optional model (`PI_MODEL`)
 2. `docker compose up --build -d`
 3. Discord: `/sandbox create <name> <your_discord_user_id>`
 4. `/apikey set anthropic <key>` (or another provider) then mention the bot

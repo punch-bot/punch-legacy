@@ -6,10 +6,10 @@ export const LIFECYCLE_PROGRESS_EMOJI = "👀";
 export const THREAD_WINDOW = 100;
 export const RESIDUE_LIMIT = 10;
 export const MAX_UPLOAD = Number(process.env.DISCORD_MAX_UPLOAD) || 8 * 1024 * 1024;
-export const MAX_ATTACHMENT_BYTES = (Number(process.env.OPENCODE_MAX_ATTACHMENT) || 10) * 1024 * 1024;
-export const COMPRESS_TIMEOUT_MS = Number(process.env.OPENCODE_COMPRESS_TIMEOUT) || 300;
+export const MAX_ATTACHMENT_BYTES = (Number(process.env.PI_MAX_ATTACHMENT || process.env.OPENCODE_MAX_ATTACHMENT) || 10) * 1024 * 1024;
+export const COMPRESS_TIMEOUT_MS = Number(process.env.PI_COMPRESS_TIMEOUT || process.env.OPENCODE_COMPRESS_TIMEOUT) || 300;
 export const BOT_HTTP_PORT = 4098;
-export const BOT_HTTP_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
+export const BOT_HTTP_PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
 
 export const MODEL_LIST = [
   { label: "Claude Sonnet 4", value: "anthropic/claude-sonnet-4-20250514", emoji: "🧠" },
@@ -34,11 +34,11 @@ export const MODEL_LIST = [
 export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "nim"];
 
 export function supervisorAuth() {
-  return "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+  return "Basic " + Buffer.from(`opencode:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
 }
 
 export function supervisorAuthWithUser() {
-  return "Basic " + Buffer.from(`${process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+  return "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
 }
 
 export function botHttpAuth(req) {

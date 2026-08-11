@@ -121,7 +121,7 @@ export function registerInteractions(client) {
         } else {
           const apiUrl = apiUrlFor(mapping.userId);
           if (!apiUrl) throw new Error("Sandbox supervisor URL is unavailable");
-          const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+          const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
           const response = await fetch(`${apiUrl}/doctor/fix`, {
             method: "POST",
             headers: {
@@ -389,7 +389,7 @@ export function registerInteractions(client) {
       const sub = interaction.options.getSubcommand();
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       if (!url) {
         await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
         return;
@@ -441,7 +441,7 @@ export function registerInteractions(client) {
       const sub = interaction.options.getSubcommand();
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       if (!url) {
         await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
         return;
@@ -541,7 +541,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "workers") {
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       if (!url) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       const sub = interaction.options.getSubcommand();
       try {
@@ -615,7 +615,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "models") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       try {
         const res = await fetch(`${apiUrl}/model`, { headers: { authorization: auth } });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
@@ -645,7 +645,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "apikey") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       const provider = interaction.options.getString("provider", true).toLowerCase();
       const key = interaction.options.getString("key");
       if (!PROVIDER_NAMES.includes(provider)) {
@@ -684,7 +684,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "provider") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       const sub = interaction.options.getSubcommand();
 
       if (sub === "add") {
@@ -1129,8 +1129,8 @@ export function registerInteractions(client) {
       }, 1500);
 
       // Summarizing a long session can take well over the default per-turn HTTP
-      // timeout (OPENCODE_TIMEOUT), so give it a dedicated, generous budget.
-      const COMPRESS_TIMEOUT_MS = (Number(process.env.OPENCODE_COMPRESS_TIMEOUT) || 300) * 1000;
+      // timeout (PI_TIMEOUT), so give it a dedicated, generous budget.
+      const COMPRESS_TIMEOUT_MS = (Number(process.env.PI_COMPRESS_TIMEOUT || process.env.OPENCODE_COMPRESS_TIMEOUT) || 300) * 1000;
       const ac = new AbortController();
       const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
 
@@ -1238,8 +1238,8 @@ export function registerInteractions(client) {
         await interaction.reply({ content: "No sandbox assigned. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
         return;
       }
-      const supervisorUsername = process.env.OPENCODE_SERVER_USERNAME || "opencode";
-      const auth = "Basic " + Buffer.from(`${supervisorUsername}:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+      const supervisorUsername = process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode";
+      const auth = "Basic " + Buffer.from(`${supervisorUsername}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
       const sub = interaction.options.getSubcommand();
       await interaction.deferReply({ ephemeral: true });
       try {
@@ -1394,7 +1394,7 @@ export function registerInteractions(client) {
 
     if (interaction.commandName === "tailscale") {
       const uid = interaction.user.id;
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
       const url = apiUrlFor(uid);
       if (!url) {
         await interaction.reply({ content: "No sandbox found. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
@@ -1638,7 +1638,7 @@ export function registerInteractions(client) {
     if (!interaction.isStringSelectMenu() || interaction.customId !== "skill_remove") return;
     const name = interaction.values[0];
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
     try {
       const res = await fetch(`${apiUrlFor(uid)}/tools/remove`, {
         method: "POST",
@@ -1660,7 +1660,7 @@ export function registerInteractions(client) {
     if (!interaction.isStringSelectMenu() || interaction.customId !== "model_select") return;
     const value = interaction.values[0];
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
 
     if (value === "__custom__") {
       try {
@@ -1717,7 +1717,7 @@ export function registerInteractions(client) {
       return;
     }
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
     try {
       const res = await fetch(`${apiUrlFor(uid)}/model`, {
         method: "POST",
@@ -1747,7 +1747,7 @@ export function registerInteractions(client) {
     const model = parts.slice(2).join(":");
 
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
     const apiUrl = apiUrlFor(uid);
 
     const name = interaction.fields.getTextInputValue("edit_name").trim() || undefined;

@@ -5,7 +5,7 @@ const REDACT = [
   /\bsk-[A-Za-z0-9]{10,}\b/g,
   /\bBearer\s+[A-Za-z0-9._-]{10,}\b/gi,
   /(api[_-]?key|password|secret|token)\s*[:=]\s*\S+/gi,
-  /OPENCODE_SERVER_PASSWORD=\S+/g,
+  /(PI_SERVER_PASSWORD|OPENCODE_SERVER_PASSWORD)=\S+/g,
 ];
 
 export function redactLogText(text) {

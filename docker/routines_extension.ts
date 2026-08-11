@@ -7,7 +7,7 @@ const BOT_URL = process.env.PUNCH_BOT_URL || "http://bot:4098";
 const AUTH =
   "Basic " +
   Buffer.from(
-    `${process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.OPENCODE_SERVER_PASSWORD || ""}`,
+    `${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`,
   ).toString("base64");
 
 async function botFetch(path: string, init: RequestInit = {}) {

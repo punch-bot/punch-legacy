@@ -12,12 +12,12 @@ services:
     environment:
       PUNCH_STACK_NAME: ${PUNCH_STACK_NAME:-punch}
       PUNCH_SANDBOX_IMAGE: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
-      OPENCODE_SERVER_URL: ""
+      PI_SERVER_URL: ""
       SANDBOX_MAP: "{}"
-      OPENCODE_REMOTE_DIR: /work
-      OPENCODE_TIMEOUT: "60"
-      OPENCODE_IDLE_TIMEOUT: "90"
-      OPENCODE_MAX: "1800"
+      PI_REMOTE_DIR: /work
+      PI_TIMEOUT: "60"
+      PI_IDLE_TIMEOUT: "90"
+      PI_MAX: "1800"
     tmpfs:
       - /tmp
     pids_limit: 256

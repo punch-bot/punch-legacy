@@ -8,7 +8,7 @@ const SECRET_PATTERNS = [
   /\/data\/secrets/i,
   /\/data\/env/i,
   /\.env\b/i,
-  /OPENCODE_SERVER_PASSWORD/i,
+  /(PI_SERVER_PASSWORD|OPENCODE_SERVER_PASSWORD)/i,
   /ANTHROPIC_API_KEY/i,
   /OPENAI_API_KEY/i,
   /Bearer\s+[A-Za-z0-9._-]+/i,
@@ -51,7 +51,7 @@ const OUTBOUND_SECRET_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._-]{20,}\b/i,
   /ANTHROPIC_API_KEY\s*=\s*\S+/i,
   /OPENAI_API_KEY\s*=\s*\S+/i,
-  /OPENCODE_SERVER_PASSWORD\s*=\s*\S+/i,
+  /(PI_SERVER_PASSWORD|OPENCODE_SERVER_PASSWORD)\s*=\s*\S+/i,
   /\b[A-Za-z0-9+/]{40,}={0,2}\b/, // long base64-ish blobs
 ];
 

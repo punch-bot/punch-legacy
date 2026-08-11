@@ -9,9 +9,9 @@ import { doctorTokenFor } from "./sandbox-manager.js";
 //
 // Flow: POST /session (once per channel) -> POST /session/{id}/message per turn.
 // The Punch pi-gateway adapts this HTTP shape onto Pi RPC prompt/abort/compact/events.
-// Env vars OPENCODE_* are legacy aliases kept for compose compatibility.
+// Env vars PI_* are the primary names; OPENCODE_* are legacy aliases kept for compose compatibility.
 
-const DEFAULT_SERVER = (process.env.OPENCODE_SERVER_URL || "").replace(/\/$/, "");
+const DEFAULT_SERVER = (process.env.PI_SERVER_URL || process.env.OPENCODE_SERVER_URL || "").replace(/\/$/, "");
 const DEFAULT_API_URL = (() => {
   try {
      const u = new URL(DEFAULT_SERVER);
@@ -21,13 +21,13 @@ const DEFAULT_API_URL = (() => {
      return DEFAULT_SERVER + ":4097";
   }
 })();
-const MODEL = process.env.OPENCODE_MODEL || "opencode/big-pickle";
+const MODEL = process.env.PI_MODEL || process.env.OPENCODE_MODEL || "opencode/big-pickle";
 const [PROVIDER_ID, ...rest] = MODEL.split("/");
 const MODEL_ID = rest.join("/");
-const USER = process.env.OPENCODE_SERVER_USERNAME || "opencode";
-const PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
-const DIR_BASE = process.env.OPENCODE_REMOTE_DIR || "/work";
-const TIMEOUT_MS = (Number(process.env.OPENCODE_TIMEOUT) || 300) * 1000;
+const USER = process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode";
+const PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
+const DIR_BASE = process.env.PI_REMOTE_DIR || process.env.OPENCODE_REMOTE_DIR || "/work";
+const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT || process.env.OPENCODE_TIMEOUT) || 300) * 1000;
 
 // Map of Discord user IDs to sandbox hostnames.
 // e.g. {"12345":"sandbox-punch:4096","67890":"sandbox-ember:4096"}
@@ -98,10 +98,10 @@ export function getActivityLogs(userId, tail = 30) {
 
 // const BASE_SYSTEM = ""; // The system prompt is loaded from /work/.pi/SYSTEM.md.
 
-// Dynamic-only stacks omit OPENCODE_SERVER_URL; every Discord user must be in
+// Dynamic-only stacks omit PI_SERVER_URL; every Discord user must be in
 // sandbox_users.json (via /sandbox create). Mapped users never use DEFAULT_SERVER.
-if (!DEFAULT_SERVER && process.env.PUNCH_REQUIRE_OPENCODE_URL === "1") {
-  throw new Error("OPENCODE_SERVER_URL is not set and PUNCH_REQUIRE_OPENCODE_URL=1 (Punch uses dynamic /sandbox create instead)");
+if (!DEFAULT_SERVER && process.env.PUNCH_REQUIRE_PI_URL === "1") {
+  throw new Error("PI_SERVER_URL is not set and PUNCH_REQUIRE_PI_URL=1 (Punch uses dynamic /sandbox create instead)");
 }
 
 function headers() {
@@ -169,9 +169,9 @@ async function api(path, body, baseUrl, signal = null) {
   throw new Error(`cannot reach pi server at ${srv} (${lastCode})`);
 }
 
-const IDLE_MS = (Number(process.env.OPENCODE_IDLE_TIMEOUT) || 90) * 1000;
-const CEIL_MS = (Number(process.env.OPENCODE_MAX) || 1800) * 1000;
-const HARD_MS = (Number(process.env.OPENCODE_HARD_TIMEOUT) || 300) * 1000;
+const IDLE_MS = (Number(process.env.PI_IDLE_TIMEOUT || process.env.OPENCODE_IDLE_TIMEOUT) || 90) * 1000;
+const CEIL_MS = (Number(process.env.PI_MAX || process.env.OPENCODE_MAX) || 1800) * 1000;
+const HARD_MS = (Number(process.env.PI_HARD_TIMEOUT || process.env.OPENCODE_HARD_TIMEOUT) || 300) * 1000;
 
 export function isStuckTurnError(message) {
   return /timed out|stalled|ceiling|hard timeout|hard cap|silent for|turn hung/i.test(String(message || ""));
@@ -366,7 +366,7 @@ export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
   return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
 }
 
-const TOOL_STALE_MS = (Number(process.env.OPENCODE_TOOL_STALE_TIMEOUT) || 180) * 1000;
+const TOOL_STALE_MS = (Number(process.env.PI_TOOL_STALE_TIMEOUT || process.env.OPENCODE_TOOL_STALE_TIMEOUT) || 180) * 1000;
 
 async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
   if (!baseUrl) throw new Error("No sandbox server assigned for this user");
@@ -532,7 +532,7 @@ const CONTEXT_LIMITS = {
   "opencode/north-mini-code-free": 256000,
   "opencode/nemotron-3-ultra-free": 1000000,
 };
-const DEFAULT_CONTEXT_LIMIT = Number(process.env.OPENCODE_CONTEXT_LIMIT) || 128000;
+const DEFAULT_CONTEXT_LIMIT = Number(process.env.PI_CONTEXT_LIMIT || process.env.OPENCODE_CONTEXT_LIMIT) || 128000;
 
 function contextLimitFor(model) {
   if (!model) return DEFAULT_CONTEXT_LIMIT;

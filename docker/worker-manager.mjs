@@ -63,7 +63,7 @@ export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_
   if (active.size >= cap) throw new Error(`Worker limit reached (${cap})`);
   if (!["research", "coding", "browser"].includes(kind)) throw new Error("kind must be research, coding, or browser");
   if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 20_000) throw new Error("prompt must be 1-20000 characters");
-  const safeModel = String(model || process.env.OPENCODE_MODEL || "opencode/big-pickle");
+  const safeModel = String(model || process.env.PI_MODEL || process.env.OPENCODE_MODEL || "opencode/big-pickle");
   if (!/^[A-Za-z0-9._/-]+$/.test(safeModel)) throw new Error("Invalid model");
   const id = randomUUID();
   const workdir = join(ROOT, id);
