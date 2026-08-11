@@ -100,7 +100,7 @@ export function getActivityLogs(userId, tail = 30) {
 
 // Dynamic-only stacks omit PI_SERVER_URL; every Discord user must be in
 // sandbox_users.json (via /sandbox create). Mapped users never use DEFAULT_SERVER.
-if (!DEFAULT_SERVER && process.env.PUNCH_REQUIRE_PI_URL === "1") {
+if (!DEFAULT_SERVER && (process.env.PUNCH_REQUIRE_PI_URL === "1" || process.env.PUNCH_REQUIRE_OPENCODE_URL === "1")) {
   throw new Error("PI_SERVER_URL is not set and PUNCH_REQUIRE_PI_URL=1 (Punch uses dynamic /sandbox create instead)");
 }
 

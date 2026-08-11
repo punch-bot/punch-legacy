@@ -1,5 +1,5 @@
 // Model / API-key / provider routes for the sandbox supervisor.
-import { ENV_FILE, log, saveJSON, state } from "./state.mjs";
+import { ENV_FILE, MODELS_FILE, loadJSON, log, saveJSON, state } from "./state.mjs";
 import { forceRestart } from "./gateway.mjs";
 import {
   PROVIDER_ENV_MAP,
@@ -22,18 +22,7 @@ function titlecase(s) {
 
 /** Model, API-key and custom-provider routes. Returns true if handled. */
 export function handleProviderRoutes(req, res, url) {
-  const models = (() => {
-    try {
-      return JSON.parse(
-        require("node:fs").readFileSync(require("node:path").join(
-          process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
-          "models.json",
-        ), "utf8"),
-      );
-    } catch {
-      return {};
-    }
-  })();
+  const models = loadJSON(MODELS_FILE);
 
   if (req.method === "GET" && url.pathname === "/model") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -47,6 +36,11 @@ export function handleProviderRoutes(req, res, url) {
     req.on("end", () => {
       try {
         const { model } = JSON.parse(body);
+        if (!model) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing model" }));
+          return;
+        }
         const normalized = normalizeModel(model);
         state.CURRENT_MODEL = normalized;
         process.env.PI_DEFAULT_MODEL = normalized;
@@ -65,15 +59,15 @@ export function handleProviderRoutes(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/apikeys") {
-    const env = require("node:fs").existsSync(ENV_FILE)
-      ? JSON.parse(require("node:fs").readFileSync(ENV_FILE, "utf8"))
-      : {};
+    const env = loadJSON(ENV_FILE);
     const configured = [];
-    for (const key of Object.keys(env)) {
-      if (Object.values(PROVIDER_ENV_MAP).includes(key)) {
-        configured.push(key);
-      } else if (key.endsWith("_API_KEY")) {
-        configured.push(key);
+    for (const [provider, envVar] of Object.entries(PROVIDER_ENV_MAP)) {
+      if (env[envVar]) configured.push(provider);
+    }
+    // also include any _API_KEY env vars for custom providers
+    for (const k of Object.keys(env)) {
+      if (k.endsWith("_API_KEY") && !configured.includes(k.replace("_API_KEY", "").toLowerCase())) {
+        configured.push(k.replace("_API_KEY", "").toLowerCase());
       }
     }
     res.writeHead(200, { "content-type": "application/json" });
@@ -87,8 +81,13 @@ export function handleProviderRoutes(req, res, url) {
     req.on("end", () => {
       try {
         const { provider, key } = JSON.parse(body);
+        if (!provider) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing provider" }));
+          return;
+        }
         const id = sanitizeId(provider);
-        const envVar = PROVIDER_ENV_MAP[id] || `${String(provider || "").toUpperCase().replace(/[^A-Z0-9_]/g, "")}_API_KEY`;
+        const envVar = PROVIDER_ENV_MAP[id] || `${provider.toUpperCase()}_API_KEY`;
         const env = loadJSON(ENV_FILE);
         if (key) {
           env[envVar] = String(key).trim();
@@ -114,12 +113,11 @@ export function handleProviderRoutes(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/providers") {
-    const providers = { ...PROVIDER_ENV_MAP };
-    for (const name of Object.keys(models.providers || {})) {
-      if (!(name in providers)) providers[name] = `$${name.toUpperCase()}_API_KEY`;
-    }
+    const modelProviders = models.providers || {};
+    const builtinProviders = Object.keys(PROVIDER_ENV_MAP);
+    const allProviders = [...new Set([...builtinProviders, ...Object.keys(modelProviders)])];
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ providers, custom: models.providers || {} }));
+    res.end(JSON.stringify({ providers: allProviders, custom: modelProviders }));
     return true;
   }
 
@@ -129,28 +127,31 @@ export function handleProviderRoutes(req, res, url) {
     req.on("end", () => {
       try {
         const { name, endpoint, api } = JSON.parse(body);
-        const id = sanitizeId(name);
-        if (!id || !endpoint) {
+        if (!name) {
           res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "Missing name or endpoint" }));
+          res.end(JSON.stringify({ error: "Missing name" }));
+          return;
+        }
+        const id = sanitizeId(name);
+        if (!id) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid provider name" }));
           return;
         }
         const prev = models.providers?.[id] || {};
         models.providers = models.providers || {};
         models.providers[id] = {
           ...prev,
-          baseUrl: endpoint,
+          baseUrl: endpoint || prev.baseUrl || "",
           api: api || prev.api || "openai-completions",
           apiKey: prev.apiKey || `$${id.toUpperCase()}_API_KEY`,
+          models: prev.models || [],
         };
-        require("node:fs").writeFileSync(require("node:path").join(
-          process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
-          "models.json",
-        ), JSON.stringify(models, null, 2));
+        saveJSON(MODELS_FILE, models);
         forceRestart();
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ success: true, id }));
-        log(`provider ${key ? "set" : "removed"}: ${id}`);
+        res.end(JSON.stringify({ success: true, provider: id, baseUrl: models.providers[id].baseUrl }));
+        log(`provider ${prev.baseUrl ? "updated" : "created"}: ${id}`);
       } catch {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -172,13 +173,11 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         delete models.providers[id];
-        require("node:fs").writeFileSync(require("node:path").join(
-          process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
-          "models.json",
-        ), JSON.stringify(models, null, 2));
+        saveJSON(MODELS_FILE, models);
         forceRestart();
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true }));
+        log(`provider removed: ${id}`);
       } catch {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -215,15 +214,13 @@ export function handleProviderRoutes(req, res, url) {
         };
         models.providers[pid].models = models.providers[pid].models || [];
         const existing = models.providers[pid].models.findIndex((m) => m.id === model);
-        if (existing >= 0) models.providers[pid].models[existing] = entry;
+        if (existing >= 0) models.providers[pid].models[existing] = { ...models.providers[pid].models[existing], ...entry };
         else models.providers[pid].models.push(entry);
-        require("node:fs").writeFileSync(require("node:path").join(
-          process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
-          "models.json",
-        ), JSON.stringify(models, null, 2));
+        saveJSON(MODELS_FILE, models);
         forceRestart();
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ success: true }));
+        res.end(JSON.stringify({ success: true, model }));
+        log(`model ${existing >= 0 ? "updated" : "added"}: ${pid}/${model}`);
       } catch {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));
@@ -239,21 +236,24 @@ export function handleProviderRoutes(req, res, url) {
       try {
         const { provider, model } = JSON.parse(body);
         const pid = sanitizeId(provider);
+        if (!pid || !model) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Missing provider or model" }));
+          return;
+        }
         const list = models.providers?.[pid]?.models || [];
         const idx = list.findIndex((m) => m.id === model);
-        if (!pid || idx < 0) {
+        if (idx < 0) {
           res.writeHead(404, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: "Provider or model not found" }));
+          res.end(JSON.stringify({ error: "Model not found" }));
           return;
         }
         list.splice(idx, 1);
-        require("node:fs").writeFileSync(require("node:path").join(
-          process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
-          "models.json",
-        ), JSON.stringify(models, null, 2));
+        saveJSON(MODELS_FILE, models);
         forceRestart();
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true }));
+        log(`model removed: ${pid}/${model}`);
       } catch {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid JSON" }));

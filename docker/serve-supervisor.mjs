@@ -48,6 +48,11 @@ saveModel(state.CURRENT_MODEL);
 process.env.PI_DEFAULT_MODEL = state.CURRENT_MODEL;
 process.env.PI_MODEL = state.CURRENT_MODEL;
 
+// -- Ensure the basic-auth username resolves (legacy OPENCODE_* fallback) --
+if (!process.env.PI_SERVER_USERNAME) {
+  process.env.PI_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+}
+
 // --- Env / secrets injection ---
 (function injectEnv() {
   const env = loadJSON(ENV_FILE);
