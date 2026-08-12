@@ -108,6 +108,10 @@ const client = new Client({
 
 const recentReactionKeys = new Map();
 const REACTION_DEDUP_MS = 5000;
+/** @type {null | { stop: () => Promise<void> }} */
+let spectrumHandle = null;
+let spectrumShuttingDown = false;
+let spectrumSignalsBound = false;
 
 const LIFECYCLE_PROGRESS_EMOJI = "👀";
 
@@ -1018,7 +1022,15 @@ client.once(Events.ClientReady, async (c) => {
   // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
   try {
     const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
-    await startSpectrumAlongsideBot();
+    spectrumHandle = await startSpectrumAlongsideBot();
+    if (spectrumHandle && !spectrumSignalsBound) {
+      spectrumSignalsBound = true;
+      for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.on(signal, () => {
+          void shutdownSpectrum(signal);
+        });
+      }
+    }
   } catch (err) {
     console.error(
       "[spectrum] failed to boot alongside Discord:",
@@ -5204,5 +5216,18 @@ const botHttpServer = createServer(async (req, res) => {
 botHttpServer.listen(BOT_HTTP_PORT, "0.0.0.0", () => {
   console.log(`Bot HTTP API listening on port ${BOT_HTTP_PORT}`);
 });
+
+async function shutdownSpectrum(signal) {
+  if (spectrumShuttingDown || !spectrumHandle) return;
+  spectrumShuttingDown = true;
+  const handle = spectrumHandle;
+  spectrumHandle = null;
+  try {
+    await handle.stop();
+    console.log(`[spectrum] stopped on ${signal}`);
+  } catch (err) {
+    console.error("[spectrum] stop failed:", err && err.message ? err.message : String(err));
+  }
+}
 
 client.login(TOKEN);
