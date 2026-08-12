@@ -165,6 +165,10 @@ export async function handleSpectrumMessage(space, message, config) {
         "";
       try {
         const issued = issuePairingCode(String(address));
+        if (!issued.created) {
+          await reply(`Still waiting — run /pair ${issued.code} in Discord (Punch Nightly).`);
+          return;
+        }
         await reply(issued.message);
       } catch {
         await reply(
@@ -180,6 +184,7 @@ export async function handleSpectrumMessage(space, message, config) {
       (sender && (sender.address || sender.id)) ||
       `${msg.platform || "spectrum"}-user`;
 
+    logSpectrum("agent turn start", { userId });
     const result = await runPunchTurn({
       userId,
       sessionKey,
@@ -188,14 +193,24 @@ export async function handleSpectrumMessage(space, message, config) {
     });
 
     if (!result.ok) {
+      logSpectrum("agent turn failed", { code: result.code });
       await reply(/** @type {{ error: string }} */ (result).error);
       return;
     }
+    logSpectrum("agent turn ok", { len: result.text?.length || 0 });
     await reply(/** @type {{ text: string }} */ (result).text);
   };
 
-  // Pairing/echo replies must not wait on typing indicators (RCS can hang there).
-  if (pairingOnly || config.mode === "echo" || typeof sp.responding !== "function") {
+  // Typing indicators hang on RCS/SMS; only use responding() on terminal.
+  const skipTyping =
+    pairingOnly ||
+    config.mode === "echo" ||
+    msg.platform === "imessage" ||
+    service === "RCS" ||
+    service === "SMS" ||
+    typeof sp.responding !== "function";
+
+  if (skipTyping) {
     await run();
     return;
   }
