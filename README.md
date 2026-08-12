@@ -29,15 +29,20 @@ Discord ──▶ [ punch-bot ] ──HTTP──▶ [ sandbox-<name> ]
             :4098                          pi-gateway :4096 → pi --mode rpc
             routines, pigeons                 supervisor :4097
             docker.sock → creates sandboxes
+
+Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-gateway
+            (iMessage / terminal via spectrum-ts)
 ```
 
 - **Bot** — thin client; no Pi on the host required for Docker deploy.
 - **Sandbox** — one container per registered user; image installs Pi; built on first `/sandbox create`.
+- **Spectrum** — optional second entrypoint ([docs/spectrum.md](docs/spectrum.md)); same Pi agent, no `DISCORD_TOKEN` required.
 
 ## Quick start
 
 1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
 2. `docker compose up --build -d`
+3. Optional iMessage/Spectrum: set `SPECTRUM_*` in `.env`, then `npm run start:spectrum` (see [docs/spectrum.md](docs/spectrum.md))
 3. Discord: `/sandbox create <name> <your_discord_user_id>`
 4. `/apikey set anthropic <key>` (or another provider) then mention the bot
 

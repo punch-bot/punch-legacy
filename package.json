@@ -6,8 +6,11 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:spectrum": "node src/spectrum.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test test/*.mjs"
+    "test": "node --test test/*.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint src/spectrum.js src/spectrum src/punch-turn.js"
   },
   "engines": {
     "node": ">=18"
@@ -16,6 +19,13 @@
     "chrono-node": "^2.9.1",
     "cron-parser": "^5.6.1",
     "discord.js": "^14.26.4",
-    "dotenv": "^16.6.1"
+    "dotenv": "^16.6.1",
+    "spectrum-ts": "12.7.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.1",
+    "eslint": "^9.39.5",
+    "typescript": "~5.8.3"
   }
 }

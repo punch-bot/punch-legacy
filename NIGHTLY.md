@@ -17,6 +17,15 @@ docker compose down
 - **Network:** `punch-nightly_edge`
 - **Bot HTTP:** host **4099**, container 4098
 
+## Spectrum (Photon)
+
+Optional second chat entrypoint for iMessage (and local terminal smoke) via `spectrum-ts`. Same Punch sandboxes as Discord.
+
+```sh
+# After /sandbox create and SPECTRUM_* in .env — see docs/spectrum.md
+npm run start:spectrum
+```
+
 ## Sandboxes
 
 Compose does not start a sandbox. Per Discord user:
