@@ -58,6 +58,7 @@ test("createSpectrumApp-compatible options from loadSpectrumConfig", () => {
     SPECTRUM_PROVIDERS: "imessage,terminal",
     SPECTRUM_PROJECT_ID: "proj",
     SPECTRUM_PROJECT_SECRET: "sec",
+    SPECTRUM_USER_MAP: '{"+1":"1"}',
     SPECTRUM_DEFAULT_USER_ID: "1",
   });
   const imessage = { config: () => ({ id: "imessage" }) };

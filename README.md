@@ -42,9 +42,9 @@ Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-g
 
 1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
 2. `docker compose up --build -d`
-3. Optional iMessage/Spectrum: set `SPECTRUM_*` in `.env`, then `npm run start:spectrum` (see [docs/spectrum.md](docs/spectrum.md))
-3. Discord: `/sandbox create <name> <your_discord_user_id>`
-4. `/apikey set anthropic <key>` (or another provider) then mention the bot
+3. Optional iMessage/Spectrum: `npm install`, set `SPECTRUM_*` in `.env` (including `SPECTRUM_USER_MAP` for iMessage), then `npm run start:spectrum` (see [docs/spectrum.md](docs/spectrum.md))
+4. Discord: `/sandbox create <name> <your_discord_user_id>`
+5. `/apikey set anthropic <key>` (or another provider) then mention the bot
 
 Host **4098** = bot HTTP API. Dynamic sandboxes publish **noVNC** from port **16080+** when `VNC_PASSWORD` is set.
 

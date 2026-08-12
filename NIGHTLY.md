@@ -23,6 +23,7 @@ Optional second chat entrypoint for iMessage (and local terminal smoke) via `spe
 
 ```sh
 # After /sandbox create and SPECTRUM_* in .env — see docs/spectrum.md
+npm install
 npm run start:spectrum
 ```
 

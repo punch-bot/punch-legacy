@@ -97,6 +97,16 @@ export async function runPunchTurn({
     return { ok: false, code: "no_sandbox", error: NO_SANDBOX_MSG };
   }
 
+  // Spectrum sessions must be scoped to the Punch userId so a shared space cannot
+  // reuse another user's Pi session id against a different sandbox.
+  if (key.startsWith("spectrum:") && !key.startsWith(`spectrum:${uid}:`)) {
+    return {
+      ok: false,
+      code: "session_scope",
+      error: "Spectrum sessionKey must be scoped as spectrum:<userId>:<spaceId>.",
+    };
+  }
+
   const projectMemory = await fetchProjectMemory(uid);
   const relatedText = store.preamble(uid, key, body, { isDm: true });
   const settings = store.getUserSettings(uid);

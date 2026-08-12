@@ -10,7 +10,12 @@
  */
 
 import "dotenv/config";
-import { loadSpectrumConfig, formatConfigError, SpectrumConfigError } from "./spectrum/config.js";
+import {
+  loadSpectrumConfig,
+  formatConfigError,
+  SpectrumConfigError,
+  SAFE_STARTUP_ERROR,
+} from "./spectrum/config.js";
 import { createSpectrumApp, runSpectrumLoop } from "./spectrum/app.js";
 import { reloadSandboxMap } from "./agent.js";
 
@@ -29,8 +34,11 @@ async function main() {
   try {
     app = await createSpectrumApp(config);
   } catch (err) {
-    console.error(`[spectrum] failed to start Spectrum: ${formatConfigError(err)}`);
-    if (!(err instanceof SpectrumConfigError)) {
+    if (err instanceof SpectrumConfigError) {
+      console.error(`[spectrum] configuration error: ${err.message}`);
+    } else {
+      // Do not print SDK err.message — it may include request options or secrets.
+      console.error(`[spectrum] ${SAFE_STARTUP_ERROR}`);
       console.error(
         "[spectrum] Check SPECTRUM_PROJECT_ID / SPECTRUM_PROJECT_SECRET and that the imessage platform is enabled in https://app.photon.codes/",
       );
@@ -51,6 +59,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[spectrum] fatal:", formatConfigError(err));
+  console.error(`[spectrum] fatal: ${formatConfigError(err)}`);
   process.exit(1);
 });

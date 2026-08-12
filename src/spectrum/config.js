@@ -7,6 +7,9 @@
 export const ALLOWED_PROVIDERS = Object.freeze(["imessage", "terminal"]);
 export const ALLOWED_MODES = Object.freeze(["agent", "echo"]);
 
+export const SAFE_STARTUP_ERROR =
+  "Spectrum startup failed. Check configuration and Photon project credentials (details omitted to avoid leaking secrets).";
+
 export class SpectrumConfigError extends Error {
   constructor(message) {
     super(message);
@@ -95,8 +98,11 @@ export function loadSpectrumConfig(env = process.env) {
     nonempty(env.SPECTRUM_PROJECT_SECRET) || nonempty(env.PROJECT_SECRET);
   const defaultUserId = nonempty(env.SPECTRUM_DEFAULT_USER_ID);
   const userMap = parseUserMap(env.SPECTRUM_USER_MAP);
+  const mapSize = Object.keys(userMap).length;
+  const hasImessage = providers.includes("imessage");
+  const hasTerminal = providers.includes("terminal");
 
-  const needsCloudCredentials = providers.includes("imessage");
+  const needsCloudCredentials = hasImessage;
   if (needsCloudCredentials) {
     const missing = [];
     if (!projectId) missing.push("SPECTRUM_PROJECT_ID");
@@ -110,12 +116,22 @@ export function loadSpectrumConfig(env = process.env) {
     }
   }
 
-  if (mode === "agent" && !defaultUserId) {
-    throw new SpectrumConfigError(
-      "SPECTRUM_DEFAULT_USER_ID is required in agent mode. " +
-        "Set it to a Discord user ID that already has a Punch sandbox (/sandbox create). " +
-        "Optional SPECTRUM_USER_MAP can override per sender address.",
-    );
+  if (mode === "agent") {
+    // iMessage: require an explicit allowlist. Never fall back to a global default user —
+    // any reachable sender would otherwise inherit that sandbox.
+    if (hasImessage && mapSize === 0) {
+      throw new SpectrumConfigError(
+        "SPECTRUM_USER_MAP is required in agent mode when imessage is enabled. " +
+          "Map each allowed iMessage address/phone to a Punch sandbox user ID. " +
+          "Unmapped iMessage senders are rejected.",
+      );
+    }
+    // Terminal-only (or terminal alongside imessage): default user is allowed as a local fallback.
+    if (hasTerminal && !defaultUserId && mapSize === 0) {
+      throw new SpectrumConfigError(
+        "Agent mode with the terminal provider requires SPECTRUM_DEFAULT_USER_ID or SPECTRUM_USER_MAP.",
+      );
+    }
   }
 
   return {
@@ -132,12 +148,10 @@ export function loadSpectrumConfig(env = process.env) {
 
 /**
  * Format a startup error for stderr without leaking secrets.
+ * Only SpectrumConfigError messages are considered pre-vetted/safe.
  * @param {unknown} err
  */
 export function formatConfigError(err) {
   if (err instanceof SpectrumConfigError) return err.message;
-  if (err && typeof err === "object" && "message" in err) {
-    return String(/** @type {{ message: unknown }} */ (err).message);
-  }
-  return String(err);
+  return SAFE_STARTUP_ERROR;
 }

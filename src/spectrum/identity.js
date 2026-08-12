@@ -46,9 +46,10 @@ export function senderLookupKeys(sender, extra = null) {
  * @param {{ id?: string, address?: string } | null | undefined} sender
  * @param {{ defaultUserId?: string, userMap?: Record<string, string> }} config
  * @param {{ address?: string } | null | undefined} [extra]
+ * @param {{ allowDefault?: boolean }} [options] - default fallback is opt-in (terminal only)
  * @returns {string | null}
  */
-export function resolvePunchUserId(sender, config, extra = null) {
+export function resolvePunchUserId(sender, config, extra = null, options = {}) {
   const map = config.userMap && typeof config.userMap === "object" ? config.userMap : {};
   for (const key of senderLookupKeys(sender, extra)) {
     if (map[key]) return map[key];
@@ -63,5 +64,8 @@ export function resolvePunchUserId(sender, config, extra = null) {
       }
     }
   }
-  return config.defaultUserId ? String(config.defaultUserId) : null;
+  if (options.allowDefault && config.defaultUserId) {
+    return String(config.defaultUserId);
+  }
+  return null;
 }

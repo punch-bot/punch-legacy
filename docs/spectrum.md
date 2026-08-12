@@ -14,20 +14,21 @@ SDK: [`spectrum-ts`](https://www.npmjs.com/package/spectrum-ts) (pinned in `pack
 ## Quick start
 
 1. Create a Photon project at [app.photon.codes](https://app.photon.codes/) and copy the project ID and secret.
-2. Ensure the Discord bot has created a sandbox for your user: `/sandbox create <name> <discord_user_id>`.
-3. Copy `.env.example` → `.env` and set:
+1. Ensure the Discord bot has created a sandbox for your user: `/sandbox create <name> <discord_user_id>`.
+1. Copy `.env.example` → `.env` and set:
 
 ```bash
 SPECTRUM_MODE=agent
 SPECTRUM_PROVIDERS=imessage
 SPECTRUM_PROJECT_ID=...
 SPECTRUM_PROJECT_SECRET=...
-SPECTRUM_DEFAULT_USER_ID=<same discord_user_id>
+SPECTRUM_USER_MAP={"+15551234567":"<discord_user_id>"}
 ```
 
-4. Start the Spectrum process (separate from Discord):
+1. Install host dependencies, then start the Spectrum process (separate from Discord):
 
 ```bash
+npm install
 npm run start:spectrum
 ```
 
@@ -44,12 +45,13 @@ This entrypoint does **not** require `DISCORD_TOKEN`.
 
 `SPECTRUM_PROVIDERS` is a comma-separated list:
 
-- `imessage` — managed Spectrum Cloud lines (`imessage.config()`). Requires project credentials.
-- `terminal` — local TUI / non-TTY readline (`terminal.config()`). No Photon credentials.
+- `imessage` — managed Spectrum Cloud lines (`imessage.config()`). Requires project credentials and `SPECTRUM_USER_MAP`.
+- `terminal` — local TUI / non-TTY readline (`terminal.config()`). No Photon credentials. May use `SPECTRUM_DEFAULT_USER_ID`.
 
 Local smoke without cloud credentials:
 
 ```bash
+npm install
 SPECTRUM_MODE=echo SPECTRUM_PROVIDERS=terminal npm run start:spectrum
 ```
 
@@ -57,16 +59,16 @@ Do **not** use `@spectrum-ts/imessage-local` in Punch (macOS-only Messages datab
 
 ## Identity mapping
 
-Punch sandboxes are keyed by Discord user IDs. Spectrum senders map to those IDs via:
+Punch sandboxes are keyed by Discord user IDs.
 
-1. `SPECTRUM_USER_MAP` JSON (`"+1555…"` / email / sender id → Punch user id)
-2. Else `SPECTRUM_DEFAULT_USER_ID`
+1. **iMessage (required):** `SPECTRUM_USER_MAP` JSON (`"+1555…"` / email / sender id → Punch user id). Unmapped senders are rejected.
+1. **Terminal only (optional):** `SPECTRUM_DEFAULT_USER_ID` as a local fallback when the map has no hit.
 
-Sessions are stored under `spectrum:<space.id>` so they do not collide with Discord channel sessions.
+Sessions are stored under `spectrum:<userId>:<space.id>` so they do not collide with Discord channel sessions or other Punch users in a shared space.
 
 ## Architecture
 
-```
+```text
 Spectrum (iMessage / terminal)
   → src/spectrum.js
   → src/punch-turn.js

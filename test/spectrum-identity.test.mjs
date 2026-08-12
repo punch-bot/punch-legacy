@@ -25,16 +25,26 @@ test("resolvePunchUserId uses user map before default", () => {
       defaultUserId: "default",
       userMap: { "+15551234567": "mapped" },
     },
+    null,
+    { allowDefault: true },
   );
   assert.equal(uid, "mapped");
 });
 
-test("resolvePunchUserId falls back to defaultUserId", () => {
-  const uid = resolvePunchUserId(
-    { id: "unknown" },
-    { defaultUserId: "default", userMap: {} },
+test("resolvePunchUserId rejects unknown senders unless allowDefault", () => {
+  assert.equal(
+    resolvePunchUserId({ id: "unknown" }, { defaultUserId: "default", userMap: {} }),
+    null,
   );
-  assert.equal(uid, "default");
+  assert.equal(
+    resolvePunchUserId(
+      { id: "unknown" },
+      { defaultUserId: "default", userMap: {} },
+      null,
+      { allowDefault: true },
+    ),
+    "default",
+  );
 });
 
 test("resolvePunchUserId matches normalized map keys", () => {
@@ -51,4 +61,12 @@ test("resolvePunchUserId matches normalized map keys", () => {
 test("resolvePunchUserId returns null without default or map hit", () => {
   const uid = resolvePunchUserId({ id: "x" }, { userMap: {} });
   assert.equal(uid, null);
+});
+
+test("resolvePunchUserId authorizes mapped iMessage senders without default", () => {
+  const uid = resolvePunchUserId(
+    { address: "+15550001111" },
+    { userMap: { "+15550001111": "punch-user-1" } },
+  );
+  assert.equal(uid, "punch-user-1");
 });

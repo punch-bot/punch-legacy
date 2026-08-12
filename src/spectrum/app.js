@@ -87,17 +87,21 @@ export async function handleSpectrumMessage(space, message, config) {
     }
 
     const sender = msg.sender || null;
-    // Narrowed iMessage senders may expose address; try sender fields only here.
-    const userId = resolvePunchUserId(sender, config);
+    // Default-user fallback is only for the trusted local terminal provider.
+    // iMessage (and other remote platforms) require an explicit SPECTRUM_USER_MAP hit.
+    const allowDefault = msg.platform === "terminal";
+    const userId = resolvePunchUserId(sender, config, null, { allowDefault });
     if (!userId) {
       await reply(
         "Punch could not map this Spectrum sender to a sandbox user. " +
-          "Set SPECTRUM_DEFAULT_USER_ID or SPECTRUM_USER_MAP.",
+          "Add the sender to SPECTRUM_USER_MAP (required for iMessage), " +
+          "or set SPECTRUM_DEFAULT_USER_ID for the terminal provider.",
       );
       return;
     }
 
-    const sessionKey = `spectrum:${sp.id || "unknown"}`;
+    // Scope sessions per Punch user so shared spaces cannot reuse another user's Pi session.
+    const sessionKey = `spectrum:${userId}:${sp.id || "unknown"}`;
     const speaker =
       (sender && (sender.address || sender.id)) ||
       `${msg.platform || "spectrum"}-user`;
@@ -136,12 +140,9 @@ export async function runSpectrumLoop(app, config) {
   for await (const [space, message] of app.messages) {
     try {
       await handleSpectrumMessage(space, message, config);
-    } catch (err) {
-      const messageText =
-        err && typeof err === "object" && "message" in err
-          ? String(/** @type {{ message: unknown }} */ (err).message)
-          : String(err);
-      console.error("[spectrum] turn failed:", messageText);
+    } catch {
+      // Avoid logging raw SDK/agent errors — they may embed request options or secrets.
+      console.error("[spectrum] turn failed (details omitted)");
     }
   }
 }
