@@ -108,6 +108,10 @@ const client = new Client({
 
 const recentReactionKeys = new Map();
 const REACTION_DEDUP_MS = 5000;
+/** @type {null | { stop: () => Promise<void> }} */
+let spectrumHandle = null;
+let spectrumShuttingDown = false;
+let spectrumSignalsBound = false;
 
 const LIFECYCLE_PROGRESS_EMOJI = "👀";
 
@@ -1015,6 +1019,26 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`punch online as ${c.user.tag}`);
   reloadSandboxMap();
 
+  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
+  try {
+    const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
+    spectrumHandle = await startSpectrumAlongsideBot();
+    if (spectrumHandle && !spectrumSignalsBound) {
+      spectrumSignalsBound = true;
+      for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.on(signal, () => {
+          // Discord owns process lifetime; only sync-stop Spectrum here.
+          void shutdownSpectrum(signal);
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "[spectrum] failed to boot alongside Discord:",
+      err && err.message ? err.message : String(err),
+    );
+  }
+
   // Boot all dynamic sandboxes on startup
   for (const u of sandbox.loadUsers()) {
     const up = await sandbox.composeUp(u.name);
@@ -1026,6 +1050,17 @@ client.once(Events.ClientReady, async (c) => {
   }
 
   let slashCmd = [{
+    name: "pair",
+    description: "Link your iMessage number to Punch using a pairing code",
+    options: [
+      {
+        type: 3,
+        name: "code",
+        description: "9-digit code from Punch iMessage",
+        required: true,
+      },
+    ],
+  }, {
     name: "env",
     description: "Manage sandbox environment variables (hidden from others)",
     options: [
@@ -3114,6 +3149,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (!interaction.isChatInputCommand()) return;
 
+  if (interaction.commandName === "pair") {
+    const code = interaction.options.getString("code", true);
+    const { completePairing } = await import("./spectrum/pairing.js");
+    const result = completePairing(code, interaction.user.id);
+    if (!result.ok) {
+      await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const hasSandbox = !!apiUrlFor(interaction.user.id);
+    const next = hasSandbox
+      ? "Text Punch again from that number and you'll land in your sandbox."
+      : "You still need a sandbox — ask an admin for `/sandbox create <name> " +
+        interaction.user.id +
+        "` then text Punch again.";
+    await interaction.reply({
+      content:
+        `Paired **${result.address}** to your Discord account.\n${next}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
   if (interaction.commandName === "env") {
     const sub = interaction.options.getSubcommand();
     const uid = interaction.user.id;
@@ -5160,5 +5217,18 @@ const botHttpServer = createServer(async (req, res) => {
 botHttpServer.listen(BOT_HTTP_PORT, "0.0.0.0", () => {
   console.log(`Bot HTTP API listening on port ${BOT_HTTP_PORT}`);
 });
+
+async function shutdownSpectrum(signal) {
+  if (spectrumShuttingDown || !spectrumHandle) return;
+  spectrumShuttingDown = true;
+  const handle = spectrumHandle;
+  spectrumHandle = null;
+  try {
+    await handle.stop();
+    console.log(`[spectrum] stopped on ${signal}`);
+  } catch (err) {
+    console.error("[spectrum] stop failed:", err && err.message ? err.message : String(err));
+  }
+}
 
 client.login(TOKEN);
