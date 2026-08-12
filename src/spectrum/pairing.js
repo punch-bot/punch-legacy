@@ -187,6 +187,65 @@ export function formatPairingMessage(code) {
 }
 
 /**
+ * @param {string} discordUsername
+ */
+export function formatPairingCompleteMessage(discordUsername) {
+  const who = String(discordUsername || "").trim() || "your Discord account";
+  return `Paired to ${who}! Send a message again to text your punch!`;
+}
+
+/**
+ * Addresses paired to a Punch user id.
+ * @param {string} userId
+ * @returns {string[]}
+ */
+export function listPairedAddressesForUser(userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) return [];
+  const state = loadState();
+  return Object.entries(state.pairs || {})
+    .filter(([, pairedUid]) => String(pairedUid) === uid)
+    .map(([address]) => address);
+}
+
+/**
+ * Remove durable pairings for a Discord user.
+ * @param {string} userId
+ * @param {string | null | undefined} [address] Optional specific phone/email to unpair
+ * @returns {{ ok: true, addresses: string[] } | { ok: false, error: string }}
+ */
+export function unpairUser(userId, address = null) {
+  const uid = String(userId || "").trim();
+  if (!uid) return { ok: false, error: "Missing Discord user id." };
+
+  const target = address == null || address === ""
+    ? null
+    : normalizeAddressKey(String(address)) || String(address).trim();
+
+  const state = loadState();
+  /** @type {string[]} */
+  const removed = [];
+
+  for (const [storedAddress, pairedUid] of Object.entries(state.pairs || {})) {
+    if (String(pairedUid) !== uid) continue;
+    const storedKey = normalizeAddressKey(storedAddress) || String(storedAddress).trim();
+    if (target && storedKey !== target && storedAddress !== target) continue;
+    removed.push(storedAddress);
+  }
+
+  if (removed.length === 0) {
+    if (target) {
+      return { ok: false, error: "That number is not paired to your Discord account." };
+    }
+    return { ok: false, error: "You don't have any paired phone numbers." };
+  }
+
+  for (const addr of removed) delete state.pairs[addr];
+  saveState(state);
+  return { ok: true, addresses: removed };
+}
+
+/**
  * Complete pairing: bind pending code's address to a Discord/Punch userId.
  * @param {string} code
  * @param {string} userId

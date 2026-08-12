@@ -14,6 +14,9 @@ const {
   mergeUserMaps,
   getPairedUserMap,
   formatPairingMessage,
+  formatPairingCompleteMessage,
+  listPairedAddressesForUser,
+  unpairUser,
   _resetPairingStoreForTests,
 } = await import("../src/spectrum/pairing.js");
 
@@ -58,6 +61,39 @@ test("completePairing rejects bad or expired codes", () => {
   const expired = completePairing(issued.code, "1", { now: now + 2_000 });
   assert.equal(expired.ok, false);
   assert.match(expired.error, /expired|Unknown/i);
+});
+
+test("formatPairingCompleteMessage includes Discord username", () => {
+  assert.equal(
+    formatPairingCompleteMessage("ember"),
+    "Paired to ember! Send a message again to text your punch!",
+  );
+});
+
+test("unpairUser removes one or all paired addresses for a user", () => {
+  _resetPairingStoreForTests();
+  const a = issuePairingCode("+15550001111");
+  const b = issuePairingCode("+15550002222");
+  completePairing(a.code, "user-1");
+  completePairing(b.code, "user-1");
+  assert.deepEqual(listPairedAddressesForUser("user-1").sort(), ["+15550001111", "+15550002222"]);
+
+  const one = unpairUser("user-1", "+15550001111");
+  assert.equal(one.ok, true);
+  assert.deepEqual(one.addresses, ["+15550001111"]);
+  assert.deepEqual(listPairedAddressesForUser("user-1"), ["+15550002222"]);
+
+  const all = unpairUser("user-1");
+  assert.equal(all.ok, true);
+  assert.equal(listPairedAddressesForUser("user-1").length, 0);
+});
+
+test("unpairUser rejects foreign or missing pairings", () => {
+  _resetPairingStoreForTests();
+  const issued = issuePairingCode("+15550003333");
+  completePairing(issued.code, "owner");
+  assert.equal(unpairUser("other").ok, false);
+  assert.equal(unpairUser("owner", "+19999999999").ok, false);
 });
 
 test("env SPECTRUM_USER_MAP wins over durable pairs on conflict", () => {

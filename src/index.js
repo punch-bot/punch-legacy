@@ -1061,6 +1061,17 @@ client.once(Events.ClientReady, async (c) => {
       },
     ],
   }, {
+    name: "unpair",
+    description: "Unlink a paired phone number from your Discord account",
+    options: [
+      {
+        type: 3,
+        name: "phone",
+        description: "Phone number or email to unpair (omit to unpair all yours)",
+        required: false,
+      },
+    ],
+  }, {
     name: "env",
     description: "Manage sandbox environment variables (hidden from others)",
     options: [
@@ -3151,7 +3162,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.commandName === "pair") {
     const code = interaction.options.getString("code", true);
-    const { completePairing } = await import("./spectrum/pairing.js");
+    const { completePairing, formatPairingCompleteMessage } = await import("./spectrum/pairing.js");
     const result = completePairing(code, interaction.user.id);
     if (!result.ok) {
       await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
@@ -3163,9 +3174,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
       : "You still need a sandbox — ask an admin for `/sandbox create <name> " +
         interaction.user.id +
         "` then text Punch again.";
+    const discordName =
+      interaction.member?.displayName ||
+      interaction.user.globalName ||
+      interaction.user.username;
+    if (spectrumHandle?.app) {
+      const { sendSpectrumText } = await import("./spectrum/outbound.js");
+      const notify = await sendSpectrumText(
+        spectrumHandle.app,
+        result.address,
+        formatPairingCompleteMessage(discordName),
+      );
+      if (!notify.ok) {
+        console.error(`[spectrum] pairing notify failed: ${notify.error}`);
+      }
+    }
     await interaction.reply({
       content:
         `Paired **${result.address}** to your Discord account.\n${next}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (interaction.commandName === "unpair") {
+    const phone = interaction.options.getString("phone");
+    const { unpairUser } = await import("./spectrum/pairing.js");
+    const result = unpairUser(interaction.user.id, phone);
+    if (!result.ok) {
+      await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const list = result.addresses.map((a) => `\`${a}\``).join(", ");
+    await interaction.reply({
+      content: `Unpaired ${list} from your Discord account. Text Punch again to get a new pairing code.`,
       flags: MessageFlags.Ephemeral,
     });
     return;
