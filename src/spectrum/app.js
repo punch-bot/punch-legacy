@@ -10,6 +10,7 @@ import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
 import { buildProviderConfigs, buildSpectrumOptions } from "./providers.js";
 import { resolvePunchUserId } from "./identity.js";
+import { issuePairingCode, mergeUserMaps } from "./pairing.js";
 import { runPunchTurn } from "../punch-turn.js";
 
 /**
@@ -88,15 +89,30 @@ export async function handleSpectrumMessage(space, message, config) {
 
     const sender = msg.sender || null;
     // Default-user fallback is only for the trusted local terminal provider.
-    // iMessage (and other remote platforms) require an explicit SPECTRUM_USER_MAP hit.
+    // iMessage uses SPECTRUM_USER_MAP + durable /pair bindings; unknown numbers get a code.
     const allowDefault = msg.platform === "terminal";
-    const userId = resolvePunchUserId(sender, config, null, { allowDefault });
+    const userMap = mergeUserMaps(config.userMap);
+    const userId = resolvePunchUserId(sender, { ...config, userMap }, null, { allowDefault });
     if (!userId) {
-      await reply(
-        "Punch could not map this Spectrum sender to a sandbox user. " +
-          "Add the sender to SPECTRUM_USER_MAP (required for iMessage), " +
-          "or set SPECTRUM_DEFAULT_USER_ID for the terminal provider.",
-      );
+      if (allowDefault) {
+        await reply(
+          "Punch could not map this Spectrum sender to a sandbox user. " +
+            "Set SPECTRUM_DEFAULT_USER_ID for the terminal provider, or /pair from Discord.",
+        );
+        return;
+      }
+
+      const address =
+        (sender && (sender.address || sender.id)) ||
+        "";
+      try {
+        const issued = issuePairingCode(String(address));
+        await reply(issued.message);
+      } catch {
+        await reply(
+          "Hey, i don't know who you are! Text again in a moment, or run /pair in discord once you have a code.",
+        );
+      }
       return;
     }
 

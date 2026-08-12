@@ -61,19 +61,17 @@ test("loadSpectrumConfig missing secret mentions secret env name without leaking
       /SPECTRUM_PROJECT_SECRET/.test(err.message) &&
       !err.message.includes(secret),
   );
-  assert.throws(
-    () =>
-      loadSpectrumConfig({
-        SPECTRUM_MODE: "agent",
-        SPECTRUM_PROVIDERS: "imessage",
-        SPECTRUM_PROJECT_ID: "proj_123",
-        SPECTRUM_PROJECT_SECRET: secret,
-      }),
-    (err) =>
-      err instanceof SpectrumConfigError &&
-      /SPECTRUM_USER_MAP/.test(err.message) &&
-      !err.message.includes(secret),
-  );
+});
+
+test("loadSpectrumConfig agent+imessage allows empty user map (pairing flow)", () => {
+  const cfg = loadSpectrumConfig({
+    SPECTRUM_MODE: "agent",
+    SPECTRUM_PROVIDERS: "imessage",
+    SPECTRUM_PROJECT_ID: "proj_abc",
+    SPECTRUM_PROJECT_SECRET: "sec_abc",
+  });
+  assert.equal(cfg.mode, "agent");
+  assert.deepEqual(cfg.userMap, {});
 });
 
 test("loadSpectrumConfig accepts SPECTRUM_* credentials with user map", () => {

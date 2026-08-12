@@ -117,17 +117,10 @@ export function loadSpectrumConfig(env = process.env) {
   }
 
   if (mode === "agent") {
-    // iMessage: require an explicit allowlist. Never fall back to a global default user —
-    // any reachable sender would otherwise inherit that sandbox.
-    if (hasImessage && mapSize === 0) {
-      throw new SpectrumConfigError(
-        "SPECTRUM_USER_MAP is required in agent mode when imessage is enabled. " +
-          "Map each allowed iMessage address/phone to a Punch sandbox user ID. " +
-          "Unmapped iMessage senders are rejected.",
-      );
-    }
-    // Terminal-only (or terminal alongside imessage): default user is allowed as a local fallback.
-    if (hasTerminal && !defaultUserId && mapSize === 0) {
+    // iMessage: unknown senders get a pairing code (Discord /pair). Optional SPECTRUM_USER_MAP
+    // still works as a static allowlist. Never fall back to a global default for iMessage.
+    // Terminal-only: default user or map/pairs required for agent turns.
+    if (hasTerminal && !hasImessage && !defaultUserId && mapSize === 0) {
       throw new SpectrumConfigError(
         "Agent mode with the terminal provider requires SPECTRUM_DEFAULT_USER_ID or SPECTRUM_USER_MAP.",
       );

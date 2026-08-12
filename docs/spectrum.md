@@ -24,7 +24,8 @@ SPECTRUM_MODE=agent
 SPECTRUM_PROVIDERS=imessage
 SPECTRUM_PROJECT_ID=...
 SPECTRUM_PROJECT_SECRET=...
-SPECTRUM_USER_MAP={"+15551234567":"<your_discord_user_id>"}
+# Optional static map; otherwise unknown numbers get a /pair code over iMessage
+# SPECTRUM_USER_MAP={"+15551234567":"<your_discord_user_id>"}
 ```
 
 1. Rebuild/restart the bot:
@@ -61,7 +62,7 @@ Optional standalone (debug only): `npm run start:spectrum` — same code path, n
 
 `SPECTRUM_PROVIDERS` is a comma-separated list:
 
-- `imessage` — managed Spectrum Cloud lines (`imessage.config()`). Requires project credentials. Agent mode also requires `SPECTRUM_USER_MAP`.
+- `imessage` — managed Spectrum Cloud lines (`imessage.config()`). Requires project credentials. Unknown senders get a Discord `/pair` code.
 - `terminal` — local TUI / non-TTY readline (`terminal.config()`). No Photon credentials. May use `SPECTRUM_DEFAULT_USER_ID`.
 
 Local smoke without cloud credentials:
@@ -75,9 +76,10 @@ Do **not** use `@spectrum-ts/imessage-local` in Punch (macOS-only Messages datab
 
 ## Identity mapping
 
-Punch sandboxes are keyed by Discord user IDs.
+Punch sandboxes are keyed by Discord user IDs. iMessage senders are linked one of two ways:
 
-1. **iMessage agent mode (required):** `SPECTRUM_USER_MAP` JSON (`"+1555…"` / email / sender id → Punch user id). Unmapped senders are rejected.
+1. **`/pair` (default):** an unknown number texts Punch → Punch replies with a 9-digit code → that person runs `/pair <code>` in Discord → number is bound to their Discord account (stored under `data/spectrum_pairs.json`).
+1. **`SPECTRUM_USER_MAP` (optional static allowlist):** JSON in `.env` (`"+1555…"` / email → Punch user id). Env entries win over `/pair` on conflict.
 1. **Terminal only (optional):** `SPECTRUM_DEFAULT_USER_ID` as a local fallback when the map has no hit.
 
 Sessions are stored under `spectrum:<userId>:<space.id>` so they do not collide with Discord channel sessions or other Punch users in a shared space.

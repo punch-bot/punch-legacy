@@ -1037,6 +1037,17 @@ client.once(Events.ClientReady, async (c) => {
   }
 
   let slashCmd = [{
+    name: "pair",
+    description: "Link your iMessage number to Punch using a pairing code",
+    options: [
+      {
+        type: 3,
+        name: "code",
+        description: "9-digit code from Punch iMessage",
+        required: true,
+      },
+    ],
+  }, {
     name: "env",
     description: "Manage sandbox environment variables (hidden from others)",
     options: [
@@ -3124,6 +3135,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "pair") {
+    const code = interaction.options.getString("code", true);
+    const { completePairing } = await import("./spectrum/pairing.js");
+    const result = completePairing(code, interaction.user.id);
+    if (!result.ok) {
+      await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const hasSandbox = !!apiUrlFor(interaction.user.id);
+    const next = hasSandbox
+      ? "Text Punch again from that number and you'll land in your sandbox."
+      : "You still need a sandbox — ask an admin for `/sandbox create <name> " +
+        interaction.user.id +
+        "` then text Punch again.";
+    await interaction.reply({
+      content:
+        `Paired **${result.address}** to your Discord account.\n${next}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   if (interaction.commandName === "env") {
     const sub = interaction.options.getSubcommand();
