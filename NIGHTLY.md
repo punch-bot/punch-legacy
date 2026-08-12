@@ -19,14 +19,16 @@ docker compose down
 
 ## Spectrum (Photon)
 
-Optional second chat entrypoint for iMessage (and local terminal smoke) via `spectrum-ts`. Same Punch sandboxes as Discord.
+iMessage via `spectrum-ts` runs **in the bot process** when Photon credentials are in `.env` (auto-start). Same Punch sandboxes as Discord.
 
 ```sh
-# After /sandbox create and SPECTRUM_* in .env — see docs/spectrum.md
-npm install
-npm run start:spectrum
+# In .env: SPECTRUM_PROJECT_ID, SPECTRUM_PROJECT_SECRET, SPECTRUM_USER_MAP
+# Then:
+docker compose up --build -d
+# Look for: [spectrum] starting alongside Discord
 ```
 
+Force off: `SPECTRUM_ENABLED=0`. Standalone debug: `npm run start:spectrum`. See `docs/spectrum.md`.
 ## Sandboxes
 
 Compose does not start a sandbox. Per Discord user:

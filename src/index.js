@@ -1015,6 +1015,17 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`punch online as ${c.user.tag}`);
   reloadSandboxMap();
 
+  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
+  try {
+    const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
+    await startSpectrumAlongsideBot();
+  } catch (err) {
+    console.error(
+      "[spectrum] failed to boot alongside Discord:",
+      err && err.message ? err.message : String(err),
+    );
+  }
+
   // Boot all dynamic sandboxes on startup
   for (const u of sandbox.loadUsers()) {
     const up = await sandbox.composeUp(u.name);

@@ -36,13 +36,13 @@ Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-g
 
 - **Bot** — thin client; no Pi on the host required for Docker deploy.
 - **Sandbox** — one container per registered user; image installs Pi; built on first `/sandbox create`.
-- **Spectrum** — optional second entrypoint ([docs/spectrum.md](docs/spectrum.md)); same Pi agent, no `DISCORD_TOKEN` required.
+- **Spectrum** — Photon iMessage (and optional terminal) starts **with the bot** when `SPECTRUM_*` is set in `.env` ([docs/spectrum.md](docs/spectrum.md)).
 
 ## Quick start
 
 1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
 2. `docker compose up --build -d`
-3. Optional iMessage/Spectrum: `npm install`, set `SPECTRUM_*` in `.env` (including `SPECTRUM_USER_MAP` for iMessage), then `npm run start:spectrum` (see [docs/spectrum.md](docs/spectrum.md))
+3. Optional iMessage/Spectrum: set `SPECTRUM_PROJECT_ID`, `SPECTRUM_PROJECT_SECRET`, and `SPECTRUM_USER_MAP` in `.env` — Spectrum starts automatically with the bot (see [docs/spectrum.md](docs/spectrum.md))
 4. Discord: `/sandbox create <name> <your_discord_user_id>`
 5. `/apikey set anthropic <key>` (or another provider) then mention the bot
 
