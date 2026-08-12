@@ -70,14 +70,16 @@ export async function handleSpectrumMessage(space, message, config) {
   if (!text) return;
 
   const sp = /** @type {{ id?: string, responding?: Function, send?: Function }} */ (space);
+  // space.send guarantees delivery on RCS/SMS; message.reply() is a silent no-op
+  // on platforms without thread support (Photon docs: reactions-and-replies).
   const reply = async (body) => {
+    if (typeof sp.send === "function") {
+      await sp.send(body);
+      return;
+    }
     const m = /** @type {{ reply?: Function }} */ (message);
     if (typeof m.reply === "function") {
       await m.reply(body);
-      return;
-    }
-    if (typeof sp.send === "function") {
-      await sp.send(body);
     }
   };
 
