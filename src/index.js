@@ -3178,22 +3178,44 @@ client.on(Events.InteractionCreate, async (interaction) => {
       interaction.member?.displayName ||
       interaction.user.globalName ||
       interaction.user.username;
-    if (spectrumHandle?.app) {
-      const { sendSpectrumText } = await import("./spectrum/outbound.js");
-      const notify = await sendSpectrumText(
-        spectrumHandle.app,
-        result.address,
-        formatPairingCompleteMessage(discordName),
-      );
-      if (!notify.ok) {
-        console.error(`[spectrum] pairing notify failed: ${notify.error}`);
-      }
-    }
     await interaction.reply({
       content:
         `Paired **${result.address}** to your Discord account.\n${next}`,
       flags: MessageFlags.Ephemeral,
     });
+    if (spectrumHandle?.app) {
+      const { sendSpectrumText } = await import("./spectrum/outbound.js");
+      void sendSpectrumText(
+        spectrumHandle.app,
+        result.address,
+        formatPairingCompleteMessage(discordName),
+      )
+        .then((notify) => {
+          if (notify.ok) return;
+          console.error(`[spectrum] pairing notify failed: ${notify.error}`);
+          return interaction
+            .followUp({
+              content:
+                `⚠️ Pairing succeeded, but SMS confirmation failed (${notify.error}). ` +
+                `You can still text Punch from **${result.address}**.`,
+              flags: MessageFlags.Ephemeral,
+            })
+            .catch((err) => {
+              console.error(`[spectrum] pairing notify follow-up failed: ${err.message}`);
+            });
+        })
+        .catch((err) => {
+          console.error(`[spectrum] pairing notify failed: ${err.message}`);
+          interaction
+            .followUp({
+              content:
+                `⚠️ Pairing succeeded, but SMS confirmation failed. ` +
+                `You can still text Punch from **${result.address}**.`,
+              flags: MessageFlags.Ephemeral,
+            })
+            .catch(() => {});
+        });
+    }
     return;
   }
 

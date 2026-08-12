@@ -5,10 +5,13 @@
 
 import {
   chmodSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -18,8 +21,12 @@ import { normalizeAddressKey } from "./identity.js";
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 const PAIR_FILE = join(DATA_DIR, "spectrum_pairs.json");
+const LOCK_FILE = `${PAIR_FILE}.lock`;
 const CODE_TTL_MS = 30 * 60 * 1000;
 const CODE_DIGITS = 9;
+const LOCK_STALE_MS = 60_000;
+const LOCK_RETRY_MS = 5;
+const LOCK_MAX_WAIT_MS = 10_000;
 
 function emptyState() {
   return { pairs: {}, pending: {} };
@@ -51,6 +58,65 @@ function loadState() {
         ? raw.pending
         : {},
   };
+}
+
+function sleepMs(ms) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    // busy-wait for short cross-process lock retries
+  }
+}
+
+function acquirePairingLock() {
+  ensurePairStorePermissions();
+  const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const fd = openSync(LOCK_FILE, "wx");
+      try {
+        writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
+      } catch {
+        // lock file already open for write
+      }
+      return fd;
+    } catch (err) {
+      if (err?.code !== "EEXIST") throw err;
+      try {
+        const st = statSync(LOCK_FILE);
+        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
+          unlinkSync(LOCK_FILE);
+          continue;
+        }
+      } catch (stErr) {
+        if (stErr?.code === "ENOENT") continue;
+        throw stErr;
+      }
+      sleepMs(LOCK_RETRY_MS);
+    }
+  }
+  throw new Error(`Timeout acquiring pairing store lock (${LOCK_FILE})`);
+}
+
+function releasePairingLock(fd) {
+  try {
+    if (typeof fd === "number") closeSync(fd);
+  } catch {
+    // ignore
+  }
+  try {
+    if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
+  } catch {
+    // ignore
+  }
+}
+
+function withPairingLock(fn) {
+  const fd = acquirePairingLock();
+  try {
+    return fn();
+  } finally {
+    releasePairingLock(fd);
+  }
 }
 
 function ensurePairStorePermissions() {
@@ -151,32 +217,34 @@ export function issuePairingCode(address, opts = {}) {
 
   const now = opts.now ?? Date.now();
   const ttlMs = opts.ttlMs ?? CODE_TTL_MS;
-  const state = loadState();
-  pruneExpired(state, now);
+  return withPairingLock(() => {
+    const state = loadState();
+    pruneExpired(state, now);
 
-  const existing = findPendingByAddress(state, addressKey, now);
-  if (existing) {
-    return {
-      code: existing.code,
+    const existing = findPendingByAddress(state, addressKey, now);
+    if (existing) {
+      return {
+        code: existing.code,
+        address: addressKey,
+        created: false,
+        message: formatPairingMessage(existing.code),
+      };
+    }
+
+    const code = generateUniqueCode(state);
+    state.pending[code] = {
       address: addressKey,
-      created: false,
-      message: formatPairingMessage(existing.code),
+      createdAt: now,
+      expiresAt: now + ttlMs,
     };
-  }
-
-  const code = generateUniqueCode(state);
-  state.pending[code] = {
-    address: addressKey,
-    createdAt: now,
-    expiresAt: now + ttlMs,
-  };
-  saveState(state);
-  return {
-    code,
-    address: addressKey,
-    created: true,
-    message: formatPairingMessage(code),
-  };
+    saveState(state);
+    return {
+      code,
+      address: addressKey,
+      created: true,
+      message: formatPairingMessage(code),
+    };
+  });
 }
 
 /**
@@ -222,27 +290,29 @@ export function unpairUser(userId, address = null) {
     ? null
     : normalizeAddressKey(String(address)) || String(address).trim();
 
-  const state = loadState();
-  /** @type {string[]} */
-  const removed = [];
+  return withPairingLock(() => {
+    const state = loadState();
+    /** @type {string[]} */
+    const removed = [];
 
-  for (const [storedAddress, pairedUid] of Object.entries(state.pairs || {})) {
-    if (String(pairedUid) !== uid) continue;
-    const storedKey = normalizeAddressKey(storedAddress) || String(storedAddress).trim();
-    if (target && storedKey !== target && storedAddress !== target) continue;
-    removed.push(storedAddress);
-  }
-
-  if (removed.length === 0) {
-    if (target) {
-      return { ok: false, error: "That number is not paired to your Discord account." };
+    for (const [storedAddress, pairedUid] of Object.entries(state.pairs || {})) {
+      if (String(pairedUid) !== uid) continue;
+      const storedKey = normalizeAddressKey(storedAddress) || String(storedAddress).trim();
+      if (target && storedKey !== target && storedAddress !== target) continue;
+      removed.push(storedAddress);
     }
-    return { ok: false, error: "You don't have any paired phone numbers." };
-  }
 
-  for (const addr of removed) delete state.pairs[addr];
-  saveState(state);
-  return { ok: true, addresses: removed };
+    if (removed.length === 0) {
+      if (target) {
+        return { ok: false, error: "That number is not paired to your Discord account." };
+      }
+      return { ok: false, error: "You don't have any paired phone numbers." };
+    }
+
+    for (const addr of removed) delete state.pairs[addr];
+    saveState(state);
+    return { ok: true, addresses: removed };
+  });
 }
 
 /**
@@ -263,23 +333,25 @@ export function completePairing(code, userId, opts = {}) {
   }
 
   const now = opts.now ?? Date.now();
-  const state = loadState();
-  pruneExpired(state, now);
-  const entry = state.pending[normalizedCode];
-  if (!entry) {
-    return { ok: false, error: "Unknown or expired pairing code. Text Punch again to get a new one." };
-  }
+  return withPairingLock(() => {
+    const state = loadState();
+    pruneExpired(state, now);
+    const entry = state.pending[normalizedCode];
+    if (!entry) {
+      return { ok: false, error: "Unknown or expired pairing code. Text Punch again to get a new one." };
+    }
 
-  const address = normalizeAddressKey(entry.address) || String(entry.address).trim();
-  state.pairs[address] = uid;
-  delete state.pending[normalizedCode];
-  // Drop any other pending codes for the same address.
-  for (const [otherCode, other] of Object.entries(state.pending)) {
-    const key = normalizeAddressKey(other?.address) || String(other?.address || "").trim();
-    if (key === address) delete state.pending[otherCode];
-  }
-  saveState(state);
-  return { ok: true, address, userId: uid };
+    const address = normalizeAddressKey(entry.address) || String(entry.address).trim();
+    state.pairs[address] = uid;
+    delete state.pending[normalizedCode];
+    // Drop any other pending codes for the same address.
+    for (const [otherCode, other] of Object.entries(state.pending)) {
+      const key = normalizeAddressKey(other?.address) || String(other?.address || "").trim();
+      if (key === address) delete state.pending[otherCode];
+    }
+    saveState(state);
+    return { ok: true, address, userId: uid };
+  });
 }
 
 /**
@@ -297,6 +369,11 @@ export function pairedUserIdForAddress(address) {
 export function _resetPairingStoreForTests() {
   try {
     if (existsSync(PAIR_FILE)) unlinkSync(PAIR_FILE);
+  } catch {
+    // ignore
+  }
+  try {
+    if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
   } catch {
     // ignore
   }

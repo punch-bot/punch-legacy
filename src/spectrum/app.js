@@ -134,10 +134,8 @@ export async function handleSpectrumMessage(space, message, config) {
       }
       return;
     }
-    const m = /** @type {{ reply?: Function }} */ (message);
-    if (typeof m.reply === "function") {
-      await m.reply(payload);
-    }
+    // Do not fall back to message.reply — on RCS/SMS it can silently no-op.
+    throw new Error("Spectrum space.send is unavailable; cannot deliver outbound message");
   };
 
   const allowDefault = msg.platform === "terminal";

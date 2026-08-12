@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import process from "node:process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, statSync } from "node:fs";
+import { Worker } from "node:worker_threads";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, statSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -124,4 +125,35 @@ test("saveState uses restrictive permissions on dir and file", () => {
   chmodSync(dir, 0o755);
   issuePairingCode("+15550004444");
   assert.equal(statSync(dir).mode & 0o777 & 0o077, 0);
+});
+
+test("concurrent worker pairing keeps all updates", async () => {
+  _resetPairingStoreForTests();
+  const workerUrl = new URL("./pairing-lock-worker.mjs", import.meta.url);
+  const workerCount = 8;
+  const results = await Promise.all(
+    Array.from({ length: workerCount }, (_, index) =>
+      new Promise((resolve, reject) => {
+        const worker = new Worker(workerUrl, {
+          workerData: { dataDir: dir, index },
+        });
+        worker.on("message", resolve);
+        worker.on("error", reject);
+        worker.on("exit", (code) => {
+          if (code !== 0) reject(new Error(`worker exited with code ${code}`));
+        });
+      }),
+    ),
+  );
+
+  for (const result of results) {
+    assert.equal(result.ok, true, result.error || "worker pairing failed");
+  }
+
+  const map = getPairedUserMap();
+  assert.equal(Object.keys(map).length, workerCount);
+  for (const result of results) {
+    assert.equal(map[result.address], result.userId);
+  }
+  assert.equal(existsSync(join(dir, "spectrum_pairs.lock")), false);
 });

@@ -12,8 +12,9 @@ export function normalizeAddressKey(value) {
   if (s.includes("@")) return s.toLowerCase();
   const digits = s.replace(/[^\d+]/g, "");
   if (!digits) return s.toLowerCase();
+  // Bare digit strings (no +) normalize to E.164-style +digits so map lookups match.
   if (digits.startsWith("+")) return digits;
-  return digits;
+  return `+${digits}`;
 }
 
 /**

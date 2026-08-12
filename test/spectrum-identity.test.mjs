@@ -11,6 +11,20 @@ test("normalizeAddressKey keeps E.164 and lowercases email", () => {
   assert.equal(normalizeAddressKey("User@Example.COM"), "user@example.com");
 });
 
+test("normalizeAddressKey adds leading + to bare digit phones", () => {
+  assert.equal(normalizeAddressKey("15551234567"), "+15551234567");
+  assert.equal(normalizeAddressKey("1 (555) 123-4567"), "+15551234567");
+  assert.equal(normalizeAddressKey("+15551234567"), "+15551234567");
+});
+
+test("resolvePunchUserId matches bare digits to E.164 map keys", () => {
+  const uid = resolvePunchUserId(
+    { address: "15551234567" },
+    { userMap: { "+15551234567": "mapped" } },
+  );
+  assert.equal(uid, "mapped");
+});
+
 test("senderLookupKeys includes id and address variants", () => {
   const keys = senderLookupKeys({ id: "+1-555-0001", address: "a@b.com" });
   assert.ok(keys.includes("+1-555-0001"));
