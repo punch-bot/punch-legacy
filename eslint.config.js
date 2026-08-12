@@ -26,4 +26,23 @@ export default [
       "no-empty": ["error", { allowEmptyCatch: true }],
     },
   },
+  {
+    files: ["test/spectrum-*.test.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        Buffer: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        URL: "readonly",
+      },
+    },
+    rules: {
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }],
+      "no-empty": ["error", { allowEmptyCatch: true }],
+    },
+  },
 ];

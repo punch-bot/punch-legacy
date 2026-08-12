@@ -4,6 +4,7 @@
  */
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -25,24 +26,54 @@ function emptyState() {
 }
 
 function loadState() {
+  let text;
   try {
-    const raw = JSON.parse(readFileSync(PAIR_FILE, "utf8"));
-    if (!raw || typeof raw !== "object") return emptyState();
-    return {
-      pairs: raw.pairs && typeof raw.pairs === "object" ? raw.pairs : {},
-      pending: raw.pending && typeof raw.pending === "object" ? raw.pending : {},
-    };
+    text = readFileSync(PAIR_FILE, "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") return emptyState();
+    throw err;
+  }
+
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (err) {
+    const detail = err && err.message ? err.message : String(err);
+    throw new Error(`Corrupt spectrum pairing store at ${PAIR_FILE}: ${detail}`);
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`Corrupt spectrum pairing store at ${PAIR_FILE}: expected object`);
+  }
+  return {
+    pairs: raw.pairs && typeof raw.pairs === "object" && !Array.isArray(raw.pairs) ? raw.pairs : {},
+    pending:
+      raw.pending && typeof raw.pending === "object" && !Array.isArray(raw.pending)
+        ? raw.pending
+        : {},
+  };
+}
+
+function ensurePairStorePermissions() {
+  const dir = dirname(PAIR_FILE);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dir, 0o700);
   } catch {
-    return emptyState();
+    // best-effort on platforms that ignore mode
   }
 }
 
 function saveState(state) {
-  mkdirSync(dirname(PAIR_FILE), { recursive: true });
+  ensurePairStorePermissions();
   const temp = `${PAIR_FILE}.${process.pid}.${Date.now()}.tmp`;
   try {
-    writeFileSync(temp, JSON.stringify(state, null, 2));
+    writeFileSync(temp, JSON.stringify(state, null, 2), { mode: 0o600 });
     renameSync(temp, PAIR_FILE);
+    try {
+      chmodSync(PAIR_FILE, 0o600);
+    } catch {
+      // best-effort
+    }
   } catch (error) {
     try {
       if (existsSync(temp)) unlinkSync(temp);

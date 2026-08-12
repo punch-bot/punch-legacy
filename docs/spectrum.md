@@ -24,7 +24,7 @@ SPECTRUM_MODE=agent
 SPECTRUM_PROVIDERS=imessage
 SPECTRUM_PROJECT_ID=...
 SPECTRUM_PROJECT_SECRET=...
-# Optional static map; otherwise unknown numbers get a /pair code over iMessage
+# Agent mode only: optional static map; otherwise unknown numbers get a /pair code over iMessage
 # SPECTRUM_USER_MAP={"+15551234567":"<your_discord_user_id>"}
 ```
 
@@ -55,15 +55,15 @@ Optional standalone (debug only): `npm run start:spectrum` — same code path, n
 
 | `SPECTRUM_MODE` | Behavior |
 |-----------------|----------|
-| `agent` (default) | Inbound text → Punch sandbox via `runPunchTurn` / `runAgent` |
-| `echo` | Minimal echo/reply for local smoke |
+| `agent` (default) | Inbound text → Punch sandbox via `runPunchTurn` / `runAgent`. Pairing / `SPECTRUM_USER_MAP` apply here. |
+| `echo` | Minimal echo/reply for local smoke (no Punch user resolution or `/pair`) |
 
 ## Providers
 
 `SPECTRUM_PROVIDERS` is a comma-separated list:
 
-- `imessage` — managed Spectrum Cloud lines (`imessage.config()`). Requires project credentials. Unknown senders get a Discord `/pair` code.
-- `terminal` — local TUI / non-TTY readline (`terminal.config()`). No Photon credentials. May use `SPECTRUM_DEFAULT_USER_ID`.
+- `imessage` — managed Spectrum Cloud lines (`imessage.config()`). Requires project credentials. In **agent** mode, unknown senders get a Discord `/pair` code.
+- `terminal` — local TUI / non-TTY readline (`terminal.config()`). No Photon credentials. In **agent** mode, may use `SPECTRUM_DEFAULT_USER_ID`.
 
 Local smoke without cloud credentials:
 
@@ -76,7 +76,7 @@ Do **not** use `@spectrum-ts/imessage-local` in Punch (macOS-only Messages datab
 
 ## Identity mapping
 
-Punch sandboxes are keyed by Discord user IDs. iMessage senders are linked one of two ways:
+Applies in **`SPECTRUM_MODE=agent`** only (echo mode never resolves Punch users). Punch sandboxes are keyed by Discord user IDs. iMessage senders are linked one of two ways:
 
 1. **`/pair` (default):** an unknown number texts Punch → Punch replies with a 9-digit code → that person runs `/pair <code>` in Discord → number is bound to their Discord account (stored under `data/spectrum_pairs.json`).
 1. **`SPECTRUM_USER_MAP` (optional static allowlist):** JSON in `.env` (`"+1555…"` / email → Punch user id). Env entries win over `/pair` on conflict.
