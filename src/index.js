@@ -1027,7 +1027,8 @@ client.once(Events.ClientReady, async (c) => {
       spectrumSignalsBound = true;
       for (const signal of ["SIGINT", "SIGTERM"]) {
         process.on(signal, () => {
-          void shutdownBotProcess(signal);
+          // Discord owns process lifetime; only sync-stop Spectrum here.
+          void shutdownSpectrum(signal);
         });
       }
     }
@@ -5217,36 +5218,17 @@ botHttpServer.listen(BOT_HTTP_PORT, "0.0.0.0", () => {
   console.log(`Bot HTTP API listening on port ${BOT_HTTP_PORT}`);
 });
 
-async function shutdownBotProcess(signal) {
-  if (spectrumShuttingDown) return;
+async function shutdownSpectrum(signal) {
+  if (spectrumShuttingDown || !spectrumHandle) return;
   spectrumShuttingDown = true;
-
   const handle = spectrumHandle;
   spectrumHandle = null;
-  if (handle) {
-    try {
-      await handle.stop();
-      console.log(`[spectrum] stopped on ${signal}`);
-    } catch (err) {
-      console.error("[spectrum] stop failed:", err && err.message ? err.message : String(err));
-    }
-  }
-
-  await new Promise((resolve) => {
-    try {
-      botHttpServer.close(() => resolve());
-    } catch {
-      resolve();
-    }
-  });
-
   try {
-    client.destroy();
-  } catch {
-    // already closed
+    await handle.stop();
+    console.log(`[spectrum] stopped on ${signal}`);
+  } catch (err) {
+    console.error("[spectrum] stop failed:", err && err.message ? err.message : String(err));
   }
-
-  process.exit(0);
 }
 
 client.login(TOKEN);
