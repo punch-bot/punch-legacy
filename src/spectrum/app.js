@@ -5,13 +5,44 @@
  * Integrates with untyped Punch turn helpers; skip checkJs for this module.
  */
 
-import { Spectrum } from "spectrum-ts";
+import { Spectrum, text } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
 import { buildProviderConfigs, buildSpectrumOptions } from "./providers.js";
 import { resolvePunchUserId } from "./identity.js";
 import { issuePairingCode, mergeUserMaps } from "./pairing.js";
 import { runPunchTurn } from "../punch-turn.js";
+
+/**
+ * @param {string} value
+ */
+function maskAddress(value) {
+  const s = String(value || "").trim();
+  if (!s) return "";
+  if (s.length <= 4) return "***";
+  return `${s.slice(0, 2)}***${s.slice(-2)}`;
+}
+
+/**
+ * @param {string} message
+ * @param {Record<string, unknown>} [fields]
+ */
+function logSpectrum(message, fields = {}) {
+  const suffix = Object.keys(fields).length
+    ? ` ${Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(" ")}`
+    : "";
+  console.log(`[spectrum] ${message}${suffix}`);
+}
+
+/**
+ * @param {unknown} err
+ */
+function safeErrorMessage(err) {
+  const message = err && typeof err === "object" && "message" in err
+    ? String(/** @type {{ message: unknown }} */ (err).message)
+    : String(err);
+  return message.replace(/\b(sk_[a-zA-Z0-9_-]{8,}|sec_[a-zA-Z0-9_-]{8,})\b/g, "[redacted]");
+}
 
 /**
  * Extract plain text from a Spectrum message content union.
@@ -61,40 +92,65 @@ export async function createSpectrumApp(config, deps = {}) {
  */
 export async function handleSpectrumMessage(space, message, config) {
   if (!message || typeof message !== "object") return;
-  const msg = /** @type {{ direction?: string, content?: object, sender?: object, platform?: string }} */ (
+  const msg = /** @type {{ direction?: string, content?: { type?: string }, sender?: { address?: string, id?: string, service?: string }, platform?: string }} */ (
     message
   );
   if (msg.direction === "outbound") return;
 
-  const text = extractInboundText(msg.content);
-  if (!text) return;
+  const inboundText = extractInboundText(msg.content);
+  const sender = msg.sender || null;
+  const senderLabel = maskAddress(sender?.address || sender?.id || "");
+  const service = sender?.service || "unknown";
+
+  if (!inboundText) {
+    logSpectrum("skip inbound without text", {
+      platform: msg.platform || "unknown",
+      content: msg.content?.type || "unknown",
+      service,
+      sender: senderLabel || "unknown",
+    });
+    return;
+  }
+
+  logSpectrum("inbound", {
+    platform: msg.platform || "unknown",
+    service,
+    sender: senderLabel || "unknown",
+    len: inboundText.length,
+  });
 
   const sp = /** @type {{ id?: string, responding?: Function, send?: Function }} */ (space);
-  // space.send guarantees delivery on RCS/SMS; message.reply() is a silent no-op
-  // on platforms without thread support (Photon docs: reactions-and-replies).
   const reply = async (body) => {
+    const payload = String(body || "").trim();
+    if (!payload) return;
     if (typeof sp.send === "function") {
-      await sp.send(body);
+      const sent = await sp.send(text(payload));
+      logSpectrum("outbound", {
+        delivered: sent ? "yes" : "no",
+        len: payload.length,
+      });
+      if (!sent) {
+        throw new Error("Spectrum outbound send returned no message (check Photon user allowlist)");
+      }
       return;
     }
     const m = /** @type {{ reply?: Function }} */ (message);
     if (typeof m.reply === "function") {
-      await m.reply(body);
+      await m.reply(payload);
     }
   };
 
+  const allowDefault = msg.platform === "terminal";
+  const userMap = mergeUserMaps(config.userMap);
+  const userId = resolvePunchUserId(sender, { ...config, userMap }, null, { allowDefault });
+  const pairingOnly = config.mode === "agent" && !userId;
+
   const run = async () => {
     if (config.mode === "echo") {
-      await reply(text);
+      await reply(inboundText);
       return;
     }
 
-    const sender = msg.sender || null;
-    // Default-user fallback is only for the trusted local terminal provider.
-    // iMessage uses SPECTRUM_USER_MAP + durable /pair bindings; unknown numbers get a code.
-    const allowDefault = msg.platform === "terminal";
-    const userMap = mergeUserMaps(config.userMap);
-    const userId = resolvePunchUserId(sender, { ...config, userMap }, null, { allowDefault });
     if (!userId) {
       if (allowDefault) {
         await reply(
@@ -127,7 +183,7 @@ export async function handleSpectrumMessage(space, message, config) {
     const result = await runPunchTurn({
       userId,
       sessionKey,
-      text,
+      text: inboundText,
       speaker: String(speaker),
     });
 
@@ -138,11 +194,13 @@ export async function handleSpectrumMessage(space, message, config) {
     await reply(/** @type {{ text: string }} */ (result).text);
   };
 
-  if (typeof sp.responding === "function") {
-    await sp.responding(run);
-  } else {
+  // Pairing/echo replies must not wait on typing indicators (RCS can hang there).
+  if (pairingOnly || config.mode === "echo" || typeof sp.responding !== "function") {
     await run();
+    return;
   }
+
+  await sp.responding(run);
 }
 
 /**
@@ -158,9 +216,8 @@ export async function runSpectrumLoop(app, config) {
   for await (const [space, message] of app.messages) {
     try {
       await handleSpectrumMessage(space, message, config);
-    } catch {
-      // Avoid logging raw SDK/agent errors — they may embed request options or secrets.
-      console.error("[spectrum] turn failed (details omitted)");
+    } catch (err) {
+      console.error(`[spectrum] turn failed: ${safeErrorMessage(err)}`);
     }
   }
 }
