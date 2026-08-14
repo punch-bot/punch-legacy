@@ -292,17 +292,18 @@ export async function composeDown(name) {
   }
 }
 
-// Resolve the running container name for a sandbox. compose-created sandboxes
-// are named `punch-sandbox-<name>-<n>` while composeUp() uses
-// `punch_sandbox-<name>_1`; probe both conventions plus suffixes.
+// Resolve the running container name for a sandbox. composeUp() uses
+// `${STACK}_sandbox-<name>_1` while compose-created sandboxes (compose project
+// `STACK`) are named `${STACK}-sandbox-<name>-<n>`; probe both conventions plus
+// suffixes. All names are scoped to THIS stack so the bot never picks up
+// containers owned by another Punch instance running on the same host.
 export function containerForSandbox(name) {
   if (!isValidSandboxName(name)) return null;
   const candidates = [
     `${STACK}_sandbox-${name}_1`,
-    `punch-sandbox-${name}-1`,
-    `punch_sandbox-${name}_1`,
+    `${STACK}-sandbox-${name}-1`,
   ];
-  for (let i = 1; i <= 9; i++) candidates.push(`punch-sandbox-${name}-${i}`);
+  for (let i = 1; i <= 9; i++) candidates.push(`${STACK}-sandbox-${name}-${i}`);
   for (const candidate of candidates) {
     try {
       const out = execFileSync("docker", ["inspect", "--format", "{{.State.Running}}", candidate], {
