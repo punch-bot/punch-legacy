@@ -26,7 +26,7 @@ export function buildSlashCommands() {
       { type: 1, name: "create", description: "Create a new sandbox for a user",
         options: [
           { type: 3, name: "name", description: "Short name (e.g. ember)", required: true },
-          { type: 3, name: "userid", description: "Discord user ID", required: true },
+          { type: 3, name: "userid", description: "Discord user ID (defaults to you)", required: false },
         ] },
       { type: 1, name: "list", description: "List all sandbox users" },
       { type: 1, name: "remove", description: "Remove a sandbox user",
