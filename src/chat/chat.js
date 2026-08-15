@@ -57,6 +57,7 @@ import {
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
 import { extractEmbeds, extractQuestions, sendQuestion } from "./embeds-questions.js";
+import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
 import { fetchProjectMemory, labelLineFor, withUserRunLock } from "./queue.js";
 import { notifyPigeonDM } from "../gateway/pigeon.js";
@@ -316,7 +317,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
     const { clean: textAfterEmbeds, embeds, errors: embedErrors } = extractEmbeds(out);
     const { clean: textAfterQuestions, questions } = extractQuestions(textAfterEmbeds);
-    out = textAfterQuestions || "";
+    out = formatReplyNewlines(textAfterQuestions || "");
 
     let capturedMemory = { notesAdded: 0, factsAdded: 0, facts: [] };
     if (isDirectMessage && !message.author.bot && !opts.pigeonFrom) {
