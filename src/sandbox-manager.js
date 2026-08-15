@@ -300,10 +300,12 @@ export async function composeUp(name) {
   }
 }
 
-// Restart every registered user's sandbox by `docker restart`ing their
-// existing containers. Image rebuilds are a manual deploy-time step; the bot
-// never rebuilds images here (builds would use the host /punch source).
-export async function restartAllSandboxes() {
+// Restart every registered user's sandbox. Default: `docker restart` their
+// existing containers. With recreate:true, each container is removed and
+// recreated from the current SANDBOX_IMAGE (named volumes preserved). The bot
+// never rebuilds the image itself — that is a manual deploy-time step (builds
+// would use the host /punch source).
+export async function restartAllSandboxes({ recreate = false } = {}) {
   const users = loadUsers();
   if (users.length === 0) return { ok: false, error: "No sandbox users configured. Use /sandbox create first." };
 
@@ -312,10 +314,21 @@ export async function restartAllSandboxes() {
   for (const user of users) {
     try {
       validateSandboxName(user.name);
-      const container = containerForSandbox(user.name);
-      if (!container) throw new Error("sandbox container not found");
-      const { stdout } = await execFileAsync("docker", ["restart", "--time", "10", container], { timeout: 30000 });
-      results.push({ name: user.name, ok: true, output: stdout.trim() });
+      if (recreate) {
+        await removeContainer(user.name);
+        const run = await runSandboxContainer(user.name);
+        if (!run.ok) {
+          failures++;
+          results.push({ name: user.name, ok: false, error: run.error });
+          continue;
+        }
+        results.push({ name: user.name, ok: true, output: run.output });
+      } else {
+        const container = containerForSandbox(user.name);
+        if (!container) throw new Error("sandbox container not found");
+        const { stdout } = await execFileAsync("docker", ["restart", "--time", "10", container], { timeout: 30000 });
+        results.push({ name: user.name, ok: true, output: stdout.trim() });
+      }
     } catch (err) {
       failures++;
       results.push({ name: user.name, ok: false, error: err.stderr?.trim() || err.message });

@@ -355,19 +355,24 @@ export function registerInteractions(client) {
           return;
         }
         const noun = users.length === 1 ? "sandbox" : "sandboxes";
+        const recreate = interaction.options.getBoolean("recreate") ?? false;
         await interaction.reply({
-          content: `Restarting ${users.length} ${noun} — volumes kept…`,
+          content: recreate
+            ? `Recreating ${users.length} ${noun} from the current image — volumes kept…`
+            : `Restarting ${users.length} ${noun} — volumes kept…`,
           flags: MessageFlags.Ephemeral,
         });
 
-        const res = await sandbox.restartAllSandboxes();
+        const res = await sandbox.restartAllSandboxes({ recreate });
         reloadSandboxMap();
 
         const lines = res.results.map((r) =>
           `${r.ok ? "✅" : "⚠️"} **${r.name}**${r.ok ? "" : ` — ${(r.error || "").slice(0, 300)}`}`,
         ).join("\n");
         const okLabel = res.ok ? "✅" : "⚠️";
-        const okText = res.ok ? "All sandboxes restarted" : "Some sandboxes failed to restart";
+        const okText = res.ok
+          ? (recreate ? "All sandboxes recreated" : "All sandboxes restarted")
+          : (recreate ? "Some sandboxes failed to recreate" : "Some sandboxes failed to restart");
         await interaction.editReply({
           content: `${okLabel} ${okText}. User data volumes were preserved.\n${lines}`,
         });
