@@ -295,7 +295,7 @@ export function registerInteractions(client) {
 
       if (sub === "create") {
         const name = interaction.options.getString("name", true).toLowerCase().replace(/[^a-z0-9-]/g, "");
-        const userId = interaction.options.getString("userid", true);
+        const userId = interaction.options.getString("userid") || interaction.user.id;
 
         if (!name) {
           await interaction.reply({ content: "Name must contain only lowercase letters, digits, and hyphens.", flags: MessageFlags.Ephemeral });
