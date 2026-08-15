@@ -53,6 +53,26 @@ client.once(Events.ClientReady, async (c) => {
     );
   }
 
+  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
+  try {
+    const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
+    spectrumHandle = await startSpectrumAlongsideBot();
+    if (spectrumHandle && !spectrumSignalsBound) {
+      spectrumSignalsBound = true;
+      for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.on(signal, () => {
+          // Discord owns process lifetime; only sync-stop Spectrum here.
+          void shutdownSpectrum(signal);
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "[spectrum] failed to boot alongside Discord:",
+      err && err.message ? err.message : String(err),
+    );
+  }
+
   // Boot all dynamic sandboxes on startup
   for (const u of sandbox.loadUsers()) {
     const up = await sandbox.composeUp(u.name);

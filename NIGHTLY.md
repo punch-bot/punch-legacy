@@ -29,7 +29,6 @@ docker compose up --build -d
 ```
 
 Force off: `SPECTRUM_ENABLED=0`. Standalone debug: `npm run start:spectrum`. See `docs/spectrum.md`.
-
 ## Sandboxes
 
 Compose does not start a sandbox. Per Discord user:
