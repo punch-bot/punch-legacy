@@ -300,41 +300,12 @@ export async function composeUp(name) {
   }
 }
 
-// Restart every registered user's sandbox. With rebuild:true the sandbox image
-// is rebuilt once, then every container is recreated from the same named
-// volumes (user data preserved). With rebuild:false existing containers are
-// simply `docker restart`ed.
-export async function restartAllSandboxes({ rebuild = true } = {}) {
+// Restart every registered user's sandbox by `docker restart`ing their
+// existing containers. Image rebuilds are a manual deploy-time step; the bot
+// never rebuilds images here (builds would use the host /punch source).
+export async function restartAllSandboxes() {
   const users = loadUsers();
   if (users.length === 0) return { ok: false, error: "No sandbox users configured. Use /sandbox create first." };
-
-  if (rebuild) {
-    const build = await buildSandboxImage();
-    const results = [];
-    let failures = 0;
-    for (const user of users) {
-      try {
-        validateSandboxName(user.name);
-        await removeContainer(user.name);
-        const run = await runSandboxContainer(user.name);
-        if (!run.ok) {
-          failures++;
-          results.push({ name: user.name, ok: false, error: run.error });
-          continue;
-        }
-        results.push({ name: user.name, ok: true, output: run.output });
-      } catch (err) {
-        failures++;
-        results.push({ name: user.name, ok: false, error: err.stderr?.trim() || err.message });
-      }
-    }
-    return {
-      ok: failures === 0 && build.ok,
-      rebuilt: build.ok,
-      buildError: build.ok ? null : build.error,
-      results,
-    };
-  }
 
   const results = [];
   let failures = 0;
@@ -350,7 +321,7 @@ export async function restartAllSandboxes({ rebuild = true } = {}) {
       results.push({ name: user.name, ok: false, error: err.stderr?.trim() || err.message });
     }
   }
-  return { ok: failures === 0, rebuilt: false, buildError: null, results };
+  return { ok: failures === 0, results };
 }
 
 export async function composeDown(name) {
