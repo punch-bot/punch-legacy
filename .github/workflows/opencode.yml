@@ -27,6 +27,6 @@ jobs:
          env:
            OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
          with:
-           model: opencode/big-pickle
+           model: opencode/deepseek-v4-flash-free
           # share: true
           # github_token: xxxx
