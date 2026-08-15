@@ -34,6 +34,33 @@ services:
       - "${PUNCH_HOST_SOURCE:-/punch}:/punch:ro"
     restart: unless-stopped
 
+  # Base sandbox image/container. Builds from THIS source (not host /punch).
+  # Not started with the bot by default — run it explicitly to (re)build the
+  # image or bring up a base instance:
+  #   docker compose build sandbox
+  #   docker compose up -d sandbox
+  sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox.Dockerfile
+    image: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
+    profiles: ["sandbox"]
+    environment:
+      PI_SERVER_USERNAME: ${PI_SERVER_USERNAME:-opencode}
+      PI_SERVER_PASSWORD: ${PI_SERVER_PASSWORD:-}
+      PI_MODEL: ${PI_MODEL:-opencode/big-pickle}
+      VNC_PASSWORD: ${VNC_PASSWORD:-}
+    networks:
+      - edge
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    pids_limit: 512
+    mem_limit: 4g
+    cpus: 3
+    restart: "no"
+
   searxng:
     image: searxng/searxng:latest
     networks:
