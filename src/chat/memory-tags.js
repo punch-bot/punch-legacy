@@ -16,7 +16,7 @@ export function persistMemoryTags(textIn, speakerId, channelId) {
     const fact = m[3].trim();
     if (!fact) continue;
     if (scope === "channel") store.remember("channel", channelId, fact);
-    else store.remember("user", m[2] || speakerId, fact);
+    else store.remember("user", speakerId, fact);
     saved += 1;
   }
 
