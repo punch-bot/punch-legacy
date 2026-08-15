@@ -423,7 +423,10 @@ export function registerInteractions(client) {
       }
 
       if (sub === "restart-all") {
-        if (!isBotOwner(interaction.user.id)) return;
+        if (!isBotOwner(interaction.user.id)) {
+          await interaction.reply({ content: "⛔ Only the bot owner can restart sandboxes.", flags: MessageFlags.Ephemeral });
+          return;
+        }
         const users = sandbox.loadUsers();
         if (users.length === 0) {
           await interaction.reply({ content: "No dynamic sandbox users configured. Use `/sandbox create` to add one.", flags: MessageFlags.Ephemeral });

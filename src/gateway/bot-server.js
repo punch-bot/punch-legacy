@@ -305,42 +305,32 @@ const botHttpServer = createServer(async (req, res) => {
   // State API endpoints
   if (url.pathname.startsWith("/state/")) {
     try {
+      const headerUserId = req.headers["x-discord-user-id"] || null;
+      if (!headerUserId) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Missing x-discord-user-id header" }));
+      }
       if (req.method === "GET" && url.pathname === "/state/activity") {
-        const userId = url.searchParams.get("userId");
-        if (!userId) {
-          res.writeHead(400, { "content-type": "application/json" });
-          return void res.end(JSON.stringify({ error: "Missing userId" }));
-        }
         const type = url.searchParams.get("type") || undefined;
         const limit = Number(url.searchParams.get("limit")) || 20;
-        const activities = state.getActivities(userId, { type, limit });
+        const activities = state.getActivities(headerUserId, { type, limit });
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ activities }));
       }
 
       if (req.method === "GET" && url.pathname === "/state/stats") {
-        const userId = url.searchParams.get("userId");
-        if (!userId) {
-          res.writeHead(400, { "content-type": "application/json" });
-          return void res.end(JSON.stringify({ error: "Missing userId" }));
-        }
-        const stats = state.getActivityStats(userId);
+        const stats = state.getActivityStats(headerUserId);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify(stats));
       }
 
       if (req.method === "GET" && url.pathname === "/state/statistics") {
-        const userId = url.searchParams.get("userId");
-        if (!userId) {
-          res.writeHead(400, { "content-type": "application/json" });
-          return void res.end(JSON.stringify({ error: "Missing userId" }));
-        }
         const period = url.searchParams.get("period") || "week";
         if (!statistics.STATISTICS_PERIODS.includes(period)) {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Invalid period" }));
         }
-        const usage = state.getUsageStatistics(userId, period);
+        const usage = state.getUsageStatistics(headerUserId, period);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify(usage));
       }

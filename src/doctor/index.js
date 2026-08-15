@@ -42,8 +42,11 @@ function envValue(env, key) {
 
 // Reads a value preferring the PI_* name, falling back to the OPENCODE_* legacy alias.
 function envAuthValue(env, base) {
-  const v = envValue(env, `PI_${base}`) ?? envValue(env, `OPENCODE_${base}`);
-  return typeof v === "string" ? v : "";
+  for (const key of [`PI_${base}`, `OPENCODE_${base}`]) {
+    const v = envValue(env, key);
+    if (typeof v === "string" && v !== "") return v;
+  }
+  return "";
 }
 
 function authHeaders(env, doctorToken) {

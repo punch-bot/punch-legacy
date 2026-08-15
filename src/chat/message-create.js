@@ -15,6 +15,10 @@ import {
 } from "../stt.js";
 import { repliedToBlock } from "../prompt-blocks.js";
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function registerMessageCreate(client) {
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot && !store.getUserSettings(message.author.id).allowBots) return;
@@ -61,7 +65,7 @@ function registerMessageCreate(client) {
 
     let text = content.replace(/<@!?\d+>/g, "").trim();
     if (summonWord) {
-      text = text.replace(new RegExp(`\\b${summonWord}\\b`, "gi"), "").trim();
+      text = text.replace(new RegExp(`\\b${escapeRegExp(summonWord)}\\b`, "gi"), "").trim();
     }
 
     // Collect the message this one is replying to (if any) as focused context

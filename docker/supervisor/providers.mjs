@@ -7,6 +7,8 @@ import {
   normalizeModel,
   saveModel,
   syncAuthProvider,
+  RESERVED_PROVIDER_IDS,
+  FORMERLY_OVERRIDDEN_PROVIDERS,
 } from "./models.mjs";
 
 function sanitizeId(s) {
@@ -87,6 +89,11 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         const id = sanitizeId(provider);
+        if (!id || RESERVED_PROVIDER_IDS.has(id)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid provider" }));
+          return;
+        }
         const envVar = PROVIDER_ENV_MAP[id] || `${provider.toUpperCase()}_API_KEY`;
         const env = loadJSON(ENV_FILE);
         if (key) {
@@ -133,7 +140,7 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         const id = sanitizeId(name);
-        if (!id) {
+        if (!id || RESERVED_PROVIDER_IDS.has(id) || FORMERLY_OVERRIDDEN_PROVIDERS.has(id)) {
           res.writeHead(400, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Invalid provider name" }));
           return;
@@ -167,6 +174,11 @@ export function handleProviderRoutes(req, res, url) {
       try {
         const { name } = JSON.parse(body);
         const id = sanitizeId(name);
+        if (!id || RESERVED_PROVIDER_IDS.has(id) || FORMERLY_OVERRIDDEN_PROVIDERS.has(id)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid provider name" }));
+          return;
+        }
         if (!models.providers?.[id]) {
           res.writeHead(404, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Provider not found" }));

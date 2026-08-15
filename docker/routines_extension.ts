@@ -16,6 +16,7 @@ async function botFetch(path: string, init: RequestInit = {}) {
     headers: {
       "content-type": "application/json",
       authorization: AUTH,
+      "x-discord-user-id": process.env.SANDBOX_USER_ID || "",
       ...(init.headers || {}),
     },
   });

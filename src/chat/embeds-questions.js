@@ -83,7 +83,7 @@ function parseQuestionAttrs(attrs) {
   if (t) q.title = t[1];
   const d = attrs.match(/description="([^"]*)"/i);
   if (d) q.description = d[1];
-  if (/\bmulti\b/i.test(attrs)) q.multi = true;
+  if (/\bmulti\b/i.test(attrs.replace(/="[^"]*"/g, ""))) q.multi = true;
   const s = attrs.match(/style="([^"]*)"/i);
   if (s) q.style = s[1].toLowerCase();
   const inp = attrs.match(/input="([^"]*)"/i);
@@ -135,7 +135,7 @@ function buildQuestionComponents(q, messageId) {
     }
     return rows;
   }
-  const useSelect = q.style === "select" || q.multi || opts.length > 5;
+  const useSelect = opts.length > 5 || ((q.style === "select" || q.multi) && opts.length > 0);
   if (useSelect) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId(`qsel:${messageId}`)

@@ -21,11 +21,15 @@ export const HEALTHY_MS = 8000;
 
 export const WORK = "/work";
 export const PROBE_URL = "http://127.0.0.1:4096/health";
-export const PROBE_AUTH =
-  "Basic " +
-  Buffer.from(
-    `${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`,
-  ).toString("base64");
+// Recomputed per call so password rotation via /env or /apikey is picked up.
+export function probeAuth() {
+  return (
+    "Basic " +
+    Buffer.from(
+      `${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`,
+    ).toString("base64")
+  );
+}
 export const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
 
 // Env / secrets storage (per-container, so no user prefix needed).

@@ -238,8 +238,19 @@ export async function gitInSandbox(name, args, { cwd } = {}) {
 }
 
 async function removeContainer(name) {
+  const targets = [];
+  for (const candidate of containerCandidates(name)) {
+    try {
+      const out = execFileSync("docker", ["inspect", "--format", "{{.State.Running}}", candidate], {
+        timeout: 5000,
+        encoding: "utf8",
+      }).trim();
+      if (out === "true" || out === "false") targets.push(candidate);
+    } catch {}
+  }
+  if (targets.length === 0) return { stdout: "", stderr: "" };
   try {
-    return await execFileAsync("docker", ["rm", "--force", CONTAINER_NAME(name)], { timeout: 15000 });
+    return await execFileAsync("docker", ["rm", "--force", ...targets], { timeout: 15000 });
   } catch (err) {
     const message = err.stderr?.trim() || err.message || "";
     if (/No such container/i.test(message)) return { stdout: "", stderr: "" };
@@ -324,7 +335,7 @@ export async function restartAllSandboxes({ recreate = false } = {}) {
         }
         results.push({ name: user.name, ok: true, output: run.output });
       } else {
-        const container = containerForSandbox(user.name);
+        const container = containerForSandbox(user.name) || CONTAINER_NAME(user.name);
         if (!container) throw new Error("sandbox container not found");
         const { stdout } = await execFileAsync("docker", ["restart", "--time", "10", container], { timeout: 30000 });
         results.push({ name: user.name, ok: true, output: stdout.trim() });
@@ -347,19 +358,24 @@ export async function composeDown(name) {
   }
 }
 
-// Resolve the running container name for a sandbox. composeUp() uses
-// `${STACK}_sandbox-<name>_1` while compose-created sandboxes (compose project
-// `STACK`) are named `${STACK}-sandbox-<name>-<n>`; probe both conventions plus
-// suffixes. All names are scoped to THIS stack so the bot never picks up
-// containers owned by another Punch instance running on the same host.
-export function containerForSandbox(name) {
-  if (!isValidSandboxName(name)) return null;
+// All possible container names for a sandbox across conventions: composeUp
+// uses `${STACK}_sandbox-<name>_1`, compose-created sandboxes (compose project
+// `STACK`) use `${STACK}-sandbox-<name>-<n>`. All scoped to THIS stack so the
+// bot never picks up containers owned by another Punch instance on this host.
+function containerCandidates(name) {
   const candidates = [
     `${STACK}_sandbox-${name}_1`,
     `${STACK}-sandbox-${name}-1`,
   ];
   for (let i = 1; i <= 9; i++) candidates.push(`${STACK}-sandbox-${name}-${i}`);
-  for (const candidate of candidates) {
+  return candidates;
+}
+
+// Resolve the running container name for a sandbox. Returns null if no
+// matching container is currently running.
+export function containerForSandbox(name) {
+  if (!isValidSandboxName(name)) return null;
+  for (const candidate of containerCandidates(name)) {
     try {
       const out = execFileSync("docker", ["inspect", "--format", "{{.State.Running}}", candidate], {
         timeout: 5000,

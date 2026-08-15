@@ -12,12 +12,12 @@ import {
   AUTH_FILE,
   ENV_FILE,
   EXT_DISABLED_FILE,
-  PROBE_AUTH,
   PROBE_URL,
   SECRETS_FILE,
   TOOL_DIRS,
   log,
   loadJSON,
+  probeAuth,
   saveJSON,
   state,
 } from "./state.mjs";
@@ -144,7 +144,7 @@ export function handleGeneralRoutes(req, res, url) {
         gatewayProcess: state.child,
         gatewayStartedAt: state.startedAt,
         probeUrl: PROBE_URL,
-        probeAuth: PROBE_AUTH,
+        probeAuth: probeAuth(),
         currentModel: state.CURRENT_MODEL,
         authFile: AUTH_FILE,
         providerEnvMap: PROVIDER_ENV_MAP,
@@ -206,6 +206,9 @@ export function handleGeneralRoutes(req, res, url) {
       try {
         const { to, text, agent, hop } = JSON.parse(body);
         if (!to || !text) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing to or text" })); return; }
+        if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(to)) {
+          res.writeHead(400); res.end(JSON.stringify({ error: "Invalid to" })); return;
+        }
         const from = process.env.SANDBOX_NAME;
         if (!from) { res.writeHead(500); res.end(JSON.stringify({ error: "SANDBOX_NAME not configured" })); return; }
         const payload = { text };
@@ -262,9 +265,20 @@ export function handleGeneralRoutes(req, res, url) {
     req.on("end", () => {
       try {
         const pid = parseInt(JSON.parse(body).pid);
-        exec(`kill -9 ${pid}`, () => {});
-        res.writeHead(200);
-        res.end(JSON.stringify({ success: true }));
+        if (!Number.isInteger(pid) || pid <= 0) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid pid" }));
+          return;
+        }
+        exec(`kill -9 ${pid}`, (err) => {
+          if (err) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: err.message || "Kill failed" }));
+            return;
+          }
+          res.writeHead(200);
+          res.end(JSON.stringify({ success: true }));
+        });
       } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
     });
     return true;
@@ -338,7 +352,8 @@ export function handleGeneralRoutes(req, res, url) {
             key === envVar ||
             (provider === "google" && (key === "GEMINI_API_KEY" || key === "GOOGLE_API_KEY"))
           ) {
-            syncAuthProvider(provider, env[envVar] || env.GEMINI_API_KEY || null);
+            const fallback = provider === "google" ? env.GEMINI_API_KEY || null : null;
+            syncAuthProvider(provider, env[envVar] || fallback);
           }
         }
         forceRestart();

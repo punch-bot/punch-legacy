@@ -38,9 +38,12 @@ async function handleQuestionInteraction(interaction) {
     return;
   }
 
-  // Remove components so the question can't be answered twice.
+  // Claim the question before awaiting so concurrent clicks can't double-answer.
+  if (!registry.questionState.delete(interaction.message.id)) {
+    await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
   await interaction.update({ components: [] }).catch(() => {});
-  registry.questionState.delete(interaction.message.id);
 
   const clicker = interaction.user;
   const label = clicker.displayName || clicker.username;
@@ -105,9 +108,12 @@ async function handleQuestionModalSubmit(interaction) {
     return;
   }
 
-  // Remove components so the question can't be answered twice.
+  // Claim the question before awaiting so concurrent clicks can't double-answer.
+  if (!registry.questionState.delete(msgId)) {
+    await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
   await interaction.update({ components: [] }).catch(() => {});
-  registry.questionState.delete(msgId);
 
   const clicker = interaction.user;
   const label = clicker.displayName || clicker.username;
@@ -177,8 +183,11 @@ async function handleQuestionCheckboxSubmit(interaction) {
     return;
   }
 
+  if (!registry.questionState.delete(msgId)) {
+    await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
+    return;
+  }
   await interaction.update({ components: [] }).catch(() => {});
-  registry.questionState.delete(msgId);
 
   const clicker = interaction.user;
   const label = clicker.displayName || clicker.username;

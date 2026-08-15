@@ -148,8 +148,9 @@ export async function sendPermissionDM(recipientId, from, text, hop) {
       .setLabel(`Always deny ${from}`)
       .setStyle(ButtonStyle.Secondary),
   );
+  const snippet = String(text).length > 1500 ? `${String(text).slice(0, 1500)}\n… *(truncated)*` : String(text);
   await dm.send({
-    content: `📬 **Agent pigeon from ${from}** — allow your Punch to run this?\n\n${text}`,
+    content: `📬 **Agent pigeon from ${from}** — allow your Punch to run this?\n\n${snippet}`,
     components: [row],
   });
   console.log(`[pigeon] permission pending ${pendingId} uid=${recipientId} from=${from}`);

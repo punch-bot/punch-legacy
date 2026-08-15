@@ -88,10 +88,12 @@ export async function applyReactTags(message, emojis) {
 
 export function reactionDedupKey(userId, messageId) {
   const key = `${userId}:${messageId}`;
-  if (registry.recentReactionKeys.has(key)) return true;
-  registry.recentReactionKeys.set(key, Date.now());
+  const now = Date.now();
+  const existing = registry.recentReactionKeys.get(key);
+  if (existing && now - existing < REACTION_DEDUP_MS) return true;
+  registry.recentReactionKeys.set(key, now);
   for (const [k, ts] of registry.recentReactionKeys) {
-    if (Date.now() - ts > REACTION_DEDUP_MS) registry.recentReactionKeys.delete(k);
+    if (now - ts > REACTION_DEDUP_MS) registry.recentReactionKeys.delete(k);
   }
   return false;
 }
@@ -112,7 +114,7 @@ export function chunk(text, size = 1900) {
 export async function reply(message, text) {
   for (const part of chunk(text)) {
     try {
-      await message.reply(part);
+      await message.reply({ content: part, allowedMentions: { parse: [] } });
     } catch (err) {
       console.error(`[discord] reply failed in ${message.channelId}:`, err.message);
       break;

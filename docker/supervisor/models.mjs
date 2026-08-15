@@ -176,9 +176,23 @@ export const PROVIDER_ENV_MAP = {
   nim: "NVIDIA_API_KEY",
 };
 
+/** Object-property names that must never be used as provider ids. */
+export const RESERVED_PROVIDER_IDS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Sanitize a provider id for use as an auth.json / models.json object key. */
+export function sanitizeProviderId(provider) {
+  const id = String(provider || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  if (!id || RESERVED_PROVIDER_IDS.has(id)) return null;
+  return id;
+}
+
 /** Pi auth shape: { type: "api_key", key } under provider id. */
 export function syncAuthProvider(provider, key) {
-  const id = provider.toLowerCase();
+  const id = sanitizeProviderId(provider);
+  if (!id) {
+    log(`syncAuthProvider: rejected invalid provider id: ${provider}`);
+    return;
+  }
   const auth = loadJSON(AUTH_FILE);
   if (key) {
     auth[id] = { type: "api_key", key };
@@ -208,6 +222,9 @@ export function syncEnvApiKeysToAuth() {
     if (provider === "google" && !key) key = env.GEMINI_API_KEY;
     if (key && (auth[provider]?.key !== key || auth[provider]?.type !== "api_key")) {
       auth[provider] = { type: "api_key", key };
+      changed = true;
+    } else if (!key && auth[provider]) {
+      delete auth[provider];
       changed = true;
     }
   }

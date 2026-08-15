@@ -112,8 +112,8 @@ async function trySpawnMultitaskWorker(message, text, contextMessages = [], opts
     return true;
   }
   if (result.fallbackQueue) return false;
-  await reply(message, `⚠️ Could not start subtask: ${result.error}`);
-  return true;
+  console.log(`[multitask] uid=${uid} worker start failed, falling back to queue: ${result.error}`);
+  return false;
 }
 
 async function listActiveWorkers(uid) {

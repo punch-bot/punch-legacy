@@ -41,7 +41,7 @@ async function fireRoutine(routine) {
         response: "sandbox unreachable", status: "error", duration: Date.now() - start,
         routineId: routine.id,
       });
-      return;
+      throw new Error(`sandbox unreachable for heartbeat ${routine.id}`);
     }
 
     const existingSession = state.getHeartbeatSession(uid);
@@ -161,7 +161,7 @@ async function fireRoutine(routine) {
       content: `⚠️ <@${routine.userId}> Scheduled automation failed — sandbox unreachable.`,
       allowedMentions: { users: [routine.userId] },
     });
-    return;
+    throw new Error(`sandbox unreachable for routine ${routine.id}`);
   }
 
   const uid = routine.userId;
@@ -238,10 +238,11 @@ async function fireRoutine(routine) {
 }
 
 function verifyRoutineUser(bodyUserId, headerUserId) {
-  if (headerUserId && bodyUserId && headerUserId !== bodyUserId) {
+  if (!headerUserId) return null;
+  if (bodyUserId && headerUserId !== bodyUserId) {
     throw new Error("userId does not match x-discord-user-id header");
   }
-  return headerUserId || bodyUserId;
+  return headerUserId;
 }
 
 export { fireRoutine, verifyRoutineUser };

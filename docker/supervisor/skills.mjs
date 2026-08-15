@@ -52,7 +52,12 @@ export function handleSkillsRoutes(req, res, url) {
     let body = "";
     req.on("data", chunk => { body += chunk; if (body.length > 1024) req.destroy(); });
     req.on("end", () => {
-      try { const result = reviewProposal(proposalMatch[1], Boolean(JSON.parse(body || "{}").approve)); if (!result) { res.writeHead(404); res.end(JSON.stringify({ error: "Proposal not found" })); return; } res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ result })); }
+      try {
+        const parsed = JSON.parse(body || "{}");
+        if (typeof parsed.approve !== "boolean") {
+          res.writeHead(400); res.end(JSON.stringify({ error: "approve must be boolean" })); return;
+        }
+        const result = reviewProposal(proposalMatch[1], parsed.approve); if (!result) { res.writeHead(404); res.end(JSON.stringify({ error: "Proposal not found" })); return; } res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ result })); }
       catch (error) { res.writeHead(400); res.end(JSON.stringify({ error: error.message })); }
     });
     return true;

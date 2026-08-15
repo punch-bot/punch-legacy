@@ -49,8 +49,10 @@ process.env.PI_DEFAULT_MODEL = state.CURRENT_MODEL;
 process.env.PI_MODEL = state.CURRENT_MODEL;
 
 // -- Ensure the basic-auth username resolves (legacy OPENCODE_* fallback) --
-if (!process.env.PI_SERVER_USERNAME) {
-  process.env.PI_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME || "opencode";
+// Mirror the legacy name only when it is explicitly set; otherwise leave the
+// consumer-side "opencode" default (config.js supervisorAuth*) to apply.
+if (!process.env.PI_SERVER_USERNAME && process.env.OPENCODE_SERVER_USERNAME) {
+  process.env.PI_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME;
 }
 
 // --- Env / secrets injection ---

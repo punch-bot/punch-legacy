@@ -16,8 +16,9 @@ export function handleTailscaleRoutes(req, res, url) {
           res.writeHead(400).end(JSON.stringify({ error: "Missing key" }));
           return;
         }
-        writeFileSync(TAILSCALE_KEY_FILE, JSON.stringify({ authkey: key }));
-        execFile("tailscale", ["up", `--authkey=${key}`, "--accept-routes", "--accept-dns=false"], { timeout: 15000 }, (err, stdout, stderr) => {
+        const clean = key.trim();
+        writeFileSync(TAILSCALE_KEY_FILE, JSON.stringify({ authkey: clean }));
+        execFile("tailscale", ["up", `--authkey=${clean}`, "--accept-routes", "--accept-dns=false"], { timeout: 15000 }, (err, stdout, stderr) => {
           if (err) {
             res.writeHead(500).end(JSON.stringify({ error: (stderr || err.message).trim() }));
             return;
@@ -67,9 +68,13 @@ export function handleTailscaleRoutes(req, res, url) {
       loginProcess.stdout.on("data", scan);
       loginProcess.stderr.on("data", scan);
       loginProcess.on("error", (err) => finish(500, { error: err.message }));
-      loginProcess.on("close", () => {
+      loginProcess.on("close", (code) => {
         if (responded) return;
         const match = output.match(urlPattern);
+        if (code !== 0 && !match) {
+          finish(500, { error: output.trim() || `tailscale login exited with code ${code}` });
+          return;
+        }
         finish(200, match
           ? { success: true, url: match[1] }
           : { success: true, url: null, output: output.trim() });

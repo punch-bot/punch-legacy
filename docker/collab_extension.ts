@@ -4,7 +4,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
 const BOT_URL = process.env.PUNCH_BOT_URL || "http://bot:4098";
-const AUTH = "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+const AUTH = "Basic " + Buffer.from(`opencode:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
 
 async function botFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(`${BOT_URL}${path}`, { ...init, headers: { "content-type": "application/json", authorization: AUTH, ...(init.headers || {}) } });

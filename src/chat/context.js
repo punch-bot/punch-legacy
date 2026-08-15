@@ -105,7 +105,8 @@ export async function fetchThreadContext(channel, message, opts = {}) {
   try {
     const root = await resolveRoot(channel, message.id);
     if (!root) {
-      return fetchChannelContext(channel, message.id, currentSandboxName).slice(-RESIDUE_LIMIT);
+      const ambient = await fetchChannelContext(channel, message.id, currentSandboxName);
+      return ambient.slice(-RESIDUE_LIMIT);
     }
 
     const fetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
@@ -122,21 +123,28 @@ export async function fetchThreadContext(channel, message, opts = {}) {
     // Non-reply ping (root == the summon itself): no thread has formed yet, so
     // add a small ambient residue of recent human messages for context.
     if (root.id === message.id && result.length <= 1) {
-      const residue = fetchChannelContext(channel, message.id, currentSandboxName).slice(-RESIDUE_LIMIT);
-      result = result.concat(residue);
+      const residue = await fetchChannelContext(channel, message.id, currentSandboxName);
+      result = result.concat(residue.slice(-RESIDUE_LIMIT));
     }
 
     // Cross-ping escape hatch: a Discord message link in the summon pulls that
     // other thread's messages into context too (bot output attributed as
     // [punch:NAME], outputs stay distinct).
     // v2: also scan message.reference for linked messages, and support multiple links.
-    const linkMatch = message.content.match(/discord\.com\/channels\/\d+\/\d+\/(\d+)/);
+    const linkMatch = message.content.match(/discord\.com\/channels\/\d+\/(\d+)\/(\d+)/);
     if (linkMatch) {
-      const linked = await channel.messages.fetch(linkMatch[1]).catch(() => null);
+      const linkedChannelId = linkMatch[1];
+      const linkedMessageId = linkMatch[2];
+      const linkChannel =
+        linkedChannelId && linkedChannelId !== channel.id
+          ? await registry.client.channels.fetch(linkedChannelId).catch(() => null)
+          : channel;
+      if (!linkChannel) return result.slice(-THREAD_WINDOW);
+      const linked = await linkChannel.messages.fetch(linkedMessageId).catch(() => null);
       if (linked) {
-        const linkedRoot = await resolveRoot(channel, linked.id);
+        const linkedRoot = await resolveRoot(linkChannel, linked.id);
         if (linkedRoot) {
-          const lfetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
+          const lfetched = await linkChannel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
           const lall = [linkedRoot, ...lfetched.values()];
           const lmapped = lall.map((m) => ({ id: m.id, referenceMessageId: m.reference?.messageId || null }));
           const lkeep = filterThreadSubtree(lmapped, linkedRoot.id);

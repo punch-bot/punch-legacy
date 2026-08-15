@@ -303,8 +303,8 @@ export async function transcribeVoiceMessage(message, {
 export async function resolveSttConfigForUser(userId) {
   let sandboxEnv = {};
   try {
-    if (apiUrlFor(userId)) {
-      const data = await getEnv(userId);
+    if (!pickSttCredential(process.env) && apiUrlFor(userId)) {
+      const data = await getEnv(userId, AbortSignal.timeout(3000));
       sandboxEnv = data?.env && typeof data.env === "object" ? data.env : {};
     }
   } catch (err) {

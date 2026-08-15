@@ -488,6 +488,14 @@ async function handleCommand(message, cmd, rest) {
         return true;
       }
 
+      if (sub === "list") {
+        const list = routines.listRoutines(uid);
+        await reply(message, list.length === 0
+          ? "No routines yet."
+          : `**Your routines:**\n${list.map(routines.formatRoutine).join("\n")}`);
+        return true;
+      }
+
       await reply(message, `Usage:\n\`${PREFIX}routine list\` — list routines\n\`${PREFIX}routine history [id]\` — recent runs/errors\n\`${PREFIX}routine remove <id>\`\n\`${PREFIX}routine pause/resume <id>\`\n\`${PREFIX}routine daily <time> <text>\`\n\`${PREFIX}routine every <interval> <text>\`\n\`${PREFIX}routine auto <when> <prompt>\``);
       return true;
     }

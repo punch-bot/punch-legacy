@@ -6,11 +6,11 @@ import { join } from "node:path";
 import {
   DEBOUNCE_MS,
   HEALTHY_MS,
-  PROBE_AUTH,
   PROBE_URL,
   TOOL_DIRS,
   WORK,
   log,
+  probeAuth,
   sleep,
   state,
 } from "./state.mjs";
@@ -112,7 +112,7 @@ export async function probeHealth(gen) {
     if (gen !== state.generation) return;
     let status;
     try {
-      const res = await fetch(PROBE_URL, { headers: { authorization: PROBE_AUTH } });
+      const res = await fetch(PROBE_URL, { headers: { authorization: probeAuth() } });
       status = res.status;
     } catch {
       await sleep(500);

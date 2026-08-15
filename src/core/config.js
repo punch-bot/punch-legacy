@@ -54,6 +54,7 @@ export function supervisorAuthWithUser() {
 }
 
 export function botHttpAuth(req) {
+  if (!BOT_HTTP_PASS) return false;
   const auth = req.headers.authorization || "";
   const expected = "Basic " + Buffer.from(`opencode:${BOT_HTTP_PASS}`).toString("base64");
   return auth === expected;

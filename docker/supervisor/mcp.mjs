@@ -12,6 +12,9 @@ import {
 import { forceRestart } from "./gateway.mjs";
 import { ENV_FILE, MCP_FILE, PI_MCP_FILE, log, loadJSON, saveJSON } from "./state.mjs";
 
+/** Object-property names that would poison the registry/prototype if used as MCP names. */
+const RESERVED_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
 /** Write adapter-shaped mcp.json for ops/debug; Punch extension reads /data/mcp.json directly. */
 export function syncMcpConfig() {
   mkdirSync("/data/pi/agent", { recursive: true });
@@ -83,6 +86,10 @@ export function handleMcpRoutes(req, res, url) {
           res.writeHead(400).end(JSON.stringify({ error: "Invalid name (letters, digits, _ and - only)" }));
           return;
         }
+        if (RESERVED_NAMES.has(name)) {
+          res.writeHead(400).end(JSON.stringify({ error: "Reserved name" }));
+          return;
+        }
         const candidate = { type, enabled: !!enabled };
         if (auth === "api_key" || auth === "apikey" || apiKeyValue) candidate.auth = "api_key";
         else if (Object.prototype.hasOwnProperty.call(parsed, "auth")) candidate.auth = auth;
@@ -130,6 +137,7 @@ export function handleMcpRoutes(req, res, url) {
       try {
         const { name } = JSON.parse(body);
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        if (RESERVED_NAMES.has(name)) { res.writeHead(400).end(JSON.stringify({ error: "Reserved name" })); return; }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
         const env = loadJSON(ENV_FILE);
@@ -155,6 +163,7 @@ export function handleMcpRoutes(req, res, url) {
       try {
         const { name, key } = JSON.parse(body);
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        if (RESERVED_NAMES.has(name)) { res.writeHead(400).end(JSON.stringify({ error: "Reserved name" })); return; }
         if (typeof key !== "string" || !key.trim()) {
           res.writeHead(400).end(JSON.stringify({ error: "Missing API key" }));
           return;
@@ -185,6 +194,7 @@ export function handleMcpRoutes(req, res, url) {
       try {
         const { name } = JSON.parse(body);
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        if (RESERVED_NAMES.has(name)) { res.writeHead(400).end(JSON.stringify({ error: "Reserved name" })); return; }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
         const env = loadJSON(ENV_FILE);

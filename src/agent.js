@@ -101,7 +101,7 @@ export function getActivityLogs(userId, tail = 30) {
 // Dynamic-only stacks omit PI_SERVER_URL; every Discord user must be in
 // sandbox_users.json (via /sandbox create). Mapped users never use DEFAULT_SERVER.
 if (!DEFAULT_SERVER && (process.env.PUNCH_REQUIRE_PI_URL === "1" || process.env.PUNCH_REQUIRE_OPENCODE_URL === "1")) {
-  throw new Error("PI_SERVER_URL is not set and PUNCH_REQUIRE_PI_URL=1 (Punch uses dynamic /sandbox create instead)");
+  throw new Error("PI_SERVER_URL is not set but PUNCH_REQUIRE_PI_URL=1 (or PUNCH_REQUIRE_OPENCODE_URL=1); Punch uses dynamic /sandbox create instead");
 }
 
 function headers() {
@@ -937,9 +937,9 @@ export async function summarizeSession(sessionId, userId, signal = null) {
   );
 }
 
-export async function getEnv(userId) {
+export async function getEnv(userId, signal = null) {
   const url = `${apiUrlFor(userId)}/env`;
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetch(url, { headers: headers(), signal });
   if (!res.ok) {
      const t = await res.text().catch(() => "");
      throw new Error(`getEnv API ${res.status}: ${t.slice(0, 200)}`);
