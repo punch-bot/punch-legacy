@@ -10,6 +10,19 @@ export const COMPRESS_TIMEOUT_MS = Number(process.env.PI_COMPRESS_TIMEOUT || pro
 export const BOT_HTTP_PORT = 4098;
 export const BOT_HTTP_PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
 
+// Bot owners as comma-separated Discord user IDs (e.g. "1234567890,0987654321").
+// Only owners may run owner-scoped commands like /sandbox restart-all.
+export const BOT_OWNERS = new Set(
+  (process.env.BOT_OWNERS || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
+
+export function isBotOwner(userId) {
+  return userId != null && BOT_OWNERS.has(String(userId));
+}
+
 export const MODEL_LIST = [
   { label: "Claude Sonnet 4", value: "anthropic/claude-sonnet-4-20250514", emoji: "🧠" },
   { label: "Claude 3.5 Sonnet", value: "anthropic/claude-3.5-sonnet-20241022", emoji: "🧠" },

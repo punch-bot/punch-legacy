@@ -247,39 +247,110 @@ async function removeContainer(name) {
   }
 }
 
+export async function buildSandboxImage() {
+  if (!existsSync(MAIN_COMPOSE)) return { ok: false, error: "Main compose file not found at " + MAIN_COMPOSE };
+  try {
+    await execFileAsync("docker", ["build", "--tag", SANDBOX_IMAGE, "--file", "/punch/docker/sandbox.Dockerfile", "/punch"], { timeout: 120000 });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.stderr?.trim() || err.message };
+  }
+}
+
+// Create (or recreate) the container for one sandbox. Named volumes are
+// created if missing but never removed, so user data (/root, /work, /data,
+// /var/lib/tailscale, /collab) survives across recreations.
+async function runSandboxContainer(name) {
+  const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
+  for (const volumeName of volumeNames) {
+    await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
+  }
+  const ports = vncPorts(name);
+  const args = [
+    "run", "--detach",
+    "--name", CONTAINER_NAME(name),
+    "--network", NETWORK,
+    "--network-alias", `sandbox-${name}`,
+    ...userEnvArgs(name),
+    "--publish", `${ports.web}:6080`,
+    "--publish", `${ports.vnc}:5900`,
+    "--device", "/dev/net/tun",
+    "--cap-add", "NET_ADMIN",
+    "--pids-limit", "512",
+    "--memory", "4g",
+    "--cpus", "3",
+    ...volumeArgs(name),
+    "--restart", "unless-stopped",
+    SANDBOX_IMAGE,
+  ];
+  const { stdout } = await execFileAsync("docker", args, { timeout: 60000 });
+  return { ok: true, output: stdout.trim() };
+}
+
 export async function composeUp(name) {
   if (!existsSync(MAIN_COMPOSE)) return { ok: false, error: "Main compose file not found at " + MAIN_COMPOSE };
   try {
     validateSandboxName(name);
     await removeContainer(name);
-    await execFileAsync("docker", ["build", "--tag", SANDBOX_IMAGE, "--file", "/punch/docker/sandbox.Dockerfile", "/punch"], { timeout: 120000 });
-    const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
-    for (const volumeName of volumeNames) {
-      await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
-    }
-    const ports = vncPorts(name);
-    const args = [
-      "run", "--detach",
-      "--name", CONTAINER_NAME(name),
-      "--network", NETWORK,
-      "--network-alias", `sandbox-${name}`,
-      ...userEnvArgs(name),
-      "--publish", `${ports.web}:6080`,
-      "--publish", `${ports.vnc}:5900`,
-      "--device", "/dev/net/tun",
-      "--cap-add", "NET_ADMIN",
-      "--pids-limit", "512",
-      "--memory", "4g",
-      "--cpus", "3",
-      ...volumeArgs(name),
-      "--restart", "unless-stopped",
-      SANDBOX_IMAGE,
-    ];
-    const { stdout } = await execFileAsync("docker", args, { timeout: 60000 });
-    return { ok: true, output: stdout.trim() };
+    const build = await buildSandboxImage();
+    if (!build.ok) return build;
+    return await runSandboxContainer(name);
   } catch (err) {
     return { ok: false, error: err.stderr?.trim() || err.message };
   }
+}
+
+// Restart every registered user's sandbox. With rebuild:true the sandbox image
+// is rebuilt once, then every container is recreated from the same named
+// volumes (user data preserved). With rebuild:false existing containers are
+// simply `docker restart`ed.
+export async function restartAllSandboxes({ rebuild = true } = {}) {
+  const users = loadUsers();
+  if (users.length === 0) return { ok: false, error: "No sandbox users configured. Use /sandbox create first." };
+
+  if (rebuild) {
+    const build = await buildSandboxImage();
+    const results = [];
+    let failures = 0;
+    for (const user of users) {
+      try {
+        validateSandboxName(user.name);
+        await removeContainer(user.name);
+        const run = await runSandboxContainer(user.name);
+        if (!run.ok) {
+          failures++;
+          results.push({ name: user.name, ok: false, error: run.error });
+          continue;
+        }
+        results.push({ name: user.name, ok: true, output: run.output });
+      } catch (err) {
+        failures++;
+        results.push({ name: user.name, ok: false, error: err.stderr?.trim() || err.message });
+      }
+    }
+    return {
+      ok: failures === 0 && build.ok,
+      rebuilt: build.ok,
+      buildError: build.ok ? null : build.error,
+      results,
+    };
+  }
+
+  const results = [];
+  let failures = 0;
+  for (const user of users) {
+    try {
+      validateSandboxName(user.name);
+      const container = containerForSandbox(user.name);
+      if (!container) throw new Error("sandbox container not found");
+      const { stdout } = await execFileAsync("docker", ["restart", "--time", "10", container], { timeout: 30000 });
+      results.push({ name: user.name, ok: true, output: stdout.trim() });
+    } catch (err) {
+      failures++;
+      results.push({ name: user.name, ok: false, error: err.stderr?.trim() || err.message });
+    }
+  }
+  return { ok: failures === 0, rebuilt: false, buildError: null, results };
 }
 
 export async function composeDown(name) {

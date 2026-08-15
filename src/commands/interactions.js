@@ -35,7 +35,7 @@ import {
   syncMultitaskWorkerCap,
 } from "../agent.js";
 
-import { MODEL_LIST, PROVIDER_NAMES } from "../core/config.js";
+import { MODEL_LIST, PROVIDER_NAMES, isBotOwner } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -344,6 +344,37 @@ export function registerInteractions(client) {
 
         reloadSandboxMap();
         await interaction.reply({ content: `✅ Sandbox **${name}** removed.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      if (sub === "restart-all") {
+        if (!isBotOwner(interaction.user.id)) return;
+        const rebuild = interaction.options.getBoolean("rebuild") ?? true;
+        const users = sandbox.loadUsers();
+        if (users.length === 0) {
+          await interaction.reply({ content: "No dynamic sandbox users configured. Use `/sandbox create` to add one.", flags: MessageFlags.Ephemeral });
+          return;
+        }
+        const noun = users.length === 1 ? "sandbox" : "sandboxes";
+        await interaction.reply({
+          content: `Restarting ${users.length} ${noun}${rebuild ? " (rebuilding image)" : ""} — volumes kept…`,
+          flags: MessageFlags.Ephemeral,
+        });
+
+        const res = await sandbox.restartAllSandboxes({ rebuild });
+        reloadSandboxMap();
+
+        const lines = res.results.map((r) =>
+          `${r.ok ? "✅" : "⚠️"} **${r.name}**${r.ok ? "" : ` — ${(r.error || "").slice(0, 300)}`}`,
+        ).join("\n");
+        const buildNote = res.buildError
+          ? `\n⚠️ Image rebuild failed: ${res.buildError.slice(0, 300)}`
+          : "";
+        const okLabel = res.ok ? "✅" : "⚠️";
+        const okText = res.ok ? "All sandboxes restarted" : "Some sandboxes failed to restart";
+        await interaction.editReply({
+          content: `${okLabel} ${okText}. User data volumes were preserved.\n${lines}${buildNote}`,
+        });
         return;
       }
     }

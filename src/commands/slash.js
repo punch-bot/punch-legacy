@@ -33,6 +33,10 @@ export function buildSlashCommands() {
         options: [
           { type: 3, name: "name", description: "User name to remove", required: true },
         ] },
+      { type: 1, name: "restart-all", description: "Recreate every sandbox container at once (volumes kept)",
+        options: [
+          { type: 5, name: "rebuild", description: "Rebuild the sandbox image first (default true)", required: false },
+        ] },
     ],
   }, {
     name: "collab",
