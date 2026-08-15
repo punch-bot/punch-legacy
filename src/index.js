@@ -395,7 +395,7 @@ const MODEL_LIST = [
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 
-const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "nim"];
+const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nim"];
 
 async function ensureUserSandbox(userId) {
   const apiUrl = apiUrlFor(userId);
@@ -1231,7 +1231,7 @@ client.once(Events.ClientReady, async (c) => {
     name: "apikey",
     description: "Set or remove an API key for an AI provider in your sandbox",
     options: [
-      { type: 3, name: "provider", description: "Provider: anthropic, openai, google, opencode (Zen), etc.", required: true },
+      { type: 3, name: "provider", description: "Provider: anthropic, openai, google, opencode (Zen/Go), etc.", required: true },
       { type: 3, name: "key", description: "API key (omit to remove the key)" },
     ],
   }, {
