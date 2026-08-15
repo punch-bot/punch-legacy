@@ -109,6 +109,10 @@ const client = new Client({
 
 const recentReactionKeys = new Map();
 const REACTION_DEDUP_MS = 5000;
+/** @type {null | { stop: () => Promise<void> }} */
+let spectrumHandle = null;
+let spectrumShuttingDown = false;
+let spectrumSignalsBound = false;
 
 const LIFECYCLE_PROGRESS_EMOJI = "👀";
 
@@ -188,11 +192,40 @@ function reactionDedupKey(userId, messageId) {
   return false;
 }
 
-async function fetchChannelContext(channel, beforeId, currentSandboxName = null) {
+// Discord message IDs the summoning user explicitly referenced: the message
+// they replied to plus any discord.com message links pasted into the summon.
+// These are the only references that can pull another user's messages into
+// the summoning user's context.
+function referencedMessageIds(message) {
+  const ids = new Set();
+  if (!message) return ids;
+  if (message.reference?.messageId) ids.add(message.reference.messageId);
+  if (message.content) {
+    for (const m of message.content.matchAll(/discord\.com\/channels\/\d+\/\d+\/(\d+)/g)) {
+      ids.add(m[1]);
+    }
+  }
+  return ids;
+}
+
+// Scope ambient channel context to the summoning user: keep only their own
+// messages plus any message they explicitly referenced (a reply or a pasted
+// discord.com link). Other people's messages and other punches' output never
+// enter a user's prompt through the ambient channel window (that was PNCH-18).
+function visibleToSummoner(m, summonerUserId, referenced) {
+  if (m.author.bot) {
+    return referenced.has(m.id);
+  }
+  return String(m.author.id) === String(summonerUserId) || referenced.has(m.id);
+}
+
+async function fetchChannelContext(channel, message, currentSandboxName = null, summonerUserId = null) {
   if (!channel) return [];
   try {
-    const fetched = await channel.messages.fetch({ limit: 15, before: beforeId });
+    const fetched = await channel.messages.fetch({ limit: 15, before: message?.id });
+    const referenced = referencedMessageIds(message);
     return fetched
+      .filter((m) => visibleToSummoner(m, summonerUserId, referenced))
       .map((m) => mapContextMsg(m, currentSandboxName))
       .filter((m) => m && m.content.length > 0)
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
@@ -252,16 +285,18 @@ function mapContextMsg(m, currentSandboxName) {
 }
 
 // Thread-scoped context: ingest only the reply subtree rooted at the summoning
-// message's root. Humans are always visible; other punches' output is included
-// (attributed as `[punch:NAME]`) so the summoning punch can see what its
-// neighbours are doing, while its OWN prior output is skipped to avoid loops.
+// message's root. The subtree is the summoning user's own reply chain, so it
+// may include the neighbours it explicitly engaged with (other humans and other
+// punches' output, attributed as `[punch:NAME]`), while its OWN prior output is
+// skipped to avoid loops. The ambient residue fallback below is scoped to the
+// summoning user only (own messages + explicit references).
 async function fetchThreadContext(channel, message, opts = {}) {
   if (!channel) return [];
   const currentSandboxName = sandboxNameForUser(opts.userId) || null;
   try {
     const root = await resolveRoot(channel, message.id);
     if (!root) {
-      return fetchChannelContext(channel, message.id, currentSandboxName).slice(-RESIDUE_LIMIT);
+      return fetchChannelContext(channel, message, currentSandboxName, opts.userId).slice(-RESIDUE_LIMIT);
     }
 
     const fetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
@@ -276,9 +311,11 @@ async function fetchThreadContext(channel, message, opts = {}) {
     let result = kept;
 
     // Non-reply ping (root == the summon itself): no thread has formed yet, so
-    // add a small ambient residue of recent human messages for context.
+    // add a small residue of recent messages for context. Like channel mode,
+    // the residue is scoped to the summoning user (own messages + explicit
+    // references) so other users' jobs never leak in.
     if (root.id === message.id && result.length <= 1) {
-      const residue = fetchChannelContext(channel, message.id, currentSandboxName).slice(-RESIDUE_LIMIT);
+      const residue = fetchChannelContext(channel, message, currentSandboxName, opts.userId).slice(-RESIDUE_LIMIT);
       result = result.concat(residue);
     }
 
@@ -1016,6 +1053,26 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`punch online as ${c.user.tag}`);
   reloadSandboxMap();
 
+  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
+  try {
+    const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
+    spectrumHandle = await startSpectrumAlongsideBot();
+    if (spectrumHandle && !spectrumSignalsBound) {
+      spectrumSignalsBound = true;
+      for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.on(signal, () => {
+          // Discord owns process lifetime; only sync-stop Spectrum here.
+          void shutdownSpectrum(signal);
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "[spectrum] failed to boot alongside Discord:",
+      err && err.message ? err.message : String(err),
+    );
+  }
+
   // Boot all dynamic sandboxes on startup
   for (const u of sandbox.loadUsers()) {
     const up = await sandbox.composeUp(u.name);
@@ -1027,6 +1084,28 @@ client.once(Events.ClientReady, async (c) => {
   }
 
   let slashCmd = [{
+    name: "pair",
+    description: "Link your iMessage number to Punch using a pairing code",
+    options: [
+      {
+        type: 3,
+        name: "code",
+        description: "9-digit code from Punch iMessage",
+        required: true,
+      },
+    ],
+  }, {
+    name: "unpair",
+    description: "Unlink a paired phone number from your Discord account",
+    options: [
+      {
+        type: 3,
+        name: "phone",
+        description: "Phone number or email to unpair (omit to unpair all yours)",
+        required: false,
+      },
+    ],
+  }, {
     name: "env",
     description: "Manage sandbox environment variables (hidden from others)",
     options: [
@@ -2771,7 +2850,7 @@ client.on(Events.MessageCreate, async (message) => {
   const useChannelContext =
     message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
   const contextMessages = useChannelContext
-    ? await fetchChannelContext(message.channel, message.id, sandboxNameForUser(message.author.id))
+    ? await fetchChannelContext(message.channel, message, sandboxNameForUser(message.author.id), message.author.id)
     : await fetchThreadContext(message.channel, message, { userId: message.author.id });
 
   await enqueueChat(message, text, contextMessages, repliedTo ? { repliedTo } : {});
@@ -2879,7 +2958,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const useChannelContext =
       targetMessage.guild && store.getGuildSettings(targetMessage.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(targetMessage.channel, targetMessage.id, sandboxNameForUser(user.id))
+      ? await fetchChannelContext(targetMessage.channel, targetMessage, sandboxNameForUser(user.id), user.id)
       : await fetchThreadContext(targetMessage.channel, targetMessage, { userId: user.id });
 
     console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
@@ -3114,6 +3193,81 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === "pair") {
+    const code = interaction.options.getString("code", true);
+    const { completePairing, formatPairingCompleteMessage } = await import("./spectrum/pairing.js");
+    const result = completePairing(code, interaction.user.id);
+    if (!result.ok) {
+      await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const hasSandbox = !!apiUrlFor(interaction.user.id);
+    const next = hasSandbox
+      ? "Text Punch again from that number and you'll land in your sandbox."
+      : "You still need a sandbox — ask an admin for `/sandbox create <name> " +
+        interaction.user.id +
+        "` then text Punch again.";
+    const discordName =
+      interaction.member?.displayName ||
+      interaction.user.globalName ||
+      interaction.user.username;
+    await interaction.reply({
+      content:
+        `Paired **${result.address}** to your Discord account.\n${next}`,
+      flags: MessageFlags.Ephemeral,
+    });
+    if (spectrumHandle?.app) {
+      const { sendSpectrumText } = await import("./spectrum/outbound.js");
+      void sendSpectrumText(
+        spectrumHandle.app,
+        result.address,
+        formatPairingCompleteMessage(discordName),
+      )
+        .then((notify) => {
+          if (notify.ok) return;
+          console.error(`[spectrum] pairing notify failed: ${notify.error}`);
+          return interaction
+            .followUp({
+              content:
+                `⚠️ Pairing succeeded, but SMS confirmation failed (${notify.error}). ` +
+                `You can still text Punch from **${result.address}**.`,
+              flags: MessageFlags.Ephemeral,
+            })
+            .catch((err) => {
+              console.error(`[spectrum] pairing notify follow-up failed: ${err.message}`);
+            });
+        })
+        .catch((err) => {
+          console.error(`[spectrum] pairing notify failed: ${err.message}`);
+          interaction
+            .followUp({
+              content:
+                `⚠️ Pairing succeeded, but SMS confirmation failed. ` +
+                `You can still text Punch from **${result.address}**.`,
+              flags: MessageFlags.Ephemeral,
+            })
+            .catch(() => {});
+        });
+    }
+    return;
+  }
+
+  if (interaction.commandName === "unpair") {
+    const phone = interaction.options.getString("phone");
+    const { unpairUser } = await import("./spectrum/pairing.js");
+    const result = unpairUser(interaction.user.id, phone);
+    if (!result.ok) {
+      await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const list = result.addresses.map((a) => `\`${a}\``).join(", ");
+    await interaction.reply({
+      content: `Unpaired ${list} from your Discord account. Text Punch again to get a new pairing code.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   if (interaction.commandName === "env") {
     const sub = interaction.options.getSubcommand();
@@ -5161,5 +5315,18 @@ const botHttpServer = createServer(async (req, res) => {
 botHttpServer.listen(BOT_HTTP_PORT, "0.0.0.0", () => {
   console.log(`Bot HTTP API listening on port ${BOT_HTTP_PORT}`);
 });
+
+async function shutdownSpectrum(signal) {
+  if (spectrumShuttingDown || !spectrumHandle) return;
+  spectrumShuttingDown = true;
+  const handle = spectrumHandle;
+  spectrumHandle = null;
+  try {
+    await handle.stop();
+    console.log(`[spectrum] stopped on ${signal}`);
+  } catch (err) {
+    console.error("[spectrum] stop failed:", err && err.message ? err.message : String(err));
+  }
+}
 
 client.login(TOKEN);
