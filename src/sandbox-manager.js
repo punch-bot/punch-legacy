@@ -246,7 +246,14 @@ async function removeContainer(name) {
         encoding: "utf8",
       }).trim();
       if (out === "true" || out === "false") targets.push(candidate);
-    } catch {}
+    } catch (err) {
+      const message = err.stderr?.trim() || err.message || "";
+      // "No such object/container" means this candidate simply doesn't exist —
+      // keep probing other candidates. Anything else (daemon down, permissions,
+      // malformed name) is a real failure and must surface, not report success.
+      if (/No such (object|container)/i.test(message)) continue;
+      throw new Error(`Failed to inspect sandbox container ${candidate}: ${message}`);
+    }
   }
   if (targets.length === 0) return { stdout: "", stderr: "" };
   try {

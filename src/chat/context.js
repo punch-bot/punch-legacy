@@ -139,7 +139,7 @@ export async function fetchThreadContext(channel, message, opts = {}) {
         linkedChannelId && linkedChannelId !== channel.id
           ? await registry.client.channels.fetch(linkedChannelId).catch(() => null)
           : channel;
-      if (!linkChannel) return result.slice(-THREAD_WINDOW);
+      if (!linkChannel?.isTextBased?.()) return result.slice(-THREAD_WINDOW);
       const linked = await linkChannel.messages.fetch(linkedMessageId).catch(() => null);
       if (linked) {
         const linkedRoot = await resolveRoot(linkChannel, linked.id);
