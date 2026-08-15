@@ -5,6 +5,18 @@ import * as settings from "../settings.js";
 
 export function buildSlashCommands() {
   return [{
+    name: "pair",
+    description: "Link your iMessage number to Punch using a pairing code",
+    options: [
+      { type: 3, name: "code", description: "9-digit code from Punch iMessage", required: true },
+    ],
+  }, {
+    name: "unpair",
+    description: "Unlink a paired phone number from your Discord account",
+    options: [
+      { type: 3, name: "phone", description: "Phone number or email to unpair (omit to unpair all yours)", required: false },
+    ],
+  }, {
     name: "env",
     description: "Manage sandbox environment variables (hidden from others)",
     options: [

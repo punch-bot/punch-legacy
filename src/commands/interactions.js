@@ -279,6 +279,81 @@ export function registerInteractions(client) {
 
     if (!interaction.isChatInputCommand()) return;
 
+    if (interaction.commandName === "pair") {
+      const code = interaction.options.getString("code", true);
+      const { completePairing, formatPairingCompleteMessage } = await import("../spectrum/pairing.js");
+      const result = completePairing(code, interaction.user.id);
+      if (!result.ok) {
+        await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const hasSandbox = !!apiUrlFor(interaction.user.id);
+      const next = hasSandbox
+        ? "Text Punch again from that number and you'll land in your sandbox."
+        : "You still need a sandbox — ask an admin for `/sandbox create <name> " +
+          interaction.user.id +
+          "` then text Punch again.";
+      const discordName =
+        interaction.member?.displayName ||
+        interaction.user.globalName ||
+        interaction.user.username;
+      await interaction.reply({
+        content:
+          `Paired **${result.address}** to your Discord account.\n${next}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      if (registry.spectrumHandle?.app) {
+        const { sendSpectrumText } = await import("../spectrum/outbound.js");
+        void sendSpectrumText(
+          registry.spectrumHandle.app,
+          result.address,
+          formatPairingCompleteMessage(discordName),
+        )
+          .then((notify) => {
+            if (notify.ok) return;
+            console.error(`[spectrum] pairing notify failed: ${notify.error}`);
+            return interaction
+              .followUp({
+                content:
+                  `⚠️ Pairing succeeded, but SMS confirmation failed (${notify.error}). ` +
+                  `You can still text Punch from **${result.address}**.`,
+                flags: MessageFlags.Ephemeral,
+              })
+              .catch((err) => {
+                console.error(`[spectrum] pairing notify follow-up failed: ${err.message}`);
+              });
+          })
+          .catch((err) => {
+            console.error(`[spectrum] pairing notify failed: ${err.message}`);
+            interaction
+              .followUp({
+                content:
+                  `⚠️ Pairing succeeded, but SMS confirmation failed. ` +
+                  `You can still text Punch from **${result.address}**.`,
+                flags: MessageFlags.Ephemeral,
+              })
+              .catch(() => {});
+          });
+      }
+      return;
+    }
+
+    if (interaction.commandName === "unpair") {
+      const phone = interaction.options.getString("phone");
+      const { unpairUser } = await import("../spectrum/pairing.js");
+      const result = unpairUser(interaction.user.id, phone);
+      if (!result.ok) {
+        await interaction.reply({ content: `⚠️ ${result.error}`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const list = result.addresses.map((a) => `\`${a}\``).join(", ");
+      await interaction.reply({
+        content: `Unpaired ${list} from your Discord account. Text Punch again to get a new pairing code.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     if (interaction.commandName === "sandbox") {
       const sub = interaction.options.getSubcommand();
 

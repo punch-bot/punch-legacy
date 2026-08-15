@@ -11,4 +11,7 @@ export const registry = {
   userRunChains: new Map(),
   userQueueDraining: new Set(),
   questionState: new Map(),
+  spectrumHandle: null,
+  spectrumShuttingDown: false,
+  spectrumSignalsBound: false,
 };

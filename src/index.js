@@ -33,6 +33,26 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`punch online as ${c.user.tag}`);
   reloadSandboxMap();
 
+  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
+  try {
+    const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
+    registry.spectrumHandle = await startSpectrumAlongsideBot();
+    if (registry.spectrumHandle && !registry.spectrumSignalsBound) {
+      registry.spectrumSignalsBound = true;
+      for (const signal of ["SIGINT", "SIGTERM"]) {
+        process.on(signal, () => {
+          // Discord owns process lifetime; only sync-stop Spectrum here.
+          void shutdownSpectrum(signal);
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "[spectrum] failed to boot alongside Discord:",
+      err && err.message ? err.message : String(err),
+    );
+  }
+
   // Boot all dynamic sandboxes on startup
   for (const u of sandbox.loadUsers()) {
     const up = await sandbox.composeUp(u.name);
@@ -61,5 +81,18 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 startBotHttpServer();
+
+async function shutdownSpectrum(signal) {
+  if (registry.spectrumShuttingDown || !registry.spectrumHandle) return;
+  registry.spectrumShuttingDown = true;
+  const handle = registry.spectrumHandle;
+  registry.spectrumHandle = null;
+  try {
+    await handle.stop();
+    console.log(`[spectrum] stopped on ${signal}`);
+  } catch (err) {
+    console.error("[spectrum] stop failed:", err && err.message ? err.message : String(err));
+  }
+}
 
 client.login(TOKEN);
