@@ -191,11 +191,40 @@ function reactionDedupKey(userId, messageId) {
   return false;
 }
 
-async function fetchChannelContext(channel, beforeId, currentSandboxName = null) {
+// Discord message IDs the summoning user explicitly referenced: the message
+// they replied to plus any discord.com message links pasted into the summon.
+// These are the only references that can pull another user's messages into
+// the summoning user's context.
+function referencedMessageIds(message) {
+  const ids = new Set();
+  if (!message) return ids;
+  if (message.reference?.messageId) ids.add(message.reference.messageId);
+  if (message.content) {
+    for (const m of message.content.matchAll(/discord\.com\/channels\/\d+\/\d+\/(\d+)/g)) {
+      ids.add(m[1]);
+    }
+  }
+  return ids;
+}
+
+// Scope ambient channel context to the summoning user: keep only their own
+// messages plus any message they explicitly referenced (a reply or a pasted
+// discord.com link). Other people's messages and other punches' output never
+// enter a user's prompt through the ambient channel window (that was PNCH-18).
+function visibleToSummoner(m, summonerUserId, referenced) {
+  if (m.author.bot) {
+    return referenced.has(m.id);
+  }
+  return String(m.author.id) === String(summonerUserId) || referenced.has(m.id);
+}
+
+async function fetchChannelContext(channel, message, currentSandboxName = null, summonerUserId = null) {
   if (!channel) return [];
   try {
-    const fetched = await channel.messages.fetch({ limit: 15, before: beforeId });
+    const fetched = await channel.messages.fetch({ limit: 15, before: message?.id });
+    const referenced = referencedMessageIds(message);
     return fetched
+      .filter((m) => visibleToSummoner(m, summonerUserId, referenced))
       .map((m) => mapContextMsg(m, currentSandboxName))
       .filter((m) => m && m.content.length > 0)
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
@@ -255,16 +284,18 @@ function mapContextMsg(m, currentSandboxName) {
 }
 
 // Thread-scoped context: ingest only the reply subtree rooted at the summoning
-// message's root. Humans are always visible; other punches' output is included
-// (attributed as `[punch:NAME]`) so the summoning punch can see what its
-// neighbours are doing, while its OWN prior output is skipped to avoid loops.
+// message's root. The subtree is the summoning user's own reply chain, so it
+// may include the neighbours it explicitly engaged with (other humans and other
+// punches' output, attributed as `[punch:NAME]`), while its OWN prior output is
+// skipped to avoid loops. The ambient residue fallback below is scoped to the
+// summoning user only (own messages + explicit references).
 async function fetchThreadContext(channel, message, opts = {}) {
   if (!channel) return [];
   const currentSandboxName = sandboxNameForUser(opts.userId) || null;
   try {
     const root = await resolveRoot(channel, message.id);
     if (!root) {
-      return fetchChannelContext(channel, message.id, currentSandboxName).slice(-RESIDUE_LIMIT);
+      return fetchChannelContext(channel, message, currentSandboxName, opts.userId).slice(-RESIDUE_LIMIT);
     }
 
     const fetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
@@ -279,9 +310,11 @@ async function fetchThreadContext(channel, message, opts = {}) {
     let result = kept;
 
     // Non-reply ping (root == the summon itself): no thread has formed yet, so
-    // add a small ambient residue of recent human messages for context.
+    // add a small residue of recent messages for context. Like channel mode,
+    // the residue is scoped to the summoning user (own messages + explicit
+    // references) so other users' jobs never leak in.
     if (root.id === message.id && result.length <= 1) {
-      const residue = fetchChannelContext(channel, message.id, currentSandboxName).slice(-RESIDUE_LIMIT);
+      const residue = fetchChannelContext(channel, message, currentSandboxName, opts.userId).slice(-RESIDUE_LIMIT);
       result = result.concat(residue);
     }
 
@@ -2816,7 +2849,7 @@ client.on(Events.MessageCreate, async (message) => {
   const useChannelContext =
     message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
   const contextMessages = useChannelContext
-    ? await fetchChannelContext(message.channel, message.id, sandboxNameForUser(message.author.id))
+    ? await fetchChannelContext(message.channel, message, sandboxNameForUser(message.author.id), message.author.id)
     : await fetchThreadContext(message.channel, message, { userId: message.author.id });
 
   await enqueueChat(message, text, contextMessages, repliedTo ? { repliedTo } : {});
@@ -2924,7 +2957,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const useChannelContext =
       targetMessage.guild && store.getGuildSettings(targetMessage.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(targetMessage.channel, targetMessage.id, sandboxNameForUser(user.id))
+      ? await fetchChannelContext(targetMessage.channel, targetMessage, sandboxNameForUser(user.id), user.id)
       : await fetchThreadContext(targetMessage.channel, targetMessage, { userId: user.id });
 
     console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
