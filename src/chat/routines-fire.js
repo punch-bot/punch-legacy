@@ -240,7 +240,9 @@ async function fireRoutine(routine) {
 function verifyRoutineUser(bodyUserId, headerUserId) {
   if (!headerUserId) return null;
   if (bodyUserId && headerUserId !== bodyUserId) {
-    throw new Error("userId does not match x-discord-user-id header");
+    const err = new Error("userId does not match x-discord-user-id header");
+    err.status = 403;
+    throw err;
   }
   return headerUserId;
 }

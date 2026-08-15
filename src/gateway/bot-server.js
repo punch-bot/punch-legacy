@@ -228,7 +228,7 @@ const botHttpServer = createServer(async (req, res) => {
       res.writeHead(404);
       return void res.end("Not Found");
     } catch (err) {
-      res.writeHead(500, { "content-type": "application/json" });
+      res.writeHead(err.status || 500, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: err.message }));
     }
   }
