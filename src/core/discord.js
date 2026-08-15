@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { randomUUID } from "node:crypto";
 import * as store from "../memory.js";
-import { DOCTOR_REPAIR_TTL_MS, LIFECYCLE_PROGRESS_EMOJI, REACTION_DEDUP_MS } from "./config.js";
+import { DOCTOR_REPAIR_TTL_MS, REACTION_DEDUP_MS } from "./config.js";
 import { registry } from "./registry.js";
 
 export function createClient() {
@@ -58,21 +58,6 @@ export function safeReact(message, emoji) {
   return message.react(emoji).catch((err) => {
     console.warn(`[react] failed to react ${emoji} on ${message.id}:`, err.message);
   });
-}
-
-export async function safeUnreact(message, emoji) {
-  if (!message?.reactions?.cache || !registry.client?.user) return;
-  try {
-    const reaction = message.reactions.cache.get(emoji);
-    if (reaction) await reaction.users.remove(registry.client.user.id);
-  } catch (err) {
-    console.warn(`[react] failed to unreact ${emoji} on ${message.id}:`, err.message);
-  }
-}
-
-export async function finishLifecycleReact(message, emoji) {
-  await safeUnreact(message, LIFECYCLE_PROGRESS_EMOJI);
-  await safeReact(message, emoji);
 }
 
 const REACT_PAIR_RE = /<react\s+emoji="([^"]+)"\s*>[\s\S]*?<\/react>/gi;

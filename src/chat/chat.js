@@ -34,15 +34,13 @@ import { extractCompressTag } from "../compress-tag.mjs";
 import { ensureUserSandbox } from "../core/supervisor.js";
 import {
   contextUsageNote,
-  safeReact,
   applyReactTags,
   extractReactTags,
-  finishLifecycleReact,
   reply,
   chunk,
 } from "../core/discord.js";
 import { registry } from "../core/registry.js";
-import { LIFECYCLE_PROGRESS_EMOJI, MAX_ATTACHMENT_BYTES } from "../core/config.js";
+import { MAX_ATTACHMENT_BYTES } from "../core/config.js";
 import {
   createProgressState,
   createProgressRenderer,
@@ -181,7 +179,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const speaker = `${who} (@${speakerName}, id:${uid})`;
   const isDirectMessage = !message.guildId;
 
-  const { useLifecycle, useThinking } = progressSettingsFor(message);
+  const { useThinking } = progressSettingsFor(message);
 
   const projectMemory = await fetchProjectMemory(uid);
 
@@ -231,9 +229,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     thinking = null;
   }
 
-  if (useLifecycle) {
-    await safeReact(message, LIFECYCLE_PROGRESS_EMOJI);
-  }
   message.channel.sendTyping().catch(() => {});
   const typing = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
 
@@ -382,11 +377,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       await finalizeProgress(res.activity, activityStatus);
     }
 
-    if (useLifecycle) {
-      const endEmoji = activityStatus === "completed" ? "✅" : activityStatus === "aborted" ? "🛑" : "⚠️";
-      await finishLifecycleReact(message, endEmoji);
-    }
-
     state.recordActivity({
       userId: uid, channelId: cid, type: "reactive",
       prompt: text.slice(0, 500),
@@ -415,10 +405,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
     const timedOut = /timed out|timeout|stalled|ceiling|silent for|turn hung/i.test(err?.message || "");
     await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
-    if (useLifecycle) {
-      const endEmoji = aborted ? "🛑" : "⚠️";
-      await finishLifecycleReact(message, endEmoji);
-    }
     if (aborted) {
       if (useThinking) {
         await settle(message, "❌ Request cancelled.").catch(() => {});

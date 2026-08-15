@@ -6,7 +6,6 @@ import { THREAD_WINDOW, RESIDUE_LIMIT } from "../core/config.js";
 import { PREFIX } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { setSecret, getSecrets } from "../agent.js";
-import * as store from "../memory.js";
 
 // messages: Array<{ id: string, referenceMessageId: string | null }>
 // rootId: string
@@ -159,21 +158,11 @@ export async function fetchThreadContext(channel, message, opts = {}) {
 }
 
 export function progressSettingsFor(message) {
-  const isDM = !message.guild;
-  if (isDM) {
-    return { useLifecycle: false, useThinking: true };
-  }
-  const gs = store.getGuildSettings(message.guild.id);
-  if (!gs.reactionProgressEnabled) {
-    return { useLifecycle: false, useThinking: true };
-  }
-  if (gs.reactionProgressMode === "reactions") {
-    return { useLifecycle: true, useThinking: false };
-  }
-  if (gs.reactionProgressMode === "text") {
-    return { useLifecycle: false, useThinking: true };
-  }
-  return { useLifecycle: true, useThinking: true };
+  // Lifecycle reactions (👀 → ✅/🛑/⚠️) were removed — the bot only reacts via
+  // the model's <react> tags now. Progress is always the live status message,
+  // so `reactionProgressEnabled` / `reactionProgressMode` are kept as inert
+  // config for compatibility.
+  return { useThinking: true };
 }
 
 export const settingsDeps = () => ({

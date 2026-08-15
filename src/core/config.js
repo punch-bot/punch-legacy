@@ -2,7 +2,6 @@ export const TOKEN = process.env.DISCORD_TOKEN;
 export const PREFIX = process.env.PREFIX || "!";
 export const DOCTOR_REPAIR_TTL_MS = 10 * 60_000;
 export const REACTION_DEDUP_MS = 5000;
-export const LIFECYCLE_PROGRESS_EMOJI = "👀";
 export const THREAD_WINDOW = 100;
 export const RESIDUE_LIMIT = 10;
 export const MAX_UPLOAD = Number(process.env.DISCORD_MAX_UPLOAD) || 8 * 1024 * 1024;
