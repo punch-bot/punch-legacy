@@ -4,3 +4,5 @@ data/
 *.log
 secrets/
 backups/
+.cursor/
+.opencode/

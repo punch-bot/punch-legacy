@@ -16,6 +16,15 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import {
+  activityFromProgress,
+  closeProgress,
+  createProgressState,
+  isReportProgressTool,
+  progressSnapshot,
+  reduceProgress,
+  safeToolSsePart,
+} from "/usr/local/lib/pi-progress.mjs";
 
 const HOST = process.env.PI_GATEWAY_HOST || "0.0.0.0";
 const PORT = Number(process.env.PI_GATEWAY_PORT || 4096);
@@ -35,6 +44,15 @@ let MODEL =
   "anthropic/claude-sonnet-4-5";
 const MODEL_FALLBACK = "anthropic/claude-sonnet-4-5";
 const MAX_TOOL_STUBS = 40;
+const ABORT_GRACE_MS = Number(process.env.PI_GATEWAY_ABORT_GRACE_MS) || 3000;
+const TURN_MAX_MS =
+  (Number(process.env.PI_GATEWAY_TURN_MAX_MS) ||
+    Number(process.env.OPENCODE_HARD_TIMEOUT) ||
+    300) * 1000;
+const TURN_IDLE_MS =
+  (Number(process.env.PI_GATEWAY_TURN_IDLE_MS) ||
+    Number(process.env.OPENCODE_IDLE_TIMEOUT) ||
+    120) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
 
@@ -119,6 +137,7 @@ let reqSeq = 0;
 const pending = new Map();
 const sseClients = new Set();
 const eventWaiters = new Set();
+const reportProgressCalls = new Set();
 // Pi RPC has one active agent. Hold session switching and complete prompt lifecycles
 // in a FIFO so a second Discord turn cannot collide with an in-flight Pi turn.
 let turnChain = Promise.resolve();
@@ -131,7 +150,48 @@ function enqueueTurn(work) {
 }
 /** @type {Map<string, { id: string, sessionFile: string|null, systemHash: string|null, messages: any[] }>} */
 const sessions = new Map();
+const turnProgress = new Map();
 let activeLogicalId = null;
+
+function progressEvent(sessionID, properties) {
+  return {
+    type: "session.progress",
+    properties: { sessionID, ...properties },
+  };
+}
+
+function beginTurnProgress(sessionID) {
+  const now = Date.now();
+  const state = createProgressState(now);
+  reportProgressCalls.clear();
+  turnProgress.set(sessionID, state);
+  broadcastSse(progressEvent(sessionID, progressSnapshot(state, now)));
+}
+
+function trackTurnProgress(sessionID, event) {
+  const state = turnProgress.get(sessionID);
+  if (!state) return;
+  const result = reduceProgress(state, event, Date.now());
+  turnProgress.set(sessionID, result.state);
+  for (const properties of result.progress) {
+    broadcastSse(progressEvent(sessionID, properties));
+  }
+}
+
+function finishTurnProgress(sessionID, status) {
+  const state = turnProgress.get(sessionID);
+  if (!state) return;
+  const result = closeProgress(state, status, Date.now());
+  turnProgress.set(sessionID, result.state);
+  for (const properties of result.progress) {
+    broadcastSse(progressEvent(sessionID, properties));
+  }
+}
+
+function turnActivity(sessionID) {
+  const state = turnProgress.get(sessionID);
+  return state ? activityFromProgress(state, Date.now()) : null;
+}
 
 function loadSessionMap() {
   try {
@@ -178,6 +238,40 @@ function rememberSession(logicalId, sessionFile) {
 
 loadSessionMap();
 
+function clearPiWaiters(err) {
+  for (const [, p] of pending) p.reject(err);
+  pending.clear();
+  eventWaiters.clear();
+}
+
+function forceKillPi(reason = "forced") {
+  log("force-kill pi:", reason);
+  clearPiWaiters(new Error("pi force-killed"));
+  const proc = child;
+  child = null;
+  ready = false;
+  stdoutBuf = "";
+  if (proc) {
+    try {
+      proc.kill("SIGTERM");
+    } catch {}
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+    }, 2000).unref();
+  } else {
+    startPi();
+  }
+}
+
+async function recoverStuckPi(reason = "stuck") {
+  try {
+    await rpc("abort", {}, ABORT_GRACE_MS);
+  } catch {}
+  forceKillPi(reason);
+}
+
 function startPi() {
   if (child) {
     try {
@@ -187,8 +281,7 @@ function startPi() {
   }
   ready = false;
   stdoutBuf = "";
-  for (const [, p] of pending) p.reject(new Error("pi restarted"));
-  pending.clear();
+  clearPiWaiters(new Error("pi restarted"));
 
   piSpawnedAt = Date.now();
   const { provider, modelId } = parseModel(MODEL);
@@ -222,8 +315,8 @@ function startPi() {
     log(`pi exited code=${code} signal=${signal}`);
     ready = false;
     child = null;
-    for (const [, p] of pending) p.reject(new Error("pi exited"));
-    pending.clear();
+    clearPiWaiters(new Error("pi exited"));
+    if (activeLogicalId) finishTurnProgress(activeLogicalId, "error");
     // Unknown / bad provider exits immediately — fall back so health/session work.
     if (
       code &&
@@ -276,6 +369,7 @@ function dispatchPi(msg) {
       p.resolve(msg);
     }
   } else {
+    if (activeLogicalId) trackTurnProgress(activeLogicalId, msg);
     broadcastSse(piEventToOpenCode(msg));
     if (activeLogicalId && sessions.has(activeLogicalId)) {
       trackMessageCache(activeLogicalId, msg);
@@ -373,7 +467,9 @@ function enabledSkillInstructions() {
       } catch {}
     }
   }
-  return sections.length ? `\n\n--- Enabled instruction skills ---\n${sections.join("\n\n")}\n--- End instruction skills ---` : "";
+  return sections.length
+    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
+    : "";
 }
 
 function buildUserPrompt(session, text, system) {
@@ -409,40 +505,19 @@ function attachmentsFromToolResult(result) {
   return out;
 }
 
-/** Compact tool output for session stubs — omit raw image base64. */
+/** Compact private tool output for the final-response fallback; omit image data. */
 function textOutputFromToolResult(result) {
   if (typeof result === "string") return result;
   if (Array.isArray(result?.content)) {
     const texts = result.content
-      .filter((p) => p && p.type === "text" && p.text)
-      .map((p) => p.text);
-    const nImg = result.content.filter((p) => p && p.type === "image").length;
+      .filter((part) => part?.type === "text" && part.text)
+      .map((part) => part.text);
+    const imageCount = result.content.filter((part) => part?.type === "image").length;
     let text = texts.join("\n");
-    if (nImg) text += (text ? "\n" : "") + `[${nImg} image attachment(s)]`;
+    if (imageCount) text += `${text ? "\n" : ""}[${imageCount} image attachment(s)]`;
     if (text) return text;
   }
-  try {
-    const slim =
-      result && typeof result === "object"
-        ? {
-            ...result,
-            content: Array.isArray(result.content)
-              ? result.content.map((p) =>
-                  p?.type === "image"
-                    ? {
-                        type: "image",
-                        mimeType: p.mimeType || p.mime,
-                        data: `[base64 ${String(p.data || "").length} chars]`,
-                      }
-                    : p,
-                )
-              : result.content,
-          }
-        : result;
-    return JSON.stringify(slim ?? "");
-  } catch {
-    return String(result ?? "");
-  }
+  return JSON.stringify(result ?? "");
 }
 
 function assistantFromPiMessages(messages) {
@@ -502,21 +577,15 @@ function trackMessageCache(logicalId, ev) {
   const s = sessions.get(logicalId);
   if (!s) return;
   if (ev?.type === "tool_execution_start") {
+    if (isReportProgressTool(ev)) return;
     const callID = ev.toolCallId || randomUUID();
     s.messages.push({
       info: { role: "assistant" },
-      parts: [
-        {
-          type: "tool",
-          id: callID,
-          callID,
-          tool: ev.toolName || "tool",
-          state: { status: "running", input: ev.args || ev.arguments || {} },
-        },
-      ],
+      parts: [safeToolSsePart(ev, callID, "running")],
     });
     trimToolStubs(s);
   } else if (ev?.type === "tool_execution_end") {
+    if (isReportProgressTool(ev)) return;
     const last = s.messages[s.messages.length - 1];
     const part = last?.parts?.find(
       (p) => p.type === "tool" && p.callID === ev.toolCallId,
@@ -525,6 +594,7 @@ function trackMessageCache(logicalId, ev) {
       const attachments = attachmentsFromToolResult(ev.result);
       part.state = {
         status: ev.isError ? "error" : "done",
+        title: part.state?.title,
         input: part.state?.input,
         output: textOutputFromToolResult(ev.result ?? ev.error ?? ""),
         ...(attachments.length ? { attachments } : {}),
@@ -550,39 +620,31 @@ function piEventToOpenCode(ev) {
 
   if (ev.type === "tool_execution_start") {
     const callID = ev.toolCallId || randomUUID();
+    if (isReportProgressTool(ev)) {
+      reportProgressCalls.add(callID);
+      return null;
+    }
     return {
       type: "message.part.updated",
       properties: {
         sessionID: sid,
-        part: {
-          type: "tool",
-          id: callID,
-          callID,
-          tool: ev.toolName || "tool",
-          state: { status: "running", input: ev.args || ev.arguments || {} },
-        },
+        part: safeToolSsePart(ev, callID, "running"),
       },
     };
   }
 
   if (ev.type === "tool_execution_end") {
     const callID = ev.toolCallId || randomUUID();
-    const attachments = attachmentsFromToolResult(ev.result);
+    if (isReportProgressTool(ev) || reportProgressCalls.delete(callID)) return null;
     return {
       type: "message.part.updated",
       properties: {
         sessionID: sid,
-        part: {
-          type: "tool",
-          id: callID,
+        part: safeToolSsePart(
+          ev,
           callID,
-          tool: ev.toolName || "tool",
-          state: {
-            status: ev.isError ? "error" : "done",
-            output: textOutputFromToolResult(ev.result ?? ""),
-            ...(attachments.length ? { attachments } : {}),
-          },
-        },
+          ev.isError ? "error" : "done",
+        ),
       },
     };
   }
@@ -675,6 +737,29 @@ async function promptAndWait(promptText, signal) {
     throw Object.assign(new Error("aborted"), { name: "AbortError" });
   }
   const turnP = waitTurn(signal);
+  let lastPiEventAt = Date.now();
+  const onPiActivity = (msg) => {
+    if (!msg?.type) return;
+    // RPC responses and agent lifecycle both prove Pi is alive.
+    lastPiEventAt = Date.now();
+  };
+  eventWaiters.add(onPiActivity);
+  let turnTimer;
+  let idleIv;
+  const turnMax = new Promise((_, reject) => {
+    turnTimer = setTimeout(
+      () => reject(new Error(`turn exceeded ${TURN_MAX_MS / 1000}s hard cap`)),
+      TURN_MAX_MS,
+    );
+  });
+  const turnIdle = new Promise((_, reject) => {
+    idleIv = setInterval(() => {
+      if (signal?.aborted) return;
+      if (Date.now() - lastPiEventAt > TURN_IDLE_MS) {
+        reject(new Error(`pi silent for ${Math.round(TURN_IDLE_MS / 1000)}s (turn hung)`));
+      }
+    }, 5_000);
+  });
   try {
     await rpc("prompt", { message: promptText, streamingBehavior: "followUp" }, 60000);
   } catch (e) {
@@ -682,7 +767,19 @@ async function promptAndWait(promptText, signal) {
     await turnP.catch(() => {});
     throw e;
   }
-  await turnP;
+  try {
+    await Promise.race([turnP, turnMax, turnIdle]);
+  } catch (e) {
+    turnP.cancel(e);
+    if (!signal?.aborted) {
+      void recoverStuckPi(e.message || "turn failed");
+    }
+    throw e;
+  } finally {
+    clearTimeout(turnTimer);
+    clearInterval(idleIv);
+    eventWaiters.delete(onPiActivity);
+  }
 }
 
 // --- HTTP ------------------------------------------------------------------
@@ -733,28 +830,30 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/session") {
       await waitReady();
-      const id = randomUUID();
-      await rpc("new_session");
-      const st = await rpc("get_state");
-      sessions.set(id, {
-        id,
-        sessionFile: st.data?.sessionFile || null,
-        systemHash: null,
-        messages: [],
+      await enqueueTurn(async () => {
+        const id = randomUUID();
+        await rpc("new_session");
+        const st = await rpc("get_state");
+        sessions.set(id, {
+          id,
+          sessionFile: st.data?.sessionFile || null,
+          systemHash: null,
+          messages: [],
+        });
+        if (st.data?.sessionFile) persistSessionMap();
+        activeLogicalId = id;
+        broadcastSse({
+          type: "session.created",
+          properties: { sessionID: id, info: { id } },
+        });
+        json(res, 200, { id, title: "", time: { created: Date.now() } });
       });
-      if (st.data?.sessionFile) persistSessionMap();
-      activeLogicalId = id;
-      broadcastSse({
-        type: "session.created",
-        properties: { sessionID: id, info: { id } },
-      });
-      json(res, 200, { id, title: "", time: { created: Date.now() } });
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/abort") {
-      // Fire-and-forget: don't await Pi RPC response — it may hang if Pi is stuck.
-      rpc("abort", {}, 5000).catch(() => {});
+      void recoverStuckPi("global abort");
+      if (activeLogicalId) finishTurnProgress(activeLogicalId, "aborted");
       json(res, 200, { ok: true });
       return;
     }
@@ -776,65 +875,71 @@ const server = createServer(async (req, res) => {
       const action = sessMatch[2] || "";
 
       if (req.method === "GET" && action === "message") {
-        const s = sessions.get(sid);
-        if (!s) {
-          json(res, 404, { error: "session not found" });
-          return;
-        }
+        let s;
         try {
-          await ensureSession(sid);
-          const gm = await rpc("get_messages");
-          const mapped = (gm.data?.messages || []).map((m) => {
-            const role = m.role || "user";
-            let text = "";
-            if (typeof m.content === "string") text = m.content;
-            else if (Array.isArray(m.content))
-              text = extractTextFromParts(m.content);
-            return {
-              info: { role, id: m.id || randomUUID() },
-              parts: text ? [{ type: "text", text }] : [],
-            };
+          await enqueueTurn(async () => {
+            s = sessions.get(sid);
+            if (!s) {
+              json(res, 404, { error: "session not found" });
+              return;
+            }
+            await ensureSession(sid);
+            const gm = await rpc("get_messages");
+            const mapped = (gm.data?.messages || []).map((m) => {
+              const role = m.role || "user";
+              let text = "";
+              if (typeof m.content === "string") text = m.content;
+              else if (Array.isArray(m.content))
+                text = extractTextFromParts(m.content);
+              return {
+                info: { role, id: m.id || randomUUID() },
+                parts: text ? [{ type: "text", text }] : [],
+              };
+            });
+            // Append cached tool parts from this gateway turn for media scrape
+            const withTools = mapped.concat(
+              s.messages.filter((m) =>
+                (m.parts || []).some((p) => p.type === "tool"),
+              ),
+            );
+            json(res, 200, withTools.length ? withTools : s.messages);
           });
-          // Append cached tool parts from this gateway turn for media scrape
-          const withTools = mapped.concat(
-            s.messages.filter((m) =>
-              (m.parts || []).some((p) => p.type === "tool"),
-            ),
-          );
-          json(res, 200, withTools.length ? withTools : s.messages);
         } catch {
-          json(res, 200, s.messages || []);
+          json(res, 200, s?.messages || []);
         }
         return;
       }
 
       if (req.method === "POST" && action === "abort") {
-        await rpc("abort").catch(() => {});
+        void recoverStuckPi("session abort");
+        finishTurnProgress(sid, "aborted");
         json(res, 200, { ok: true });
         return;
       }
 
       if (req.method === "POST" && action === "summarize") {
-        // Recreate mapping after gateway restart (same as message path)
-        if (!sessions.has(sid)) {
-          sessions.set(sid, {
-            id: sid,
-            sessionFile: null,
-            systemHash: null,
-            messages: [],
-          });
-        }
-        await ensureSession(sid);
         const body = await readBody(req).catch(() => ({}));
-        const providerID = body?.model?.providerID || body?.providerID;
-        const modelID = body?.model?.modelID || body?.modelID;
-        if (providerID && modelID) {
-          await rpc("set_model", {
-            provider: providerID,
-            modelId: modelID,
-          }).catch(() => {});
-        }
-        await rpc("compact", {}, 300000);
+        await enqueueTurn(async () => {
+          // Recreate mapping after gateway restart (same as message path)
+          if (!sessions.has(sid)) {
+            sessions.set(sid, {
+              id: sid,
+              sessionFile: null,
+              systemHash: null,
+              messages: [],
+            });
+          }
+          await ensureSession(sid);
+          const providerID = body?.model?.providerID || body?.providerID;
+          const modelID = body?.model?.modelID || body?.modelID;
+          if (providerID && modelID) {
+            await rpc("set_model", {
+              provider: providerID,
+              modelId: modelID,
+            }).catch(() => {});
+          }
+          await rpc("compact", {}, 300000);
+        });
         json(res, 200, { ok: true });
         return;
       }
@@ -864,34 +969,55 @@ const server = createServer(async (req, res) => {
         try {
           await enqueueTurn(async () => {
             const session = await ensureSession(sid);
-          if (model?.providerID && model?.modelID) {
-            await rpc("set_model", {
-              provider: model.providerID,
-              modelId: model.modelID,
-            }).catch((e) => log("set_model:", e.message));
-          }
+            beginTurnProgress(sid);
+            try {
+              if (model?.providerID && model?.modelID) {
+                await rpc("set_model", {
+                  provider: model.providerID,
+                  modelId: model.modelID,
+                }).catch((e) => log("set_model:", e.message));
+              }
 
-          const promptText = buildUserPrompt(session, userText, system);
-          session.messages.push({
-            info: { role: "user" },
-            parts: [{ type: "text", text: userText }],
-          });
+              const promptText = buildUserPrompt(session, userText, system);
+              // Drop tool stubs from prior turns so collectTurnMedia only
+              // sees attachments generated by *this* turn.
+              session.messages = session.messages.filter(
+                (m) => !(m.parts || []).some((p) => p.type === "tool"),
+              );
+              session.messages.push({
+                info: { role: "user" },
+                parts: [{ type: "text", text: userText }],
+              });
 
-          await promptAndWait(promptText, ac.signal);
+              await promptAndWait(promptText, ac.signal);
 
-          const gm = await rpc("get_messages");
-          const assistant = assistantFromPiMessages(gm.data?.messages || []);
-          session.messages.push(assistant);
-          // Keep recent tool stubs for post-turn media scrape; bound growth
-          trimToolStubs(session);
+              const gm = await rpc("get_messages");
+              const assistant = assistantFromPiMessages(gm.data?.messages || []);
+              finishTurnProgress(sid, assistant.info.error ? "error" : "completed");
+              assistant.info.activity = turnActivity(sid);
+              session.messages.push(assistant);
+              // Keep recent tool stubs for post-turn media scrape; bound growth
+              trimToolStubs(session);
 
-            if (action === "prompt_async") json(res, 200, { ok: true });
-            else json(res, 200, assistant);
+              if (action === "prompt_async") json(res, 200, { ok: true });
+              else json(res, 200, assistant);
+            } catch (e) {
+              finishTurnProgress(
+                sid,
+                e.name === "AbortError" || ac.signal.aborted ? "aborted" : "error",
+              );
+              throw e;
+            } finally {
+              turnProgress.delete(sid);
+            }
           });
         } catch (e) {
           if (e.name === "AbortError" || ac.signal.aborted) {
-            await rpc("abort").catch(() => {});
+            void recoverStuckPi("client disconnect");
             json(res, 499, { error: "aborted" });
+          } else if (/hard cap|force-killed|timed out/i.test(e.message || "")) {
+            void recoverStuckPi(e.message);
+            json(res, 504, { error: e.message });
           } else {
             log("message error:", e.message);
             json(res, 500, { error: e.message });
@@ -912,9 +1038,11 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "DELETE" && !action) {
-        sessions.delete(sid);
-        if (activeLogicalId === sid) activeLogicalId = null;
-        persistSessionMap();
+        await enqueueTurn(async () => {
+          sessions.delete(sid);
+          if (activeLogicalId === sid) activeLogicalId = null;
+          persistSessionMap();
+        });
         json(res, 200, { ok: true });
         return;
       }

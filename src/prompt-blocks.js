@@ -1,0 +1,94 @@
+// Centralized builders for every section of the assembled user-turn prompt.
+// Every delimited block uses a consistent `--- {name} ---` / `--- End {footer} ---` pair.
+
+export function promptBlock(name, body, footer = name) {
+  const text = String(body ?? "").trim();
+  if (!text) return "";
+  return `--- ${name} ---\n${text}\n--- End ${footer} ---`;
+}
+
+// Channel context from recent messages. `contextMessages` is an array of
+// `{ author, content }` objects (never empty when called). The block only ever
+// carries the summoning user's own messages plus anything they explicitly
+// replied to or linked; the scope note keeps the model from acting on jobs that
+// are not its own.
+export function channelContextBlock(contextMessages) {
+  return promptBlock(
+    "Channel context (background only)",
+    "Scope: your own recent messages plus anything you replied to or linked. " +
+      "It is background context — do not act on or continue other users' jobs.\n" +
+      contextMessages.map((ctx) => `[${ctx.author}] ${ctx.content}`).join("\n"),
+    "channel context",
+  );
+}
+
+export function thisTurnInstructions() {
+  return (
+    "--- This turn ---\n" +
+    "The message below triggered this turn. To react on that message, append one or more " +
+    '<react emoji="..."></react> tag(s) to your reply — Punch applies them automatically. ' +
+    "Do not use Discord API, curl, or ask for channel/message IDs."
+  );
+}
+
+export function reactedToBlock(authorName, content) {
+  return promptBlock("Reacted-to message", `[${authorName}]: ${content}`, "reacted-to message");
+}
+
+export function repliedToBlock(authorName, content) {
+  return promptBlock("Replied-to message", `[${authorName}]: ${content}`, "replied-to message");
+}
+
+export function pigeonSupervisorBlock(body) {
+  return promptBlock("PIGEON SUPERVISOR", body);
+}
+
+// Unified memory section: durable project memory (.punch-memory.md) plus
+// auto-retrieved related memory. Returns "" when there is nothing to inject.
+export function memoryBlock({ projectMemory = "", relatedText = "" } = {}) {
+  const parts = [];
+  if (projectMemory) {
+    parts.push(
+      "Project memory (update /work/.punch-memory.md when needed):\n" +
+        projectMemory.trim(),
+    );
+  }
+  if (relatedText) {
+    parts.push(
+      "Related memory (auto-retrieved — may be stale; verify before relying):\n" +
+        relatedText.trim(),
+    );
+  }
+  return promptBlock("Punch memory", parts.join("\n\n"));
+}
+
+export function timestampLine(sentAt) {
+  return `Message sent at ${sentAt}.`;
+}
+
+export function multitaskPrompt(text, contextMessages = [], sentAt) {
+  const body = [sentAt ? timestampLine(sentAt) : "", String(text ?? "").trim()].filter(Boolean).join("\n\n");
+  let prompt = body;
+  if (contextMessages.length > 0) {
+    prompt = `${channelContextBlock(contextMessages)}\n\n${prompt}`;
+  }
+  return (
+    "--- Multitask subtask ---\n" +
+    "Parallel to the main Punch turn. Work independently; return concise results.\n\n" +
+    prompt
+  );
+}
+
+export function userTurnLine(uid, speaker, text, { channelId = null, timeZone = null } = {}) {
+  const meta = [
+    channelId ? `channel:${channelId}` : null,
+    timeZone ? `tz:${timeZone}` : null,
+  ].filter(Boolean);
+  const prefix = meta.length ? `[user:${uid} ${meta.join(" ")}]` : `[user:${uid}]`;
+  return `${prefix} ${speaker}: ${text}`;
+}
+
+export function assemblePrompt(parts, userLine) {
+  const preamble = parts.filter(Boolean).join("\n\n");
+  return preamble ? `${preamble}\n\n${userLine}` : userLine;
+}

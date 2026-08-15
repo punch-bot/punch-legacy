@@ -58,7 +58,7 @@ export function stopWorker(id) {
   return update(id, { status: "stopping", phase: "stopping", detail: "Stopping worker", lastUpdateAt: Date.now() });
 }
 
-export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, notify, notifyProgress }) {
+export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_000, maxTokens = 2_000, channelId = null, messageId = null, source = null, notify, notifyProgress }) {
   const cap = getWorkerCap();
   if (active.size >= cap) throw new Error(`Worker limit reached (${cap})`);
   if (!["research", "coding", "browser"].includes(kind)) throw new Error("kind must be research, coding, or browser");
@@ -70,12 +70,18 @@ export function startWorker({ prompt, kind = "research", model, timeoutMs = 600_
   const logFile = join(workdir, "worker.log");
   const sessionDir = join(workdir, "sessions");
   mkdirSync(sessionDir, { recursive: true });
-  const record = { id, kind, model: safeModel, status: "queued", phase: "queued", detail: "Queued", lastTool: null, lastUpdateAt: Date.now(), createdAt: Date.now(), startedAt: null, finishedAt: null, timeoutMs: Math.max(1_000, Math.min(MAX_TIMEOUT_MS, Number(timeoutMs) || 600_000)), maxTokens: Math.max(128, Math.min(16_000, Number(maxTokens) || 2_000)), logFile, error: null, result: null };
+  // Persist the Discord channel that spawned this worker so multitask results
+  // reply in-channel instead of only DMing (and so we never ReferenceError).
+  const record = { id, kind, model: safeModel, status: "queued", phase: "queued", detail: "Queued", lastTool: null, lastUpdateAt: Date.now(), createdAt: Date.now(), startedAt: null, finishedAt: null, timeoutMs: Math.max(1_000, Math.min(MAX_TIMEOUT_MS, Number(timeoutMs) || 600_000)), maxTokens: Math.max(128, Math.min(16_000, Number(maxTokens) || 2_000)), logFile, channelId: channelId ? String(channelId) : null, messageId: messageId ? String(messageId) : null, source: source ? String(source) : null, error: null, result: null };
   const all = records(); all.push(record); save(all);
   const [provider, modelId] = modelParts(safeModel);
   const toolList = kind === "research" ? "read,grep,find,ls" : kind === "browser" ? "puppeteer_navigate,puppeteer_screenshot,puppeteer_click,puppeteer_fill,puppeteer_select,puppeteer_hover" : "bash,read,write,edit";
-  const policy = kind === "research" ? "Use read-only investigation. Do not modify files or use browser." : kind === "browser" ? "Use browser only for research. Do not modify files." : "Work only within /work. Make focused changes and report them.";
-  const bootstrap = `You are isolated Punch worker (${kind}). ${policy} Return concise findings/results. Do not spawn subagents, install extensions, access secrets, send messages, or bypass tool restrictions.`;
+  const policy = kind === "research"
+    ? "Read-only investigation in /work. No writes, bash, or browser."
+    : kind === "browser"
+      ? "Browser research only. No file writes or bash."
+      : "Focused changes in /work only. Report what you changed.";
+  const bootstrap = `Isolated Punch worker (${kind}). ${policy}\nReturn concise findings or results. No subagents, extensions, secrets, outbound messages, or extra tools.`;
   const args = ["/usr/local/bin/pi-worker-runner.mjs", provider, modelId, sessionDir, toolList, `${bootstrap}\n\nTask:\n${prompt}`];
   const child = spawn("node", args, { cwd: "/work", env: { ...process.env, PUNCH_WORKER_TIMEOUT_MS: String(record.timeoutMs) }, stdio: ["ignore", "pipe", "pipe"] });
   active.set(id, child);

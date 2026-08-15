@@ -68,18 +68,21 @@ export default function (pi: ExtensionAPI) {
             "once, daily, weekly, every 30m, every 2h, or cron expression",
         }),
       ),
+      timezone: Type.Optional(
+        Type.String({
+          description:
+            "IANA timezone for interpreting when (e.g. America/New_York). Prefer the user's /settings timezone.",
+        }),
+      ),
       id: Type.Optional(
         Type.String({ description: "Routine id for remove/pause/resume" }),
       ),
     }),
 
     async execute(_toolCallId, args) {
-      const headers = { "x-discord-user-id": args.userId };
-
       if (args.action === "list") {
         const data = await botFetch(
           `/routines/list?userId=${encodeURIComponent(args.userId)}`,
-          { headers },
         );
         return {
           content: [
@@ -95,7 +98,6 @@ export default function (pi: ExtensionAPI) {
         if (!args.id) throw new Error("id is required for remove");
         const data = await botFetch(`/routines/${encodeURIComponent(args.id)}`, {
           method: "DELETE",
-          headers,
           body: JSON.stringify({ userId: args.userId }),
         });
         return {
@@ -111,7 +113,6 @@ export default function (pi: ExtensionAPI) {
           `/routines/${encodeURIComponent(args.id)}/pause`,
           {
             method: "POST",
-            headers,
             body: JSON.stringify({ userId: args.userId }),
           },
         );
@@ -128,7 +129,6 @@ export default function (pi: ExtensionAPI) {
           `/routines/${encodeURIComponent(args.id)}/resume`,
           {
             method: "POST",
-            headers,
             body: JSON.stringify({ userId: args.userId }),
           },
         );
@@ -150,7 +150,6 @@ export default function (pi: ExtensionAPI) {
 
       const data = await botFetch("/routines/create", {
         method: "POST",
-        headers,
         body: JSON.stringify({
           userId: args.userId,
           channelId: args.channelId || null,
@@ -158,6 +157,7 @@ export default function (pi: ExtensionAPI) {
           payload: args.text,
           when: args.when,
           recurrence: args.recurrence || "once",
+          timezone: args.timezone || null,
         }),
       });
       return {

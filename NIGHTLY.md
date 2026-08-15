@@ -17,6 +17,18 @@ docker compose down
 - **Network:** `punch-nightly_edge`
 - **Bot HTTP:** host **4099**, container 4098
 
+## Spectrum (Photon)
+
+iMessage via `spectrum-ts` runs **in the bot process** when Photon credentials are in `.env` (auto-start). Same Punch sandboxes as Discord.
+
+```sh
+# In .env: SPECTRUM_PROJECT_ID, SPECTRUM_PROJECT_SECRET, SPECTRUM_USER_MAP
+# Then:
+docker compose up --build -d
+# Look for: [spectrum] starting alongside Discord
+```
+
+Force off: `SPECTRUM_ENABLED=0`. Standalone debug: `npm run start:spectrum`. See `docs/spectrum.md`.
 ## Sandboxes
 
 Compose does not start a sandbox. Per Discord user:
@@ -57,6 +69,7 @@ Successful DM turns create bounded daily notes for cross-session recall and extr
 ## Feature differences
 
 - Composio remains absent.
+- Custom MCP servers work via Discord `/mcp` (list/add/remove/auth) and `pi-mcp-adapter` inside the sandbox. OAuth is deferred; API keys use `/mcp auth`.
 - Tailscale is included with persistent per-sandbox state.
 - Nightly uses Pi through internal `pi-gateway`.
 - Browser tools come from built-in Pi extension.

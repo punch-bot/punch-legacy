@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
+import { punchRegistryToAdapterConfig, assertPunchEntry, mcpApiKeyEnvVar, mcpApiKeyEnvVarsToClear, migrateMcpApiKeyEnvVars, redactMcpKeysFromEnvView, sanitizeMcpEntryForDisplay, usesMcpApiKeyAuth, isMcpApiKeyConfigured } from "/usr/local/lib/mcp-config.mjs";
 import { inspectSkill, listProposals, listSkills, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
@@ -339,6 +340,17 @@ const MODELS_FILE = join(
   "models.json",
 );
 const MCP_FILE = "/data/mcp.json";
+const PI_MCP_FILE = "/data/pi/agent/mcp.json";
+
+/** Write adapter-shaped mcp.json for ops/debug; Punch extension reads /data/mcp.json directly. */
+function syncMcpConfig() {
+  mkdirSync("/data/pi/agent", { recursive: true });
+  const customMcp = loadJSON(MCP_FILE);
+  const adapterConfig = punchRegistryToAdapterConfig(customMcp);
+  writeFileSync(PI_MCP_FILE, JSON.stringify(adapterConfig, null, 2));
+  const names = Object.keys(adapterConfig.mcpServers || {});
+  log(`mcp config synced (${names.length} server${names.length === 1 ? "" : "s"}): ${names.join(", ") || "(none)"}`);
+}
 
 /** Seed OpenAI-compatible providers Pi does not ship (e.g. Poolside).
  * OpenCode Zen is NOT here — Pi ships a native `opencode` provider with
@@ -386,6 +398,58 @@ const BUILTIN_CUSTOM_PROVIDERS = {
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: 262144,
         maxTokens: 32768,
+      },
+    ],
+  },
+  nim: {
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    api: "openai-completions",
+    apiKey: "$NVIDIA_API_KEY",
+    models: [
+      {
+        id: "z-ai/glm-5.2",
+        name: "GLM 5.2",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1048576,
+        maxTokens: 131072,
+      },
+      {
+        id: "nvidia/llama-3.1-nemotron-70b-instruct",
+        name: "Nemotron 70B",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+      {
+        id: "meta/llama-3.3-70b-instruct",
+        name: "Llama 3.3 70B",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+      {
+        id: "nvidia/llama-3.1-405b-instruct",
+        name: "Llama 3.1 405B",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
+      },
+      {
+        id: "deepseek/deepseek-r1",
+        name: "DeepSeek R1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 131072,
+        maxTokens: 131072,
       },
     ],
   },
@@ -447,6 +511,7 @@ const PROVIDER_ENV_MAP = {
   // Pi ships a native `opencode-go` provider (https://opencode.ai/zen/go) that
   // shares the OPENCODE_API_KEY credential with OpenCode Zen.
   "opencode-go": "OPENCODE_API_KEY",
+  nim: "NVIDIA_API_KEY",
 };
 
 function loadJSON(file) {
@@ -456,6 +521,27 @@ function loadJSON(file) {
 function saveJSON(file, obj) {
   mkdirSync(join(file, ".."), { recursive: true });
   writeFileSync(file, JSON.stringify(obj, null, 2));
+}
+
+/** Save MCP registry and env together; restore prior file contents on failure. */
+function persistMcpRegistryAndEnv(mcp, env) {
+  const prevMcpRaw = existsSync(MCP_FILE) ? readFileSync(MCP_FILE, "utf8") : null;
+  const prevEnvRaw = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : null;
+  try {
+    saveJSON(MCP_FILE, mcp);
+    saveJSON(ENV_FILE, env);
+  } catch (e) {
+    if (prevMcpRaw != null) writeFileSync(MCP_FILE, prevMcpRaw);
+    if (prevEnvRaw != null) writeFileSync(ENV_FILE, prevEnvRaw);
+    throw e;
+  }
+}
+
+function clearMcpEnvVars(varNames, env) {
+  for (const varName of varNames) {
+    if (env[varName]) delete env[varName];
+    delete process.env[varName];
+  }
 }
 
 /** Pi auth shape: { type: "api_key", key } under provider id. */
@@ -523,15 +609,24 @@ if (SANDBOX_USER_ID) {
   log(`serving user: ${SANDBOX_USER_ID}`);
 }
 
-// Persist MCP registry for future Pi MCP wiring (v1: registry kept, not loaded into Pi).
+// Sync Punch MCP registry → Pi adapter config before the gateway starts.
 (function generateConfig() {
   mkdirSync("/data/pi", { recursive: true });
-  const customMcp = loadJSON(MCP_FILE);
-  writeFileSync(
-    "/data/pi/mcp-registry.json",
-    JSON.stringify({ note: "Punch Pi v1 — MCP deferred", mcp: customMcp }, null, 2),
-  );
-  log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"} (MCP registry saved, not active)`);
+  const mcp = loadJSON(MCP_FILE);
+  const env = loadJSON(ENV_FILE);
+  const migrated = migrateMcpApiKeyEnvVars(mcp, env);
+  if (migrated.changed) {
+    saveJSON(ENV_FILE, migrated.env);
+    for (const [k, v] of Object.entries(migrated.env)) {
+      if (k.startsWith("MCP_") && k.endsWith("_API_KEY")) process.env[k] = v;
+    }
+    for (const k of Object.keys(env)) {
+      if (k.startsWith("MCP_") && k.endsWith("_API_KEY") && !migrated.env[k]) delete process.env[k];
+    }
+    log("migrated legacy MCP API key env vars to collision-free names");
+  }
+  syncMcpConfig();
+  log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"}`);
 })();
 
 start();
@@ -854,7 +949,7 @@ const apiServer = createServer((req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/env") {
-    res.writeHead(200); res.end(JSON.stringify({ env: loadJSON(ENV_FILE) }));
+    res.writeHead(200); res.end(JSON.stringify({ env: redactMcpKeysFromEnvView(loadJSON(ENV_FILE)) }));
     return;
   }
 
@@ -949,6 +1044,153 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
+  // --- Custom provider management ---
+  if (req.method === "GET" && url.pathname === "/providers") {
+    const models = loadJSON(MODELS_FILE);
+    const modelProviders = models.providers || {};
+    const builtinProviders = Object.keys(PROVIDER_ENV_MAP);
+    const allProviders = [...new Set([...builtinProviders, ...Object.keys(modelProviders)])];
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ providers: allProviders, custom: modelProviders }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/provider") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name, endpoint, api } = JSON.parse(body);
+        if (!name) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing name" })); return; }
+        const id = name.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+        if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid provider name" })); return; }
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers) models.providers = {};
+        const prev = models.providers[id] || {};
+        models.providers[id] = {
+          ...prev,
+          baseUrl: endpoint || prev.baseUrl || "",
+          api: api || prev.api || "openai-completions",
+          apiKey: prev.apiKey || `$${id.toUpperCase()}_API_KEY`,
+          models: prev.models || [],
+        };
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true, provider: id, baseUrl: models.providers[id].baseUrl }));
+        log(`provider ${prev.baseUrl ? "updated" : "created"}: ${id}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/provider") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name } = JSON.parse(body);
+        if (!name) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing name" })); return; }
+        const id = name.toLowerCase();
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers?.[id]) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Provider not found" }));
+          return;
+        }
+        delete models.providers[id];
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true }));
+        log(`provider removed: ${id}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/provider/model") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { provider, model, name, context, maxTokens, reasoning } = JSON.parse(body);
+        if (!provider || !model) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "Missing provider or model" }));
+          return;
+        }
+        const pid = provider.toLowerCase();
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers?.[pid]) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Provider not found" }));
+          return;
+        }
+        const modelList = models.providers[pid].models || [];
+        const idx = modelList.findIndex(m => m.id === model);
+        const entry = {
+          id: model,
+          name: name || model.replace(/[-_]/g, " ").replace(/\w/g, c => c.toUpperCase()),
+          reasoning: reasoning === true || reasoning === "true" || reasoning === "yes",
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: context != null ? parseInt(context, 10) : 128000,
+          maxTokens: maxTokens != null ? parseInt(maxTokens, 10) : 4096,
+        };
+        if (idx >= 0) {
+          modelList[idx] = { ...modelList[idx], ...entry };
+        } else {
+          modelList.push(entry);
+        }
+        models.providers[pid].models = modelList;
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true, model }));
+        log(`model ${idx >= 0 ? "updated" : "added"}: ${pid}/${model}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/provider/model") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { provider, model } = JSON.parse(body);
+        if (!provider || !model) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: "Missing provider or model" }));
+          return;
+        }
+        const pid = provider.toLowerCase();
+        const models = loadJSON(MODELS_FILE);
+        if (!models.providers?.[pid]) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Provider not found" }));
+          return;
+        }
+        const modelList = models.providers[pid].models || [];
+        const idx = modelList.findIndex(m => m.id === model);
+        if (idx < 0) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: "Model not found" }));
+          return;
+        }
+        modelList.splice(idx, 1);
+        models.providers[pid].models = modelList;
+        saveJSON(MODELS_FILE, models);
+        forceRestart();
+        res.writeHead(200);
+        res.end(JSON.stringify({ success: true }));
+        log(`model removed: ${pid}/${model}`);
+      } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
+    });
+    return;
+  }
+
   // --- Instruction skills: Markdown only, no gateway reload required. ---
   if (req.method === "GET" && url.pathname === "/skills") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -1033,12 +1275,18 @@ const apiServer = createServer((req, res) => {
     req.on("data", chunk => { body += chunk; if (body.length > 25_000) req.destroy(); });
     req.on("end", () => {
       try {
-        const worker = startWorker({ ...JSON.parse(body || "{}"), notifyProgress: async (progress) => {
+        const payload = JSON.parse(body || "{}");
+        const delivery = {
+          channelId: payload.channelId || null,
+          messageId: payload.messageId || null,
+          source: payload.source || null,
+        };
+        const worker = startWorker({ ...payload, notifyProgress: async (progress) => {
           const authorization = "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-          await fetch("http://bot:4098/workers/progress", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: progress }) });
+          await fetch("http://bot:4098/workers/progress", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...progress, ...delivery } }) });
         }, notify: async (completed) => {
           const authorization = "Basic " + Buffer.from(`opencode:${process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-          await fetch("http://bot:4098/workers/complete", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: completed }) });
+          await fetch("http://bot:4098/workers/complete", { method: "POST", headers: { "content-type": "application/json", authorization }, body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...completed, ...delivery } }) });
         } });
         res.writeHead(202, { "content-type": "application/json" }); res.end(JSON.stringify({ worker }));
       } catch (error) { res.writeHead(400); res.end(JSON.stringify({ error: error.message })); }
@@ -1200,14 +1448,22 @@ const apiServer = createServer((req, res) => {
   }
 
   // --- Custom MCP server management ---
-  // Custom MCP servers are persisted in /data/mcp.json so that generateConfig()
-  // (which runs on every supervisor start and would otherwise wipe them) keeps
-  // them across container restarts. auth (OAuth) tokens themselves are stored by
-  // opencode itself in its mcp-auth.json (on the data volume), so they persist too.
+  // Registry: /data/mcp.json (Punch shape). Synced to /data/pi/agent/mcp.json for
+  // ops; pi-mcp-adapter extension loads the Punch registry into Pi on gateway start.
   if (req.method === "GET" && url.pathname === "/mcp") {
     const mcp = loadJSON(MCP_FILE);
+    const env = loadJSON(ENV_FILE);
+    const view = {};
+    for (const [name, entry] of Object.entries(mcp)) {
+      const sanitized = sanitizeMcpEntryForDisplay(entry);
+      if (usesMcpApiKeyAuth(entry)) {
+        sanitized.apiKeyConfigured = isMcpApiKeyConfigured(env, name, mcp);
+        sanitized.apiKeyEnv = mcpApiKeyEnvVar(name);
+      }
+      view[name] = sanitized;
+    }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ mcp }));
+    res.end(JSON.stringify({ mcp: view }));
     return;
   }
 
@@ -1216,7 +1472,14 @@ const apiServer = createServer((req, res) => {
     req.on("data", c => body += c);
     req.on("end", () => {
       try {
-        const { name, type, url: mcpUrl, command, environment, headers, enabled = true } = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        const { name, type, url: mcpUrl, command, environment, headers, enabled = true, auth, apiKeyEnv, apiKeyHeader } = parsed;
+        if (Object.prototype.hasOwnProperty.call(parsed, "apiKey")
+          && parsed.apiKey != null
+          && typeof parsed.apiKey !== "string") {
+          throw new Error("apiKey must be a string");
+        }
+        const apiKeyValue = typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "";
         if (!name || !type) {
           res.writeHead(400).end(JSON.stringify({ error: "Missing name or type" }));
           return;
@@ -1225,30 +1488,42 @@ const apiServer = createServer((req, res) => {
           res.writeHead(400).end(JSON.stringify({ error: "Invalid name (letters, digits, _ and - only)" }));
           return;
         }
-        const entry = { type, enabled: !!enabled };
+        // Preserve explicitly supplied fields (including falsy) so assertPunchEntry can reject them.
+        const candidate = { type, enabled: !!enabled };
+        if (auth === "api_key" || auth === "apikey" || apiKeyValue) candidate.auth = "api_key";
+        else if (Object.prototype.hasOwnProperty.call(parsed, "auth")) candidate.auth = auth;
+        if (Object.prototype.hasOwnProperty.call(parsed, "apiKeyEnv")) candidate.apiKeyEnv = apiKeyEnv;
+        if (Object.prototype.hasOwnProperty.call(parsed, "apiKeyHeader")) candidate.apiKeyHeader = apiKeyHeader;
         if (type === "remote") {
-          if (!mcpUrl) { res.writeHead(400).end(JSON.stringify({ error: "Missing url for remote MCP" })); return; }
-          entry.url = mcpUrl;
-          if (headers) entry.headers = headers;
+          candidate.url = mcpUrl;
+          if (Object.prototype.hasOwnProperty.call(parsed, "headers")) candidate.headers = headers;
         } else if (type === "local") {
-          if (!Array.isArray(command) || command.length === 0) {
-            res.writeHead(400).end(JSON.stringify({ error: "Missing command array for local MCP" }));
-            return;
-          }
-          entry.command = command;
-          if (environment) entry.environment = environment;
-        } else {
-          res.writeHead(400).end(JSON.stringify({ error: "type must be 'local' or 'remote'" }));
-          return;
+          candidate.command = command;
+          if (Object.prototype.hasOwnProperty.call(parsed, "environment")) candidate.environment = environment;
         }
+        const entry = assertPunchEntry(candidate);
         const mcp = loadJSON(MCP_FILE);
+        const env = loadJSON(ENV_FILE);
         mcp[name] = entry;
-        saveJSON(MCP_FILE, mcp);
+        let envVar = null;
+        let envChanged = false;
+        if (!usesMcpApiKeyAuth(entry)) {
+          clearMcpEnvVars(mcpApiKeyEnvVarsToClear(name, mcp), env);
+          envChanged = true;
+        } else if (apiKeyValue) {
+          envVar = mcpApiKeyEnvVar(name);
+          env[envVar] = apiKeyValue;
+          envChanged = true;
+        }
+        if (envChanged) persistMcpRegistryAndEnv(mcp, env);
+        else saveJSON(MCP_FILE, mcp);
+        if (envVar) process.env[envVar] = apiKeyValue;
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, name }));
-        log(`mcp added: ${name} (${type})`);
+        log(`mcp added: ${name} (${entry.type})`);
       } catch (e) {
-        res.writeHead(400).end(JSON.stringify({ error: "Invalid JSON" }));
+        res.writeHead(400).end(JSON.stringify({ error: e?.message || "Invalid JSON" }));
       }
     });
     return;
@@ -1263,8 +1538,12 @@ const apiServer = createServer((req, res) => {
         if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
         const mcp = loadJSON(MCP_FILE);
         if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        const env = loadJSON(ENV_FILE);
+        const varsToClear = mcpApiKeyEnvVarsToClear(name, mcp);
+        clearMcpEnvVars(varsToClear, env);
         delete mcp[name];
-        saveJSON(MCP_FILE, mcp);
+        persistMcpRegistryAndEnv(mcp, env);
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true }));
       } catch {
@@ -1274,19 +1553,74 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
-  // MCP OAuth is deferred in Pi v1 (no opencode mcp auth). Registry still CRUD-able.
+  // API key auth for MCP (OAuth deferred). Keys live in env.json as MCP_<NAME>_API_KEY.
   if (req.method === "POST" && url.pathname === "/mcp/auth") {
-    res.writeHead(501, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      error: "MCP OAuth not available in Punch Pi v1 — deferred until Pi MCP wiring",
-    }));
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name, key } = JSON.parse(body);
+        if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        if (typeof key !== "string" || !key.trim()) {
+          res.writeHead(400).end(JSON.stringify({ error: "Missing API key" }));
+          return;
+        }
+        const mcp = loadJSON(MCP_FILE);
+        if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        mcp[name] = assertPunchEntry({ ...mcp[name], auth: "api_key" });
+        const envVar = mcpApiKeyEnvVar(name);
+        const env = loadJSON(ENV_FILE);
+        env[envVar] = key.trim();
+        persistMcpRegistryAndEnv(mcp, env);
+        process.env[envVar] = key.trim();
+        syncMcpConfig();
+        forceRestart();
+        res.writeHead(200).end(JSON.stringify({ success: true, apiKeyEnv: envVar }));
+        log(`mcp api key set for: ${name}`);
+      } catch (e) {
+        res.writeHead(400).end(JSON.stringify({ error: e?.message || "Invalid JSON" }));
+      }
+    });
     return;
   }
 
   if (req.method === "POST" && url.pathname === "/mcp/logout") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", () => {
+      try {
+        const { name } = JSON.parse(body);
+        if (!name) { res.writeHead(400).end(JSON.stringify({ error: "Missing name" })); return; }
+        const mcp = loadJSON(MCP_FILE);
+        if (!mcp[name]) { res.writeHead(404).end(JSON.stringify({ error: "MCP not found" })); return; }
+        const env = loadJSON(ENV_FILE);
+        clearMcpEnvVars(mcpApiKeyEnvVarsToClear(name, mcp), env);
+        saveJSON(ENV_FILE, env);
+        syncMcpConfig();
+        forceRestart();
+        res.writeHead(200).end(JSON.stringify({ success: true }));
+        log(`mcp api key removed for: ${name}`);
+      } catch {
+        res.writeHead(400).end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
+
+  // Interactive OAuth for MCP is deferred (no Discord browser OAuth UX yet).
+  // Use /mcp auth for API keys, or remote headers / local environment for custom tokens.
+  if (req.method === "POST" && url.pathname === "/mcp/oauth") {
     res.writeHead(501, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      error: "MCP logout not available in Punch Pi v1",
+      error: "MCP OAuth not available yet — use /mcp auth for API keys, or pass custom headers/environment on add",
+    }));
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/mcp/oauth/logout") {
+    res.writeHead(501, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      error: "MCP OAuth logout not available yet — use /mcp logout for API keys",
     }));
     return;
   }

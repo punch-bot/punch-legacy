@@ -1,4 +1,5 @@
 import * as store from "./memory.js";
+import { normalizeTimeZone } from "./timezone.js";
 
 export function reactionMatches(reaction, configured) {
   if (!configured) return false;
@@ -26,6 +27,8 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
   const us = store.getUserSettings(userId);
   lines.push("**Personal:**");
   lines.push(trigger ? `- Trigger word: \`${trigger}\`` : "- Trigger word: none");
+  lines.push(`- Multitask: ${us.multitaskEnabled ? "on" : "off"}`);
+  lines.push(`- Timezone: \`${us.timeZone}\``);
   lines.push(`- Working pigeons: ${us.workingPigeonsEnabled ? "on" : "off"}`);
   const doneParts = [];
   if (us.pigeonDonePigeon) doneParts.push("pigeon");
@@ -118,11 +121,29 @@ export function setProgressMode(guildId, mode) {
   return `Progress mode set to **${mode}**.`;
 }
 
+export function setMultitaskEnabled(userId, enabled) {
+  store.patchUserSettings(userId, { multitaskEnabled: enabled });
+  return enabled
+    ? "Multitask **enabled** — new messages while I'm busy spawn parallel subtasks instead of queuing."
+    : "Multitask **disabled** — messages queue until the current turn finishes.";
+}
+
 export function setWorkingPigeonsEnabled(userId, enabled) {
   store.patchUserSettings(userId, { workingPigeonsEnabled: enabled });
   return enabled
     ? "Working pigeons **enabled** — agent pigeons will wake your Punch automatically."
     : "Working pigeons **disabled** — agent pigeons will DM you only (no auto-turn).";
+}
+
+export function setUserTimeZone(userId, timeZone) {
+  const normalized = normalizeTimeZone(timeZone);
+  store.patchUserSettings(userId, { timeZone: normalized });
+  return `Timezone set to **${normalized}**.`;
+}
+
+export function clearUserTimeZone(userId) {
+  store.patchUserSettings(userId, { timeZone: "UTC" });
+  return "Timezone reset to **UTC**.";
 }
 
 const PIGEON_DONE_KEYS = {
@@ -344,6 +365,22 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
     );
   }
 
+  if (sub === "multitask") {
+    if (sub2 === "on" || sub2 === "enable") return setMultitaskEnabled(uid, true);
+    if (sub2 === "off" || sub2 === "disable") return setMultitaskEnabled(uid, false);
+    throw new Error(`Usage: \`${prefix}settings multitask on|off|enable|disable\``);
+  }
+
+  if (sub === "timezone") {
+    if (sub2 === "set") {
+      const timeZone = tokens.slice(2).join(" ").trim();
+      if (!timeZone) throw new Error(`Usage: \`${prefix}settings timezone set <IANA timezone>\``);
+      return setUserTimeZone(uid, timeZone);
+    }
+    if (sub2 === "clear" || sub2 === "reset") return clearUserTimeZone(uid);
+    throw new Error(`Usage: \`${prefix}settings timezone set <IANA timezone>\` or clear`);
+  }
+
   if (sub === "secret" || sub === "secrets") {
     if (!isDM) throw new Error("DM me to manage secrets — use `/settings secret` in DMs.");
     if (sub === "secrets" || tokens.length === 1) {
@@ -490,6 +527,25 @@ export async function handleSettingsSlash(interaction, { prefix, botUsername, se
       const count = interaction.options.getInteger("count", true);
       const minutes = interaction.options.getInteger("minutes") ?? 10;
       await interaction.reply({ content: setPigeonRateLimit(uid, count, minutes) });
+    }
+    return;
+  }
+
+  if (sub === "multitask") {
+    if (cmd === "enable") {
+      await interaction.reply({ content: setMultitaskEnabled(uid, true) });
+    } else if (cmd === "disable") {
+      await interaction.reply({ content: setMultitaskEnabled(uid, false) });
+    }
+    return;
+  }
+
+  if (sub === "timezone") {
+    if (cmd === "set") {
+      const timeZone = interaction.options.getString("timezone", true);
+      await interaction.reply({ content: setUserTimeZone(uid, timeZone) });
+    } else {
+      await interaction.reply({ content: clearUserTimeZone(uid) });
     }
     return;
   }
@@ -688,6 +744,29 @@ export function getSlashCommandDefinition() {
               { type: 4, name: "minutes", description: "Window in minutes (default 10)", min_value: 1, max_value: 60 },
             ],
           },
+        ],
+      },
+      {
+        type: 2,
+        name: "multitask",
+        description: "Parallel subtasks while main chat is busy (personal)",
+        options: [
+          { type: 1, name: "enable", description: "Spawn workers instead of queuing when busy" },
+          { type: 1, name: "disable", description: "Queue messages until the current turn finishes" },
+        ],
+      },
+      {
+        type: 2,
+        name: "timezone",
+        description: "Timezone used for message timestamps (personal)",
+        options: [
+          {
+            type: 1,
+            name: "set",
+            description: "Set an IANA timezone",
+            options: [{ type: 3, name: "timezone", description: "For example America/New_York", required: true }],
+          },
+          { type: 1, name: "clear", description: "Reset timezone to UTC" },
         ],
       },
       {

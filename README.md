@@ -10,9 +10,9 @@ An AI agent living in Discord, designed to be a personal assistant
 
 ## What it does
 
-Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, and layered health diagnostics. Discord `/mcp` reports **MCP is not supported yet** for arbitrary user MCP servers.
+Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, layered health diagnostics, Discord voice-memo speech-to-text, and custom MCP servers via Discord `/mcp` (loaded into Pi through `pi-mcp-adapter`).
 
-**Not included:** Composio (`/link`) and arbitrary custom MCP servers. Punch uses Pi, not OpenCode.
+**Not included:** Composio (`/link`). MCP OAuth is deferred — use `/mcp auth` for API keys, or pass custom bearer tokens via `/mcp add` headers or environment. Punch uses Pi, not OpenCode.
 
 ## Automations and skills
 
@@ -29,17 +29,22 @@ Discord ──▶ [ punch-bot ] ──HTTP──▶ [ sandbox-<name> ]
             :4098                          pi-gateway :4096 → pi --mode rpc
             routines, pigeons                 supervisor :4097
             docker.sock → creates sandboxes
+
+Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-gateway
+            (iMessage / terminal via spectrum-ts)
 ```
 
 - **Bot** — thin client; no Pi on the host required for Docker deploy.
 - **Sandbox** — one container per registered user; image installs Pi; built on first `/sandbox create`.
+- **Spectrum** — Photon iMessage (and optional terminal) starts **with the bot** when `SPECTRUM_*` is set in `.env` ([docs/spectrum.md](docs/spectrum.md)).
 
 ## Quick start
 
 1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
-2. `docker compose up --build -d`
-3. Discord: `/sandbox create <name> <your_discord_user_id>`
-4. `/apikey set anthropic <key>` (or another provider; OpenCode Go: `/apikey set opencode-go <key>`) then mention the bot
+2. Optional iMessage/Spectrum: set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` in `.env` — Spectrum starts with the bot; unknown numbers pair via `/pair` (see [docs/spectrum.md](docs/spectrum.md))
+3. `docker compose up --build -d`
+4. Discord: `/sandbox create <name>`
+5. `/apikey set anthropic <key>` (or another provider) then mention the bot (or text Punch after `/pair`)
 
 Host **4098** = bot HTTP API. Dynamic sandboxes publish **noVNC** from port **16080+** when `VNC_PASSWORD` is set.
 
