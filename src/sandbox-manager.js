@@ -5,8 +5,10 @@ import { randomBytes } from "node:crypto";
 
 const execFileAsync = promisify(execFile);
 
-const USERS_FILE = "/data/sandbox_users.json";
-const DOCTOR_TOKENS_FILE = "/data/sandbox_doctor_tokens.json";
+const DATA_DIR = process.env.DATA_DIR || "/data";
+const USERS_FILE = `${DATA_DIR}/sandbox_users.json`;
+const DOCTOR_TOKENS_FILE = `${DATA_DIR}/sandbox_doctor_tokens.json`;
+const BOT_TOKENS_FILE = `${DATA_DIR}/sandbox_bot_tokens.json`;
 const MAIN_COMPOSE = "/punch/docker-compose.yml";
 const STACK = process.env.PUNCH_STACK_NAME || "punch";
 const NETWORK = `${STACK}_edge`;
@@ -55,6 +57,19 @@ function saveDoctorTokens(tokens) {
   writeFileSync(DOCTOR_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
 }
 
+function loadBotTokens() {
+  try {
+    const tokens = JSON.parse(readFileSync(BOT_TOKENS_FILE, "utf8"));
+    return tokens && typeof tokens === "object" && !Array.isArray(tokens) ? tokens : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveBotTokens(tokens) {
+  writeFileSync(BOT_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+}
+
 export function doctorTokenFor(name) {
   validateSandboxName(name);
   const tokens = loadDoctorTokens();
@@ -63,6 +78,28 @@ export function doctorTokenFor(name) {
     saveDoctorTokens(tokens);
   }
   return tokens[name];
+}
+
+/** Per-sandbox bearer token for authenticating to the bot HTTP API (:4098).
+ *  Minted like doctor tokens; gives the sandbox exactly its own identity. */
+export function botTokenFor(name) {
+  validateSandboxName(name);
+  const tokens = loadBotTokens();
+  if (!tokens[name]) {
+    tokens[name] = randomBytes(32).toString("base64url");
+    saveBotTokens(tokens);
+  }
+  return tokens[name];
+}
+
+/** Resolve a bearer token back to its sandbox owner identity, or null. */
+export function resolveBotToken(token) {
+  if (!token) return null;
+  const tokens = loadBotTokens();
+  const name = Object.keys(tokens).find((n) => tokens[n] === token);
+  if (!name) return null;
+  const user = loadUsers().find((u) => u.name === name);
+  return user ? { name, userId: user.userId } : null;
 }
 
 export function addUser(name, userId) {
@@ -88,6 +125,11 @@ export function removeUser(name) {
     delete tokens[name];
     saveDoctorTokens(tokens);
   }
+  const botTokens = loadBotTokens();
+  if (botTokens[name]) {
+    delete botTokens[name];
+    saveBotTokens(botTokens);
+  }
   return { ok: true, removed };
 }
 
@@ -101,6 +143,7 @@ function userEnvArgs(name) {
     "--env", `VNC_PASSWORD=${process.env.VNC_PASSWORD || ""}`,
     "--env", `PI_MODEL=${process.env.PI_MODEL || process.env.OPENCODE_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
+    "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
   ];
 }
 

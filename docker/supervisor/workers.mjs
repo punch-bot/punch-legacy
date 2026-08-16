@@ -2,7 +2,7 @@
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
 function botAuth() {
-  return "Basic " + Buffer.from(`opencode:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+  return "Bearer " + (process.env.PUNCH_BOT_TOKEN || "");
 }
 
 function notifyBot(path, progress) {
@@ -17,7 +17,6 @@ function notifyBot(path, progress) {
       headers: {
         "content-type": "application/json",
         authorization: botAuth(),
-        "x-discord-user-id": process.env.SANDBOX_USER_ID || "",
       },
       body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...payload, ...delivery } }),
     });

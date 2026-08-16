@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
-const BOT_URL = process.env.PUNCH_BOT_URL || "http://bot:4098";
+const BOT_URL = process.env.PUNCH_BOT_URL || "http://localhost:4097/bot";
 // Basic-auth username defaults to legacy wire alias "opencode" — not the agent runtime.
 const AUTH =
   "Basic " +
@@ -16,7 +16,6 @@ async function botFetch(path: string, init: RequestInit = {}) {
     headers: {
       "content-type": "application/json",
       authorization: AUTH,
-      "x-discord-user-id": process.env.SANDBOX_USER_ID || "",
       ...(init.headers || {}),
     },
   });

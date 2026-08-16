@@ -3,7 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
-const BOT_URL = process.env.PUNCH_BOT_URL || "http://bot:4098";
+const BOT_URL = process.env.PUNCH_BOT_URL || "http://localhost:4097/bot";
 const AUTH = "Basic " + Buffer.from(`opencode:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
 
 async function botFetch(path: string, init: RequestInit = {}) {

@@ -122,6 +122,58 @@ function listAllExtensions() {
 }
 
 /**
+ * Proxy in-sandbox /bot/* requests to the bot API (:4098) with the sandbox's
+ * Bearer token. The token lives only in the supervisor process, never in the
+ * agent/gateway process. Returns true when handled.
+ */
+export async function handleBotProxy(req, res, url) {
+  if (!url.pathname.startsWith("/bot")) return false;
+
+  const rest = url.pathname.slice("/bot".length);
+  const targetPath = rest || "/";
+  const target = `http://bot:4098${targetPath}${url.search}`;
+
+  const body = [];
+  let size = 0;
+  let overflow = false;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 5 * 1024 * 1024) {
+      overflow = true;
+      req.destroy();
+      break;
+    }
+    body.push(chunk);
+  }
+
+  try {
+    if (overflow) {
+      res.writeHead(413, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "Request body too large" }));
+      return true;
+    }
+    const bodyBuf = Buffer.concat(body);
+    const response = await fetch(target, {
+      method: req.method,
+      headers: {
+        "content-type": req.headers["content-type"] || "application/json",
+        authorization: "Bearer " + (process.env.PUNCH_BOT_TOKEN || ""),
+      },
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : bodyBuf.length ? bodyBuf : undefined,
+    });
+    const text = await response.text();
+    res.writeHead(response.status, {
+      "content-type": response.headers.get("content-type") || "application/json",
+    });
+    res.end(text);
+  } catch (error) {
+    res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: error.message }));
+  }
+  return true;
+}
+
+/**
  * Handle the general routes. Returns true when a route was matched (response written),
  * false to fall through. Assumes Basic auth already checked by the caller (server.mjs)
  * except the unauthenticated /pigeon relay handled by handlePigeonRelay().
@@ -524,7 +576,7 @@ export function handlePigeonRelay(req, res, url) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true, delivery: agentFlag ? "agent task queued" : "notification delivered", from, recipient: process.env.SANDBOX_NAME || null }));
         // Fire-and-forget notification to the bot
-        const botAuth = "Basic " + Buffer.from(`opencode:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+        const botAuth = "Bearer " + (process.env.PUNCH_BOT_TOKEN || "");
         const notifyBody = { recipientId: process.env.SANDBOX_USER_ID || "", from, text };
         if (agentFlag) {
           notifyBody.agent = true;

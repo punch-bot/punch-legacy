@@ -39,7 +39,7 @@ import { handleProviderRoutes } from "./supervisor/providers.mjs";
 import { handleSkillsRoutes } from "./supervisor/skills.mjs";
 import { handleTailscaleRoutes } from "./supervisor/tailscale.mjs";
 import { handleWorkerRoutes } from "./supervisor/workers.mjs";
-import { handleGeneralRoutes, handlePigeonRelay } from "./supervisor/routes.mjs";
+import { handleBotProxy, handleGeneralRoutes, handlePigeonRelay } from "./supervisor/routes.mjs";
 
 // --- Model selection (saved model wins, else argv[2] or default) ---
 const savedModel = loadModel();
@@ -130,6 +130,7 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
+  if (handleBotProxy(req, res, url)) return;
   if (handleGeneralRoutes(req, res, url)) return;
   if (handleProviderRoutes(req, res, url)) return;
   if (handleSkillsRoutes(req, res, url)) return;

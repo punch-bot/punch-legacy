@@ -75,6 +75,7 @@ export function start() {
   log("starting: pi-gateway (model", state.CURRENT_MODEL + ")");
   const gatewayEnv = { ...process.env };
   delete gatewayEnv.PUNCH_DOCTOR_TOKEN;
+  delete gatewayEnv.PUNCH_BOT_TOKEN;
   const child = spawn("node", ["/usr/local/bin/pi-gateway.mjs"], {
     stdio: "inherit",
     env: {

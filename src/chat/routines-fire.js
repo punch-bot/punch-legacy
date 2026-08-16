@@ -237,14 +237,14 @@ async function fireRoutine(routine) {
   });
 }
 
-function verifyRoutineUser(bodyUserId, headerUserId) {
-  if (!headerUserId) return null;
-  if (bodyUserId && headerUserId !== bodyUserId) {
-    const err = new Error("userId does not match x-discord-user-id header");
+function verifyRoutineUser(bodyUserId, authUserId) {
+  if (!authUserId) return null;
+  if (bodyUserId && authUserId !== bodyUserId) {
+    const err = new Error("userId does not match the authenticated sandbox owner");
     err.status = 403;
     throw err;
   }
-  return headerUserId;
+  return authUserId;
 }
 
 export { fireRoutine, verifyRoutineUser };

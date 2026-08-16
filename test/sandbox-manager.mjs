@@ -1,6 +1,18 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { isValidSandboxName, vncPorts } from "../src/sandbox-manager.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const tmpDir = mkdtempSync(join(tmpdir(), "sandbox-manager-test-"));
+process.env.DATA_DIR = tmpDir;
+
+const { isValidSandboxName, vncPorts, botTokenFor, resolveBotToken, addUser, removeUser } =
+  await import("../src/sandbox-manager.js");
+
+after(() => {
+  rmSync(tmpDir, { recursive: true, force: true });
+});
 
 test("accepts Docker-safe sandbox names", () => {
   assert.equal(isValidSandboxName("ember"), true);
@@ -22,4 +34,29 @@ test("assigns stable VNC ports in configured range", () => {
   assert.deepEqual(first, second);
   assert.equal(first.web - first.vnc, 180);
   assert.ok(first.web >= base && first.web < base + 4000);
+});
+
+test("botTokenFor mints a stable per-sandbox bearer token", () => {
+  const t1 = botTokenFor("ember");
+  const t2 = botTokenFor("ember");
+  assert.ok(typeof t1 === "string" && t1.length >= 40);
+  assert.equal(t1, t2);
+  assert.notEqual(botTokenFor("ember"), botTokenFor("astra"));
+});
+
+test("resolveBotToken maps a token back to its sandbox owner", () => {
+  addUser("ember", "111");
+  const token = botTokenFor("ember");
+  assert.deepEqual(resolveBotToken(token), { name: "ember", userId: "111" });
+  assert.equal(resolveBotToken("bogus"), null);
+  assert.equal(resolveBotToken(""), null);
+  assert.equal(resolveBotToken(null), null);
+});
+
+test("removing a user also invalidates their bot token", () => {
+  addUser("astra", "222");
+  const token = botTokenFor("astra");
+  assert.ok(resolveBotToken(token));
+  removeUser("astra");
+  assert.equal(resolveBotToken(token), null);
 });
