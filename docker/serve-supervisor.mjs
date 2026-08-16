@@ -117,7 +117,7 @@ setupSignalHandlers();
 })();
 
 // --- HTTP API Server ---
-const apiServer = createServer((req, res) => {
+const apiServer = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (handlePigeonRelay(req, res, url)) return;
@@ -130,7 +130,7 @@ const apiServer = createServer((req, res) => {
     return;
   }
 
-  if (handleBotProxy(req, res, url)) return;
+  if (await handleBotProxy(req, res, url)) return;
   if (handleGeneralRoutes(req, res, url)) return;
   if (handleProviderRoutes(req, res, url)) return;
   if (handleSkillsRoutes(req, res, url)) return;
