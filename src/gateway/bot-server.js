@@ -26,6 +26,26 @@ function readBody(req) {
   });
 }
 
+/** Registered Discord owner of the sandbox that made this request, or null when
+ *  the peer can't be resolved to a registered sandbox (callers then fall back
+ *  to header-only checks so behavior degrades gracefully, never stricter). */
+async function peerOwnerId(req) {
+  const peer = await resolvePeerSandbox(req);
+  if (peer?.peer !== "sandbox") return null;
+  return sandbox.loadUsers().find((u) => u.name === peer.name)?.userId || null;
+}
+
+/** Throw a 403 when a claimed Discord user doesn't match the requesting sandbox
+ *  owner. No-op when the peer resolves to nothing or to the bot itself. */
+async function requireUserForPeer(req, claimedUserId) {
+  const ownerId = await peerOwnerId(req);
+  if (ownerId && claimedUserId && ownerId !== claimedUserId) {
+    const err = new Error("userId does not match the requesting sandbox owner");
+    err.status = 403;
+    throw err;
+  }
+}
+
 async function deliverWorkerToChannel(worker, content) {
   if (!worker?.channelId) return false;
   try {
@@ -74,6 +94,17 @@ const botHttpServer = createServer(async (req, res) => {
       res.writeHead(400, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: "Invalid worker phase" }));
     }
+    const headerUserId = req.headers["x-discord-user-id"] || null;
+    if (headerUserId && headerUserId !== userId) {
+      res.writeHead(403, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: "userId does not match x-discord-user-id header" }));
+    }
+    try {
+      await requireUserForPeer(req, userId);
+    } catch (err) {
+      res.writeHead(403, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: err.message }));
+    }
     const now = Date.now();
     const key = `${userId}:${worker.id}`;
     const previous = registry.workerProgressSent.get(key);
@@ -106,6 +137,17 @@ const botHttpServer = createServer(async (req, res) => {
       res.writeHead(400, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: "Missing userId or worker" }));
     }
+    const headerUserId = req.headers["x-discord-user-id"] || null;
+    if (headerUserId && headerUserId !== userId) {
+      res.writeHead(403, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: "userId does not match x-discord-user-id header" }));
+    }
+    try {
+      await requireUserForPeer(req, userId);
+    } catch (err) {
+      res.writeHead(403, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: err.message }));
+    }
     registry.workerProgressSent.delete(`${userId}:${worker.id}`);
     try {
       const isSubtask = worker.source === "multitask" || worker.channelId;
@@ -129,6 +171,7 @@ const botHttpServer = createServer(async (req, res) => {
   if (url.pathname.startsWith("/routines")) {
     try {
       const headerUserId = req.headers["x-discord-user-id"] || null;
+      await requireUserForPeer(req, headerUserId);
 
       if (req.method === "GET" && url.pathname === "/routines/list") {
         const userId = verifyRoutineUser(url.searchParams.get("userId"), headerUserId);
@@ -297,7 +340,7 @@ const botHttpServer = createServer(async (req, res) => {
       res.writeHead(405);
       return void res.end("Method Not Allowed");
     } catch (error) {
-      res.writeHead(400, { "content-type": "application/json" });
+      res.writeHead(error.status || 400, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: error.message }));
     }
   }
@@ -310,6 +353,7 @@ const botHttpServer = createServer(async (req, res) => {
         res.writeHead(400, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ error: "Missing x-discord-user-id header" }));
       }
+      await requireUserForPeer(req, headerUserId);
       if (req.method === "GET" && url.pathname === "/state/activity") {
         const type = url.searchParams.get("type") || undefined;
         const limit = Number(url.searchParams.get("limit")) || 20;
@@ -338,7 +382,7 @@ const botHttpServer = createServer(async (req, res) => {
       res.writeHead(404);
       return void res.end("Not Found");
     } catch (err) {
-      res.writeHead(500, { "content-type": "application/json" });
+      res.writeHead(err.status || 500, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: err.message }));
     }
   }
@@ -375,7 +419,7 @@ const botHttpServer = createServer(async (req, res) => {
     res.writeHead(404);
     return void res.end("Not Found");
   } catch (err) {
-    res.writeHead(500, { "content-type": "application/json" });
+    res.writeHead(err.status || 500, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: err.message }));
   }
 });

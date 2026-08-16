@@ -9,11 +9,11 @@ description: Save durable user facts with <remember> tags and remove obsolete on
 - when you learn a durable fact worth keeping that is not already listed, append one of these tags on its own line at the very end of the reply:
 
 ```text
-<remember scope="user" id="NUMBER">the fact</remember>
+<remember scope="user">the fact</remember>
 <remember scope="channel">the fact</remember>
 ```
 
-- use the id from the trusted speaker tag for user facts. Punch stores and strips these tags, so still write a normal reply.
+- user facts are stored under the speaker automatically; channel facts under the current channel. no `id` attribute is needed on `<remember>`. Punch stores and strips these tags, so still write a normal reply.
 - remember preferences, names, ongoing projects, and standing instructions. skip trivia and one-off requests. never re-remember a fact already listed.
 - when a listed fact becomes wrong or obsolete, remove it by its cited id:
 

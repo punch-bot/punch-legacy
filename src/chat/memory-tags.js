@@ -15,14 +15,21 @@ export function persistMemoryTags(textIn, speakerId, channelId) {
     const scope = (m[1] || "user").toLowerCase();
     const fact = m[3].trim();
     if (!fact) continue;
-    if (scope === "channel") store.remember("channel", channelId, fact);
-    else store.remember("user", speakerId, fact);
-    saved += 1;
+    if (scope === "channel") {
+      // No channel context (e.g. heartbeat DM) — channel-scoped facts have no home.
+      if (channelId) {
+        store.remember("channel", channelId, fact);
+        saved += 1;
+      }
+    } else {
+      store.remember("user", speakerId, fact);
+      saved += 1;
+    }
   }
 
   for (const m of text.matchAll(FORGET_RE)) {
     const id = m[1].trim();
-    if (store.forget("user", speakerId, id) || store.forget("channel", channelId, id)) {
+    if (store.forget("user", speakerId, id) || (channelId && store.forget("channel", channelId, id))) {
       dropped += 1;
     }
   }

@@ -14,7 +14,11 @@ function notifyBot(path, progress) {
   return async (payload) => {
     await fetch(`http://bot:4098/workers/${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: botAuth() },
+      headers: {
+        "content-type": "application/json",
+        authorization: botAuth(),
+        "x-discord-user-id": process.env.SANDBOX_USER_ID || "",
+      },
       body: JSON.stringify({ userId: process.env.SANDBOX_USER_ID || "", worker: { ...payload, ...delivery } }),
     });
   };

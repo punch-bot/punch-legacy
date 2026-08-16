@@ -39,7 +39,8 @@ export default tool({
     id: tool.schema.string().optional().describe("Routine id for remove/pause/resume"),
   },
   async execute(args) {
-    const headers = { "x-discord-user-id": args.userId };
+    // The bot ties identity to the sandbox owner, not to agent-supplied args.
+    const headers = { "x-discord-user-id": process.env.SANDBOX_USER_ID || "" };
 
     if (args.action === "list") {
       const data = await botFetch(`/routines/list?userId=${encodeURIComponent(args.userId)}`, { headers });
