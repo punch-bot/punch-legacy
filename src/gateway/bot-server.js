@@ -7,13 +7,13 @@ import * as collabs from "../collabs.js";
 import * as state from "../state.js";
 import * as statistics from "../statistics.js";
 import * as sandbox from "../sandbox-manager.js";
-import { BOT_HTTP_PORT, botHttpAuth } from "../core/config.js";
+import { BOT_HTTP_PORT } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { verifyRoutineUser } from "../chat/routines-fire.js";
 import { userTimeZone } from "../commands/prefix.js";
-import { resolvePeerSandbox, isRegisteredSandboxName } from "../pigeon-peer.js";
 import { sandboxNameForUser } from "../agent.js";
 import { notifyPigeonDM, handleAgentPigeon } from "./pigeon.js";
+import { isRegisteredSandboxName } from "../pigeon-peer.js";
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -24,26 +24,6 @@ function readBody(req) {
     });
     req.on("error", reject);
   });
-}
-
-/** Registered Discord owner of the sandbox that made this request, or null when
- *  the peer can't be resolved to a registered sandbox (callers then fall back
- *  to header-only checks so behavior degrades gracefully, never stricter). */
-async function peerOwnerId(req) {
-  const peer = await resolvePeerSandbox(req);
-  if (peer?.peer !== "sandbox") return null;
-  return sandbox.loadUsers().find((u) => u.name === peer.name)?.userId || null;
-}
-
-/** Throw a 403 when a claimed Discord user doesn't match the requesting sandbox
- *  owner. No-op when the peer resolves to nothing or to the bot itself. */
-async function requireUserForPeer(req, claimedUserId) {
-  const ownerId = await peerOwnerId(req);
-  if (ownerId && claimedUserId && ownerId !== claimedUserId) {
-    const err = new Error("userId does not match the requesting sandbox owner");
-    err.status = 403;
-    throw err;
-  }
 }
 
 async function deliverWorkerToChannel(worker, content) {
@@ -67,10 +47,14 @@ async function deliverWorkerToChannel(worker, content) {
 }
 
 const botHttpServer = createServer(async (req, res) => {
-  if (!botHttpAuth(req)) {
-    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Punch API"' });
-    return void res.end("Unauthorized");
+  const authHeader = req.headers.authorization || "";
+  const authMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
+  const identity = authMatch ? await sandbox.resolveBotToken(authMatch[1]) : null;
+  if (!identity) {
+    res.writeHead(401, { "content-type": "application/json" });
+    return void res.end(JSON.stringify({ error: "Unauthorized" }));
   }
+  req.sandboxIdentity = identity;
 
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -82,7 +66,7 @@ const botHttpServer = createServer(async (req, res) => {
   }
 
   if (url.pathname === "/workers/progress" && req.method === "POST") {
-    const userId = body?.userId;
+    const userId = req.sandboxIdentity.userId;
     const worker = body?.worker;
     if (!userId || !worker?.id || !worker?.phase) {
       res.writeHead(400, { "content-type": "application/json" });
@@ -93,17 +77,6 @@ const botHttpServer = createServer(async (req, res) => {
     if (!allowed.has(phase)) {
       res.writeHead(400, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: "Invalid worker phase" }));
-    }
-    const headerUserId = req.headers["x-discord-user-id"] || null;
-    if (headerUserId && headerUserId !== userId) {
-      res.writeHead(403, { "content-type": "application/json" });
-      return void res.end(JSON.stringify({ error: "userId does not match x-discord-user-id header" }));
-    }
-    try {
-      await requireUserForPeer(req, userId);
-    } catch (err) {
-      res.writeHead(403, { "content-type": "application/json" });
-      return void res.end(JSON.stringify({ error: err.message }));
     }
     const now = Date.now();
     const key = `${userId}:${worker.id}`;
@@ -131,22 +104,11 @@ const botHttpServer = createServer(async (req, res) => {
   }
 
   if (url.pathname === "/workers/complete" && req.method === "POST") {
-    const userId = body?.userId;
+    const userId = req.sandboxIdentity.userId;
     const worker = body?.worker;
     if (!userId || !worker?.id) {
       res.writeHead(400, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: "Missing userId or worker" }));
-    }
-    const headerUserId = req.headers["x-discord-user-id"] || null;
-    if (headerUserId && headerUserId !== userId) {
-      res.writeHead(403, { "content-type": "application/json" });
-      return void res.end(JSON.stringify({ error: "userId does not match x-discord-user-id header" }));
-    }
-    try {
-      await requireUserForPeer(req, userId);
-    } catch (err) {
-      res.writeHead(403, { "content-type": "application/json" });
-      return void res.end(JSON.stringify({ error: err.message }));
     }
     registry.workerProgressSent.delete(`${userId}:${worker.id}`);
     try {
@@ -170,16 +132,15 @@ const botHttpServer = createServer(async (req, res) => {
 
   if (url.pathname.startsWith("/routines")) {
     try {
-      const headerUserId = req.headers["x-discord-user-id"] || null;
-      await requireUserForPeer(req, headerUserId);
+      const userId = req.sandboxIdentity.userId;
 
       if (req.method === "GET" && url.pathname === "/routines/list") {
-        const userId = verifyRoutineUser(url.searchParams.get("userId"), headerUserId);
-        if (!userId) {
+        const verifiedId = verifyRoutineUser(url.searchParams.get("userId"), userId);
+        if (!verifiedId) {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const list = routines.listRoutines(userId);
+        const list = routines.listRoutines(verifiedId);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routines: list }));
       }
@@ -189,8 +150,8 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Invalid JSON" }));
         }
-        const userId = verifyRoutineUser(body.userId, headerUserId);
-        if (!userId || !body.type || !body.payload) {
+        const verifiedId = verifyRoutineUser(body.userId, userId);
+        if (!verifiedId || !body.type || !body.payload) {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId, type, or payload" }));
         }
@@ -198,7 +159,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing channelId (required for non-heartbeat types)" }));
         }
-        const timezone = body.timezone || userTimeZone(userId);
+        const timezone = body.timezone || userTimeZone(verifiedId);
         let schedule = body.schedule;
         if (body.when) {
           schedule = routines.parseRecurrence(body.when, body.recurrence || "once", timezone);
@@ -208,7 +169,7 @@ const botHttpServer = createServer(async (req, res) => {
           return void res.end(JSON.stringify({ error: "Missing schedule or when" }));
         }
         const routine = routines.addRoutine({
-          userId,
+          userId: verifiedId,
           channelId: body.channelId,
           guildId: body.guildId || null,
           type: body.type,
@@ -226,12 +187,12 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Invalid JSON" }));
         }
-        const userId = verifyRoutineUser(body.userId, headerUserId);
-        if (!userId) {
+        const verifiedId = verifyRoutineUser(body.userId, userId);
+        if (!verifiedId) {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const ok = routines.removeRoutine(deleteMatch[1], userId);
+        const ok = routines.removeRoutine(deleteMatch[1], verifiedId);
         res.writeHead(ok ? 200 : 404, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ success: ok }));
       }
@@ -242,12 +203,12 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Invalid JSON" }));
         }
-        const userId = verifyRoutineUser(body.userId, headerUserId);
-        if (!userId) {
+        const verifiedId = verifyRoutineUser(body.userId, userId);
+        if (!verifiedId) {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const r = routines.pauseRoutine(pauseMatch[1], userId);
+        const r = routines.pauseRoutine(pauseMatch[1], verifiedId);
         res.writeHead(r ? 200 : 404, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routine: r }));
       }
@@ -258,12 +219,12 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Invalid JSON" }));
         }
-        const userId = verifyRoutineUser(body.userId, headerUserId);
-        if (!userId) {
+        const verifiedId = verifyRoutineUser(body.userId, userId);
+        if (!verifiedId) {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const r = routines.resumeRoutine(resumeMatch[1], userId);
+        const r = routines.resumeRoutine(resumeMatch[1], verifiedId);
         res.writeHead(r ? 200 : 404, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routine: r }));
       }
@@ -278,12 +239,7 @@ const botHttpServer = createServer(async (req, res) => {
 
   if (url.pathname.startsWith("/collabs")) {
     try {
-      const peer = await resolvePeerSandbox(req);
-      if (peer?.peer !== "sandbox" || !isRegisteredSandboxName(peer.name, sandbox.loadUsers())) {
-        res.writeHead(403, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ error: "Collaboration calls require a registered sandbox." }));
-      }
-      const actor = peer.name;
+      const actor = req.sandboxIdentity.name;
       if (req.method === "POST" && url.pathname === "/collabs/create") {
         if (!body?.reviewer || !body?.workspace) {
           res.writeHead(400, { "content-type": "application/json" });
@@ -348,22 +304,17 @@ const botHttpServer = createServer(async (req, res) => {
   // State API endpoints
   if (url.pathname.startsWith("/state/")) {
     try {
-      const headerUserId = req.headers["x-discord-user-id"] || null;
-      if (!headerUserId) {
-        res.writeHead(400, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ error: "Missing x-discord-user-id header" }));
-      }
-      await requireUserForPeer(req, headerUserId);
+      const userId = req.sandboxIdentity.userId;
       if (req.method === "GET" && url.pathname === "/state/activity") {
         const type = url.searchParams.get("type") || undefined;
         const limit = Number(url.searchParams.get("limit")) || 20;
-        const activities = state.getActivities(headerUserId, { type, limit });
+        const activities = state.getActivities(userId, { type, limit });
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ activities }));
       }
 
       if (req.method === "GET" && url.pathname === "/state/stats") {
-        const stats = state.getActivityStats(headerUserId);
+        const stats = state.getActivityStats(userId);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify(stats));
       }
@@ -374,7 +325,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Invalid period" }));
         }
-        const usage = state.getUsageStatistics(headerUserId, period);
+        const usage = state.getUsageStatistics(userId, period);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify(usage));
       }
@@ -399,12 +350,11 @@ const botHttpServer = createServer(async (req, res) => {
         res.writeHead(400);
         return void res.end(JSON.stringify({ error: "Missing recipientId, from, or text" }));
       }
-      const peer = await resolvePeerSandbox(req);
       const recipientSandbox = sandboxNameForUser(recipientId);
       const callerOk =
-        peer?.peer === "bot" ||
-        (peer?.peer === "sandbox" && recipientSandbox && peer.name === recipientSandbox);
-      if (!callerOk || !isRegisteredSandboxName(from, sandbox.loadUsers())) {
+        req.sandboxIdentity.name === recipientSandbox &&
+        isRegisteredSandboxName(from, sandbox.loadUsers());
+      if (!callerOk) {
         res.writeHead(403);
         return void res.end(JSON.stringify({ error: "Pigeon sender verification failed" }));
       }

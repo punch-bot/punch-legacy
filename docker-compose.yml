@@ -25,8 +25,6 @@ services:
     cpus: 1
     networks:
       - edge
-    ports:
-      - "${PUNCH_BOT_PORT:-4098}:4098"
     volumes:
       - bot_state:/state
       - octl_bot:/data

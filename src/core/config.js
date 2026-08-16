@@ -8,7 +8,6 @@ export const MAX_UPLOAD = Number(process.env.DISCORD_MAX_UPLOAD) || 8 * 1024 * 1
 export const MAX_ATTACHMENT_BYTES = (Number(process.env.PI_MAX_ATTACHMENT || process.env.OPENCODE_MAX_ATTACHMENT) || 10) * 1024 * 1024;
 export const COMPRESS_TIMEOUT_MS = Number(process.env.PI_COMPRESS_TIMEOUT || process.env.OPENCODE_COMPRESS_TIMEOUT) || 300;
 export const BOT_HTTP_PORT = 4098;
-export const BOT_HTTP_PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
 
 // Bot owners as comma-separated Discord user IDs (e.g. "1234567890,0987654321").
 // Only owners may run owner-scoped commands like /sandbox restart-all.
@@ -51,11 +50,4 @@ export function supervisorAuth() {
 
 export function supervisorAuthWithUser() {
   return "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
-}
-
-export function botHttpAuth(req) {
-  if (!BOT_HTTP_PASS) return false;
-  const auth = req.headers.authorization || "";
-  const expected = "Basic " + Buffer.from(`opencode:${BOT_HTTP_PASS}`).toString("base64");
-  return auth === expected;
 }
