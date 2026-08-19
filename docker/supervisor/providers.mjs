@@ -1,5 +1,5 @@
 // Model / API-key / provider routes for the sandbox supervisor.
-import { ENV_FILE, MODELS_FILE, loadJSON, log, saveJSON, state } from "./state.mjs";
+import { AUTH_FILE, ENV_FILE, MODELS_FILE, loadJSON, log, saveJSON, state } from "./state.mjs";
 import { forceRestart } from "./gateway.mjs";
 import {
   PROVIDER_ENV_MAP,
@@ -61,18 +61,24 @@ export function handleProviderRoutes(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/apikeys") {
     const env = loadJSON(ENV_FILE);
+    const auth = loadJSON(AUTH_FILE);
     const configured = [];
-    for (const [provider, envVar] of Object.entries(PROVIDER_ENV_MAP)) {
-      if (env[envVar]) configured.push(provider);
+    // Prefer exact provider ids from auth.json (custom ids may contain dashes,
+    // which an env-var-derived name cannot recover).
+    for (const [provider, entry] of Object.entries(auth)) {
+      if (entry?.type === "api_key" && entry?.key) configured.push(provider);
     }
-    // also include any _API_KEY env vars for custom providers
+    // also include any _API_KEY env vars for custom providers not tracked in auth
+    const authEnvVars = new Set(
+      configured.map((p) => `${p.toUpperCase().replace(/-/g, "_")}_API_KEY`),
+    );
     for (const k of Object.keys(env)) {
-      if (k.endsWith("_API_KEY") && !configured.includes(k.replace("_API_KEY", "").toLowerCase())) {
+      if (k.endsWith("_API_KEY") && !authEnvVars.has(k)) {
         configured.push(k.replace("_API_KEY", "").toLowerCase());
       }
     }
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ providers: configured }));
+    res.end(JSON.stringify({ providers: [...new Set(configured)] }));
     return true;
   }
 
@@ -105,7 +111,13 @@ export function handleProviderRoutes(req, res, url) {
           if (id === "google") mirrorGoogleGemini(env, null);
         }
         saveJSON(ENV_FILE, env);
-        syncAuthProvider(provider, key ? String(key).trim() : null);
+        const trimmedKey = key ? String(key).trim() : null;
+        syncAuthProvider(provider, trimmedKey);
+        // Keep sibling providers sharing this env var in sync (e.g. opencode
+        // and opencode-go both use OPENCODE_API_KEY).
+        for (const [pid, ev] of Object.entries(PROVIDER_ENV_MAP)) {
+          if (ev === envVar && pid !== id) syncAuthProvider(pid, trimmedKey);
+        }
         forceRestart();
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true }));
