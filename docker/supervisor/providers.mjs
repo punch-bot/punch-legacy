@@ -8,7 +8,6 @@ import {
   saveModel,
   syncAuthProvider,
   RESERVED_PROVIDER_IDS,
-  FORMERLY_OVERRIDDEN_PROVIDERS,
 } from "./models.mjs";
 
 function sanitizeId(s) {
@@ -94,7 +93,7 @@ export function handleProviderRoutes(req, res, url) {
           res.end(JSON.stringify({ error: "Invalid provider" }));
           return;
         }
-        const envVar = PROVIDER_ENV_MAP[id] || `${provider.toUpperCase()}_API_KEY`;
+        const envVar = PROVIDER_ENV_MAP[id] || `${provider.toUpperCase().replace(/-/g, "_")}_API_KEY`;
         const env = loadJSON(ENV_FILE);
         if (key) {
           env[envVar] = String(key).trim();
@@ -140,7 +139,7 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         const id = sanitizeId(name);
-        if (!id || RESERVED_PROVIDER_IDS.has(id) || FORMERLY_OVERRIDDEN_PROVIDERS.has(id)) {
+        if (!id || RESERVED_PROVIDER_IDS.has(id)) {
           res.writeHead(400, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Invalid provider name" }));
           return;
@@ -151,7 +150,7 @@ export function handleProviderRoutes(req, res, url) {
           ...prev,
           baseUrl: endpoint || prev.baseUrl || "",
           api: api || prev.api || "openai-completions",
-          apiKey: prev.apiKey || `$${id.toUpperCase()}_API_KEY`,
+          apiKey: prev.apiKey || `$${id.toUpperCase().replace(/-/g, "_")}_API_KEY`,
           models: prev.models || [],
         };
         saveJSON(MODELS_FILE, models);
@@ -174,7 +173,7 @@ export function handleProviderRoutes(req, res, url) {
       try {
         const { name } = JSON.parse(body);
         const id = sanitizeId(name);
-        if (!id || RESERVED_PROVIDER_IDS.has(id) || FORMERLY_OVERRIDDEN_PROVIDERS.has(id)) {
+        if (!id || RESERVED_PROVIDER_IDS.has(id)) {
           res.writeHead(400, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Invalid provider name" }));
           return;

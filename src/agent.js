@@ -542,7 +542,7 @@ function contextLimitFor(model) {
   if (prefixHit) return prefixHit[1];
   if (prov === "anthropic") return 200000;
   if (prov === "opencode" || prov === "opencode-go") return 200000;
-  if (prov === "nim") return 131072;
+  if (prov === "nvidia") return 131072;
   return DEFAULT_CONTEXT_LIMIT;
 }
 
