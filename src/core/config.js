@@ -37,12 +37,12 @@ export const MODEL_LIST = [
   { label: "Claude Sonnet 4.5 (default)", value: "anthropic/claude-sonnet-4-5", emoji: "🧠" },
   { label: "Poolside Laguna Medium", value: "poolside/poolside/laguna-m.1", emoji: "🏊" },
   { label: "Poolside Laguna XS", value: "poolside/poolside/laguna-xs-2.1", emoji: "🏊" },
-  { label: "NIM GLM-5.2 (z-ai)", value: "nim/z-ai/glm-5.2", emoji: "💚" },
-  { label: "NIM Nemotron 70B", value: "nim/nvidia/llama-3.1-nemotron-70b-instruct", emoji: "💚" },
+  { label: "NIM GLM-5.2 (z-ai)", value: "nvidia/z-ai/glm-5.2", emoji: "💚" },
+  { label: "NIM Nemotron 70B", value: "nvidia/nvidia/llama-3.1-nemotron-70b-instruct", emoji: "💚" },
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 
-export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "nim"];
+export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia"];
 
 export function supervisorAuth() {
   return "Basic " + Buffer.from(`opencode:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");

@@ -66,63 +66,7 @@ export const BUILTIN_CUSTOM_PROVIDERS = {
       },
     ],
   },
-  nim: {
-    baseUrl: "https://integrate.api.nvidia.com/v1",
-    api: "openai-completions",
-    apiKey: "$NVIDIA_API_KEY",
-    models: [
-      {
-        id: "z-ai/glm-5.2",
-        name: "GLM 5.2",
-        reasoning: true,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 1048576,
-        maxTokens: 131072,
-      },
-      {
-        id: "nvidia/llama-3.1-nemotron-70b-instruct",
-        name: "Nemotron 70B",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 131072,
-        maxTokens: 131072,
-      },
-      {
-        id: "meta/llama-3.3-70b-instruct",
-        name: "Llama 3.3 70B",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 131072,
-        maxTokens: 131072,
-      },
-      {
-        id: "nvidia/llama-3.1-405b-instruct",
-        name: "Llama 3.1 405B",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 131072,
-        maxTokens: 131072,
-      },
-      {
-        id: "deepseek/deepseek-r1",
-        name: "DeepSeek R1",
-        reasoning: true,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 131072,
-        maxTokens: 131072,
-      },
-    ],
-  },
 };
-
-// Providers we used to override but removed so Pi's native (better) config wins.
-// Clean stale entries from models.json so the native provider isn't shadowed.
-export const FORMERLY_OVERRIDDEN_PROVIDERS = new Set(["opencode"]);
 
 export function ensurePiModelsJson() {
   mkdirSync(dirname(MODELS_FILE), { recursive: true });
@@ -131,14 +75,6 @@ export function ensurePiModelsJson() {
     existing.providers = {};
   }
   let changed = false;
-  // Remove stale providers that Pi now ships natively.
-  for (const id of FORMERLY_OVERRIDDEN_PROVIDERS) {
-    if (existing.providers[id] && !BUILTIN_CUSTOM_PROVIDERS[id]) {
-      delete existing.providers[id];
-      changed = true;
-      log("removed stale custom provider", id, "(using Pi native)");
-    }
-  }
   for (const [id, cfg] of Object.entries(BUILTIN_CUSTOM_PROVIDERS)) {
     const prev = existing.providers[id];
     const next = { ...cfg };
@@ -173,7 +109,10 @@ export const PROVIDER_ENV_MAP = {
   together: "TOGETHER_API_KEY",
   poolside: "POOLSIDE_API_KEY",
   opencode: "OPENCODE_API_KEY",
-  nim: "NVIDIA_API_KEY",
+  // Pi ships a native `opencode-go` provider (https://opencode.ai/zen/go) that
+  // shares the OPENCODE_API_KEY credential with OpenCode Zen.
+  "opencode-go": "OPENCODE_API_KEY",
+  nvidia: "NVIDIA_API_KEY",
 };
 
 /** Object-property names that must never be used as provider ids. */
