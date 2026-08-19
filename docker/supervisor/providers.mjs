@@ -70,7 +70,7 @@ export function handleProviderRoutes(req, res, url) {
     }
     // also include any _API_KEY env vars for custom providers not tracked in auth
     const authEnvVars = new Set(
-      configured.map((p) => `${p.toUpperCase().replace(/-/g, "_")}_API_KEY`),
+      configured.map((p) => `${p.toUpperCase()}_API_KEY`),
     );
     for (const k of Object.keys(env)) {
       if (k.endsWith("_API_KEY") && !authEnvVars.has(k)) {
@@ -99,7 +99,7 @@ export function handleProviderRoutes(req, res, url) {
           res.end(JSON.stringify({ error: "Invalid provider" }));
           return;
         }
-        const envVar = PROVIDER_ENV_MAP[id] || `${provider.toUpperCase().replace(/-/g, "_")}_API_KEY`;
+        const envVar = PROVIDER_ENV_MAP[id] || `${provider.toUpperCase()}_API_KEY`;
         const env = loadJSON(ENV_FILE);
         if (key) {
           env[envVar] = String(key).trim();
@@ -162,7 +162,7 @@ export function handleProviderRoutes(req, res, url) {
           ...prev,
           baseUrl: endpoint || prev.baseUrl || "",
           api: api || prev.api || "openai-completions",
-          apiKey: prev.apiKey || `$${id.toUpperCase().replace(/-/g, "_")}_API_KEY`,
+          apiKey: prev.apiKey || `$${id.toUpperCase()}_API_KEY`,
           models: prev.models || [],
         };
         saveJSON(MODELS_FILE, models);
