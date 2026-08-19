@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 const execFileAsync = promisify(execFile);
 
 const DATA_DIR = process.env.DATA_DIR || "/data";
-const USERS_FILE = `${DATA_DIR}/sandbox_users.json`;
+export const USERS_FILE = `${DATA_DIR}/sandbox_users.json`;
 const DOCTOR_TOKENS_FILE = `${DATA_DIR}/sandbox_doctor_tokens.json`;
 const BOT_TOKENS_FILE = `${DATA_DIR}/sandbox_bot_tokens.json`;
 const MAIN_COMPOSE = "/punch/docker-compose.yml";

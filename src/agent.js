@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
-import { doctorTokenFor } from "./sandbox-manager.js";
+import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
 
 // Talks to the sandbox's Pi gateway (HTTP on :4096 over `pi --mode rpc`).
 // All tool execution (bash/read/write/edit) happens SERVER-SIDE in the sandbox
@@ -45,7 +45,7 @@ function sandboxMap() {
 
 export function reloadSandboxMap() {
   try {
-    const users = JSON.parse(readFileSync("/data/sandbox_users.json", "utf8"));
+    const users = JSON.parse(readFileSync(USERS_FILE, "utf8"));
     _extraMap = {};
     for (const u of users) _extraMap[u.userId] = `http://sandbox-${u.name}:4096`;
   } catch { _extraMap = {}; }
@@ -60,7 +60,7 @@ function serverFor(userId) {
 export function sandboxNameForUser(userId) {
   if (!userId) return null;
   try {
-    const users = JSON.parse(readFileSync("/data/sandbox_users.json", "utf8"));
+    const users = JSON.parse(readFileSync(USERS_FILE, "utf8"));
     const u = users.find((x) => x.userId === userId);
     if (u) return u.name;
   } catch {}
