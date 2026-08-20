@@ -394,11 +394,7 @@ export function registerInteractions(client) {
         }
 
         reloadSandboxMap();
-        const vp = sandbox.vncPorts(name);
-        const vncNote = process.env.VNC_PASSWORD
-          ? `\n🌐 VNC: http://<host>:${vp.web}/ (password-protected) or raw VNC on port ${vp.vnc}.`
-          : "";
-        await interaction.editReply({ content: `✅ Sandbox **${name}** created and running!${vncNote}` });
+        await interaction.editReply({ content: `✅ Sandbox **${name}** created and running!` });
         return;
       }
 
@@ -1448,7 +1444,7 @@ export function registerInteractions(client) {
             }
           } else if (type === "local") {
             if (!commandStr?.trim()) throw new Error("Local MCP requires `command`");
-            // Simple argv split (supports "quoted" tokens). Same rules as docker/mcp-config.mjs.
+            // Simple argv split (supports "quoted" tokens). Same rules as docker/sandbox/usr/local/lib/mcp-config.mjs.
             const argv = [];
             let cur = "";
             let quote = null;

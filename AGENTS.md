@@ -1,5 +1,7 @@
 # Punch Nightly — agent guide
 
+> **Warning:** The **"Cursor Cloud specific instructions"** section below is **irrelevant** here. It describes a Firecracker VM with no auto-started Docker daemon, a `fuse-overlayfs` `daemon.json`, and cgroup threaded-mode quirks. This repo runs on a **normal computer with a standard Docker daemon** — do not assume the VM environment or apply that setup guidance.
+
 **Workspace path:** `/Punch Nightly`  
 **Production Punch (do not edit unless asked):** `/punch`
 
@@ -11,7 +13,6 @@ This tree is an **experimental fork** of Punch: same Discord + per-user sandbox 
 | Docker network | `punch_edge` | `punch-nightly_edge` |
 | Volume prefix | `punch_` | `punch-nightly_` |
 | Bot HTTP on host | `4098` | **`4099`** → container `4098` |
-| Dynamic VNC base | `16080+` | **`26080+`** (`PUNCH_VNC_PORT_BASE`) |
 | Default sandbox in compose | often yes (juniper) | **no** — only `bot` service |
 | Coding agent | OpenCode | **Pi** (`pi --mode rpc`) via Punch `pi-gateway` on `:4096` |
 | Default sandbox URL | set in compose | **empty** — routing via registry only |
@@ -37,7 +38,7 @@ More ops detail: `NIGHTLY.md`. Human overview: `README.md`.
 
 ## Pi (Nightly v1)
 
-Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/pi-gateway.mjs` is an **internal HTTP adapter** on `:4096` so the Discord bot can keep a simple session/message/SSE client (`POST /session`, `POST /session/{id}/message`, `GET /event`, summarize/abort/file). Users and Discord copy should say **Pi**, not the gateway protocol. Bot routing (`http://sandbox-<name>:4096`) and supervisor (`:4097`) stay the same.
+Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/sandbox/usr/local/bin/pi-gateway.mjs` is an **internal HTTP adapter** on `:4096` so the Discord bot can keep a simple session/message/SSE client (`POST /session`, `POST /session/{id}/message`, `GET /event`, summarize/abort/file). Users and Discord copy should say **Pi**, not the gateway protocol. Bot routing (`http://sandbox-<name>:4096`) and supervisor (`:4097`) stay the same.
 
 | Works in v1 | Deferred / gaps |
 |-------------|-----------------|
@@ -86,15 +87,15 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 | `src/gateway/bot-server.js` | Bot HTTP `:4098`: worker progress/complete, routines/collabs/state APIs, pigeon notify |
 | `src/memory.js` | Selective cited memory retrieval, durable facts, DM-only daily notes, compaction |
 | `src/doctor/index.js` | Bot-side routing, Docker, scheduler, and report diagnostics |
-| `docker/doctor.mjs` | Sandbox-local Pi, provider, browser, Tailscale, storage, and security probes |
-| `docker/pi-gateway.mjs` | Internal HTTP `:4096` adapter over Pi RPC |
-| `docker/serve-supervisor.mjs` | Thin sandbox entrypoint: pi-gateway child + `:4097` supervisor API dispatch |
-| `docker/supervisor/*` | Sandbox supervisor modules: `state.mjs` (consts/state), `gateway.mjs` (pi-gateway lifecycle), `models.mjs` (model/provider/env/auth), `mcp.mjs` (registry sync + routes), `routes.mjs` (doctor/pigeon/tasks/env/secrets/tools/extensions), `providers.mjs`, `skills.mjs`, `workers.mjs`, `tailscale.mjs` |
-| `docker/routines_extension.ts` | Seed Pi routines tool |
-| `docker/skills-manager.mjs` | Instruction-skill metadata, precedence, proposals, enable state |
-| `docker/worker-manager.mjs` | Isolated Pi worker process records/lifecycle |
-| `docker/pi-worker-runner.mjs` | Single worker Pi RPC runner with tool allowlist |
-| `docker/sandbox.Dockerfile` | Pi sandbox image |
+| `docker/sandbox/usr/local/lib/doctor.mjs` | Sandbox-local Pi, provider, browser, Tailscale, storage, and security probes |
+| `docker/sandbox/usr/local/bin/pi-gateway.mjs` | Internal HTTP `:4096` adapter over Pi RPC |
+| `docker/sandbox/usr/local/bin/serve-supervisor.mjs` | Thin sandbox entrypoint: pi-gateway child + `:4097` supervisor API dispatch |
+| `docker/sandbox/usr/local/bin/supervisor/*` | Sandbox supervisor modules: `state.mjs` (consts/state), `gateway.mjs` (pi-gateway lifecycle), `models.mjs` (model/provider/env/auth), `mcp.mjs` (registry sync + routes), `routes.mjs` (doctor/pigeon/tasks/env/secrets/tools/extensions), `providers.mjs`, `skills.mjs`, `workers.mjs`, `tailscale.mjs` |
+| `docker/sandbox/opt/pi/extensions/routines.ts` | Seed Pi routines tool |
+| `docker/sandbox/usr/local/lib/skills-manager.mjs` | Instruction-skill metadata, precedence, proposals, enable state |
+| `docker/sandbox/usr/local/lib/worker-manager.mjs` | Isolated Pi worker process records/lifecycle |
+| `docker/sandbox/usr/local/bin/pi-worker-runner.mjs` | Single worker Pi RPC runner with tool allowlist |
+| `docker/sandbox.Dockerfile` | Pi sandbox image; `docker/sandbox/` groups files by container destination |
 | `docker-compose.yml` | Bot only; `name: punch-nightly` |
 
 ## Supervisor API (sandbox `:4097`)
@@ -109,7 +110,7 @@ Three-part memory management system:
 
 2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
 
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (keep `docker/compress_context_extension.ts` `MAX_MEMORY_CHARS` — still used by the `update_memory` tool). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
+3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (keep `docker/sandbox/opt/pi/extensions/compress_context.ts` `MAX_MEMORY_CHARS` — still used by the `update_memory` tool). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
 
 **Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
 
@@ -165,4 +166,4 @@ curl -su opencode:devpassword http://localhost:4096/health   # {"ok":true,"tools
 
 **Secrets needed for full end-to-end (not present in the VM):**
 - `DISCORD_TOKEN` — the bot exits immediately without it (`src/index.js`), so no Discord flow runs.
-- `POOLSIDE_API_KEY` — the provider used for tests here. A Pi turn reaches `pi --mode rpc` and fails with `No API key found for poolside` until set. Poolside is a built-in OpenAI-compatible provider seeded by the supervisor (`docker/serve-supervisor.mjs`, baseUrl `https://inference.poolside.ai/v1`); Pi resolves its key from the `POOLSIDE_API_KEY` env var. Run the sandbox with `PI_MODEL=poolside/poolside/laguna-m.1` (splits to `--provider poolside --model poolside/laguna-m.1`) and pass `POOLSIDE_API_KEY` into the container env, or set it via supervisor `/apikey`/`/env` (Discord `/apikey set poolside <key>`). Note `anthropic/claude-sonnet-4-5` is only an alias to the default `opencode/big-pickle`. There is no free bundled provider.
+- `POOLSIDE_API_KEY` — the provider used for tests here. A Pi turn reaches `pi --mode rpc` and fails with `No API key found for poolside` until set. Poolside is a built-in OpenAI-compatible provider seeded by the supervisor (`docker/sandbox/usr/local/bin/serve-supervisor.mjs`, baseUrl `https://inference.poolside.ai/v1`); Pi resolves its key from the `POOLSIDE_API_KEY` env var. Run the sandbox with `PI_MODEL=poolside/poolside/laguna-m.1` (splits to `--provider poolside --model poolside/laguna-m.1`) and pass `POOLSIDE_API_KEY` into the container env, or set it via supervisor `/apikey`/`/env` (Discord `/apikey set poolside <key>`). Note `anthropic/claude-sonnet-4-5` is only an alias to the default `opencode/big-pickle`. There is no free bundled provider.

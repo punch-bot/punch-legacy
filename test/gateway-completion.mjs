@@ -1,4 +1,4 @@
-import { isTurnSettledEvent } from "../docker/pi-turn-completion.mjs";
+import { isTurnSettledEvent } from "../docker/sandbox/usr/local/lib/pi-turn-completion.mjs";
 
 if (!isTurnSettledEvent({ type: "agent_settled" })) {
   throw new Error("agent_settled must complete turn");

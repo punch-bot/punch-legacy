@@ -15,7 +15,7 @@ import {
   recompressBlock,
   searchBlocks,
   textFromContent,
-} from "../docker/context-pruning-state.mjs";
+} from "../docker/sandbox/opt/pi/context-pruning-state.mjs";
 import { readFile } from "node:fs/promises";
 
 const records = messageRecords([
@@ -229,12 +229,14 @@ test("deactivateBlock rejects non-existent block id", () => {
 test("sandbox image and workdir seeding include context-pruning state and memory", async () => {
   const [dockerfile, entrypoint] = await Promise.all([
     readFile(new URL("../docker/sandbox.Dockerfile", import.meta.url), "utf8"),
-    readFile(new URL("../docker/sandbox-entrypoint.sh", import.meta.url), "utf8"),
+    readFile(new URL("../docker/sandbox/usr/local/bin/sandbox-entrypoint.sh", import.meta.url), "utf8"),
   ]);
-  assert.match(dockerfile, /COPY docker\/context-pruning-state\.mjs \/opt\/pi\/context-pruning-state\.mjs/);
-  assert.match(dockerfile, /COPY docker\/compress_context_extension\.ts \/opt\/pi\/extensions\/compress_context\.ts/);
+  assert.match(dockerfile, /COPY docker\/sandbox\/ \//);
+  assert.ok(
+    await readFile(new URL("../docker/sandbox/opt/pi/extensions/compress_context.ts", import.meta.url), "utf8"),
+  );
   assert.match(entrypoint, /cp \/opt\/pi\/context-pruning-state\.mjs \/work\/\.pi\/context-pruning-state\.mjs/);
-  assert.match(entrypoint, /cp \/opt\/pi\/extensions\/compress_context\.ts \/work\/\.pi\/extensions\/compress_context\.ts/);
+  assert.match(entrypoint, /for ext in routines collab browser searxng webfetch report_progress compress_context/);
   assert.match(entrypoint, /punch-memory\.md/);
   assert.match(entrypoint, /## Guidelines/);
   assert.match(entrypoint, /## Open work/);

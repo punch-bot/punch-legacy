@@ -46,7 +46,7 @@ Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-g
 4. Discord: `/sandbox create <name>`
 5. `/apikey set anthropic <key>` (or another provider) then mention the bot (or text Punch after `/pair`)
 
-Host **4098** = bot HTTP API. Dynamic sandboxes publish **noVNC** from port **16080+** when `VNC_PASSWORD` is set.
+Host **4098** = bot HTTP API. Sandboxes run a headless Chromium (Playwright) for the built-in browser tools; screenshots attach to Discord automatically.
 
 ## Local dev (optional)
 

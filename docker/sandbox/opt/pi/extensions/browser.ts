@@ -1,5 +1,5 @@
 /**
- * Built-in headful Chromium tools for Punch (Pi extension, not MCP), powered by Playwright.
+ * Built-in headless Chromium tools for Punch (Pi extension, not MCP), powered by Playwright.
  * Screenshots return image content so pi-gateway can auto-attach them to Discord.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -25,7 +25,7 @@ const LAUNCH_ARGS = [
   "--no-default-browser-check",
 ];
 
-// A crashed Chromium leaves stale singleton locks in the profile dir. A headful
+// A crashed Chromium leaves stale singleton locks in the profile dir. A new
 // launch then refuses with "The profile appears to be in use by another Chromium
 // process" — clear them before launching.
 const LOCK_FILES = ["SingletonLock", "SingletonCookie", "SingletonSocket", "chrome_debug.log"];
@@ -49,13 +49,9 @@ function textResult(text: string, details: Record<string, unknown> = {}) {
 }
 
 const LAUNCH_OPTIONS = {
-  headless: false,
+  headless: true,
   viewport: DEFAULT_VIEWPORT,
   args: LAUNCH_ARGS,
-  env: {
-    ...process.env,
-    DISPLAY: process.env.DISPLAY || ":99",
-  },
 };
 
 async function launchContext(): Promise<BrowserContext> {
@@ -102,7 +98,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "puppeteer_navigate",
     label: "Browser navigate",
-    description: "Navigate the sandbox browser to a URL (headful Chromium on DISPLAY=:99)",
+    description: "Navigate the sandbox browser to a URL (headless Chromium)",
     promptSnippet: "Open a URL in the browser",
     promptGuidelines: [
       "Use puppeteer_navigate before screenshot/click/fill on a page.",
