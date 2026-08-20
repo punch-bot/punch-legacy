@@ -298,8 +298,6 @@ export function handleGeneralRoutes(req, res, url) {
         const c = cmd.toLowerCase();
         if (c.includes("serve-supervisor") || c.includes("pi-gateway") ||
             c.includes("opencode serve") ||
-            c.includes("xvfb") || c.includes("fluxbox") || c.includes("x11vnc") ||
-            c.includes("websockify") || c.includes("dbus-daemon") ||
             c.includes("ps -eo") || c.includes("/lib/systemd") ||
             c.includes("chrome") || c.includes("puppeteer") ||
             stat.toUpperCase() === "Z" || c.includes("<defunct>")) continue;

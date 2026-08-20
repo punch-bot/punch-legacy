@@ -47,7 +47,6 @@ services:
       PI_SERVER_USERNAME: ${PI_SERVER_USERNAME:-opencode}
       PI_SERVER_PASSWORD: ${PI_SERVER_PASSWORD:?PI_SERVER_PASSWORD is required for sandbox services}
       PI_MODEL: ${PI_MODEL:-opencode/big-pickle}
-      VNC_PASSWORD: ${VNC_PASSWORD:-}
     networks:
       - edge
     devices:

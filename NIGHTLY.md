@@ -43,7 +43,7 @@ Compose does not start a sandbox. Per Discord user:
 
 Set provider keys through `/apikey` or `/env`, then select a model through `/models`.
 
-Containers use `punch-nightly_sandbox-<name>_1` and DNS `sandbox-<name>`. Image: `punch-nightly-sandbox:latest`. VNC ports start at `26080+` when configured. Tailscale state persists per sandbox.
+Containers use `punch-nightly_sandbox-<name>_1` and DNS `sandbox-<name>`. Image: `punch-nightly-sandbox:latest`. Tailscale state persists per sandbox.
 
 ## Memory v2
 
@@ -63,7 +63,6 @@ Successful DM turns create bounded daily notes for cross-session recall and extr
 | `PI_SERVER_PASSWORD` | Shared wire authentication (legacy `OPENCODE_SERVER_PASSWORD` still read as fallback) |
 | `PUNCH_STACK_NAME` | `punch-nightly` |
 | `PUNCH_SANDBOX_IMAGE` | `punch-nightly-sandbox:latest` |
-| `PUNCH_VNC_PORT_BASE` | Nightly VNC base, normally `26080` |
 | `PI_MODEL` | Default model (legacy `OPENCODE_MODEL` still read as fallback) |
 
 `PI_SERVER_URL` stays empty; routing uses dynamic registry.

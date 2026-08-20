@@ -7,7 +7,7 @@ import { join } from "node:path";
 const tmpDir = mkdtempSync(join(tmpdir(), "sandbox-manager-test-"));
 process.env.DATA_DIR = tmpDir;
 
-const { isValidSandboxName, vncPorts, botTokenFor, resolveBotToken, addUser, removeUser } =
+const { isValidSandboxName, botTokenFor, resolveBotToken, addUser, removeUser } =
   await import("../src/sandbox-manager.js");
 
 after(() => {
@@ -24,16 +24,6 @@ test("rejects malformed sandbox names", () => {
   for (const name of ["", "-ember", "Upper", "has space", "../escape", "a".repeat(64), null]) {
     assert.equal(isValidSandboxName(name), false, String(name));
   }
-});
-
-test("assigns stable VNC ports in configured range", () => {
-  const base = vncPorts("").web;
-  const first = vncPorts("ember");
-  const second = vncPorts("ember");
-
-  assert.deepEqual(first, second);
-  assert.equal(first.web - first.vnc, 180);
-  assert.ok(first.web >= base && first.web < base + 4000);
 });
 
 test("botTokenFor mints a stable per-sandbox bearer token", () => {

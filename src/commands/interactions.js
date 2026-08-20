@@ -394,11 +394,7 @@ export function registerInteractions(client) {
         }
 
         reloadSandboxMap();
-        const vp = sandbox.vncPorts(name);
-        const vncNote = process.env.VNC_PASSWORD
-          ? `\n🌐 VNC: http://<host>:${vp.web}/ (password-protected) or raw VNC on port ${vp.vnc}.`
-          : "";
-        await interaction.editReply({ content: `✅ Sandbox **${name}** created and running!${vncNote}` });
+        await interaction.editReply({ content: `✅ Sandbox **${name}** created and running!` });
         return;
       }
 

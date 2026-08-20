@@ -9,8 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential make gcc g++ pkg-config \
       iproute2 iputils-ping dnsutils netcat-openbsd \
       procps htop unzip zip tar file \
-      libnss3 libatk-bridge2.0-0 libcups2 libxkbcommon0 libgtk-3-0 libasound2 libgbm-dev fonts-liberation xdg-utils \
-      xvfb x11vnc fluxbox novnc websockify dbus-x11 \
+      libnss3 libasound2 libgbm-dev fonts-liberation xdg-utils \
     && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg | gpg --dearmor -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
     && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list \
     && apt-get update && apt-get install -y --no-install-recommends tailscale \
@@ -28,7 +27,6 @@ ENV HOME=/root \
     XDG_STATE_HOME=/data/state \
     PI_CODING_AGENT_DIR=/data/pi/agent \
     PI_CODING_AGENT_SESSION_DIR=/data/pi/sessions \
-    DISPLAY=:99 \
     PI_OFFLINE=1 \
     PI_SKIP_VERSION_CHECK=1 \
     PI_TELEMETRY=0 \
@@ -39,8 +37,9 @@ ENV HOME=/root \
 # before the Pi deps install; runtime dirs are created by the entrypoint/supervisor.
 COPY docker/sandbox/ /
 RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
-    && npx playwright install --with-deps chromium \
-    && npm cache clean --force
+    && npx playwright install chromium-headless-shell \
+    && npm cache clean --force \
+    && rm -rf /root/.npm
 
 # pigeon-peer.js stays single-source in src/ (shared with the bot).
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js

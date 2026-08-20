@@ -13,7 +13,6 @@ This tree is an **experimental fork** of Punch: same Discord + per-user sandbox 
 | Docker network | `punch_edge` | `punch-nightly_edge` |
 | Volume prefix | `punch_` | `punch-nightly_` |
 | Bot HTTP on host | `4098` | **`4099`** → container `4098` |
-| Dynamic VNC base | `16080+` | **`26080+`** (`PUNCH_VNC_PORT_BASE`) |
 | Default sandbox in compose | often yes (juniper) | **no** — only `bot` service |
 | Coding agent | OpenCode | **Pi** (`pi --mode rpc`) via Punch `pi-gateway` on `:4096` |
 | Default sandbox URL | set in compose | **empty** — routing via registry only |

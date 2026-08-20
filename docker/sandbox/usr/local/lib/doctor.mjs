@@ -273,7 +273,7 @@ let cachedBrowserProbeAt = 0;
 async function runBrowserProbe() {
   if (cachedBrowserProbe && Date.now() - cachedBrowserProbeAt < 30_000) return cachedBrowserProbe;
   if (deepBrowserProbe) return deepBrowserProbe;
-  const script = `const p=require('/opt/pi/node_modules/puppeteer');(async()=>{let b;try{b=await p.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});const page=await b.newPage();await page.goto('data:text/html,<title>Punch Doctor</title><h1>ok</h1>');const title=await page.title();await page.screenshot({path:'/tmp/punch-doctor-browser.png'});if(title!=='Punch Doctor')process.exitCode=2}catch(e){console.error(e.message);process.exitCode=1}finally{if(b)await b.close()}})()`;
+  const script = `const p=require('/opt/pi/node_modules/playwright');(async()=>{let b;try{b=await p.chromium.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});const page=await b.newPage();await page.goto('data:text/html,<title>Punch Doctor</title><h1>ok</h1>');const title=await page.title();await page.screenshot({path:'/tmp/punch-doctor-browser.png'});if(title!=='Punch Doctor')process.exitCode=2}catch(e){console.error(e.message);process.exitCode=1}finally{if(b)await b.close()}})()`;
   deepBrowserProbe = command("node", ["-e", script], 20_000)
     .then((probe) => {
       cachedBrowserProbe = probe;

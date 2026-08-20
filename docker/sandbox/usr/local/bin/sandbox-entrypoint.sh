@@ -1,20 +1,6 @@
 #!/bin/bash
 set -e
 
-# Start Xvfb for headful browser (Puppeteer Pi extension + noVNC)
-Xvfb :99 -screen 0 1280x800x24 > /var/log/xvfb.log 2>&1 &
-
-# Start fluxbox window manager
-fluxbox >/dev/null 2>&1 &
-
-# Start noVNC if VNC_PASSWORD is set
-if [ -n "$VNC_PASSWORD" ]; then
-  x11vnc -display :99 -passwd "$VNC_PASSWORD" -forever -shared -o /var/log/x11vnc.log >/dev/null 2>&1 &
-  # websockify authenticates at the VNC layer (x11vnc holds the password), so we
-  # do NOT pass --passwd here — newer websockify dropped that flag and would exit.
-  websockify --web=/usr/share/novnc 6080 localhost:5900 >/dev/null 2>&1 &
-fi
-
 # Start Tailscale without replacing Docker's internal DNS.
 mkdir -p /var/run/tailscale /var/lib/tailscale
 tailscaled --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 2>&1 &

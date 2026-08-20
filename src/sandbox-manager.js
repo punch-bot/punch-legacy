@@ -14,7 +14,6 @@ const STACK = process.env.PUNCH_STACK_NAME || "punch";
 const NETWORK = `${STACK}_edge`;
 const VOL_PREFIX = `${STACK}_`;
 const SANDBOX_IMAGE = process.env.PUNCH_SANDBOX_IMAGE || "punch-sandbox:latest";
-const VNC_WEB_BASE = Number(process.env.PUNCH_VNC_PORT_BASE) || 16080;
 
 function vol(name) {
   return VOL_PREFIX + name;
@@ -140,7 +139,6 @@ function userEnvArgs(name) {
     "--env", `SANDBOX_USER_ID=${user?.userId || ""}`,
     "--env", `PI_SERVER_USERNAME=${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}`,
     "--env", `PI_SERVER_PASSWORD=${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`,
-    "--env", `VNC_PASSWORD=${process.env.VNC_PASSWORD || ""}`,
     "--env", `PI_MODEL=${process.env.PI_MODEL || process.env.OPENCODE_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
     "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
@@ -158,17 +156,6 @@ function volumeArgs(name) {
 }
 
 const CONTAINER_NAME = (name) => `${STACK}_sandbox-${name}_1`;
-
-// Dynamic sandboxes publish VNC on the host from PUNCH_VNC_PORT_BASE (nightly default 26080).
-function vncPorts(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  const offset = h % 4000; // 0..3999
-  const vncRawBase = VNC_WEB_BASE - 180;
-  return { web: VNC_WEB_BASE + offset, vnc: vncRawBase + offset };
-}
-
-export { vncPorts };
 
 export function getContainerDiagnostics(name) {
   validateSandboxName(name);
@@ -326,15 +313,12 @@ async function runSandboxContainer(name) {
   for (const volumeName of volumeNames) {
     await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
   }
-  const ports = vncPorts(name);
   const args = [
     "run", "--detach",
     "--name", CONTAINER_NAME(name),
     "--network", NETWORK,
     "--network-alias", `sandbox-${name}`,
     ...userEnvArgs(name),
-    "--publish", `${ports.web}:6080`,
-    "--publish", `${ports.vnc}:5900`,
     "--device", "/dev/net/tun",
     "--cap-add", "NET_ADMIN",
     "--pids-limit", "512",
