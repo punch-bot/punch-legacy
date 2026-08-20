@@ -58,7 +58,7 @@ export const GUILD_SETTINGS_DEFAULTS = {
   reactionSummonEmoji: "🤖",
   reactionSummonEnabled: true,
   reactionProgressEnabled: true,
-  reactionProgressMode: "both", // "both" | "text" | "reactions"
+  reactionProgressMode: "both", // inert (lifecycle reactions removed; progress is the live status message)
   contextMode: "channel", // "channel" (legacy) | "thread" (reply-thread scoped)
 };
 

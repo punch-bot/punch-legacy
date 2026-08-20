@@ -40,9 +40,18 @@ function envValue(env, key) {
   return env?.[key];
 }
 
+// Reads a value preferring the PI_* name, falling back to the OPENCODE_* legacy alias.
+function envAuthValue(env, base) {
+  for (const key of [`PI_${base}`, `OPENCODE_${base}`]) {
+    const v = envValue(env, key);
+    if (typeof v === "string" && v !== "") return v;
+  }
+  return "";
+}
+
 function authHeaders(env, doctorToken) {
-  const username = envValue(env, "OPENCODE_SERVER_USERNAME") || "opencode";
-  const password = envValue(env, "OPENCODE_SERVER_PASSWORD") || "";
+  const username = envAuthValue(env, "SERVER_USERNAME") || "opencode";
+  const password = envAuthValue(env, "SERVER_PASSWORD");
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` };
   if (doctorToken) headers["x-punch-doctor-token"] = doctorToken;
   return headers;
@@ -274,11 +283,11 @@ async function routineChecks({ routines, userId }) {
 async function securityCheck({ env }) {
   const startedAt = Date.now();
   try {
-    const password = envValue(env, "OPENCODE_SERVER_PASSWORD");
+    const password = envAuthValue(env, "SERVER_PASSWORD");
     if (typeof password !== "string" || password.trim().length === 0) {
-      return [check("security-password", "warn", "Supervisor authentication", "OPENCODE_SERVER_PASSWORD is empty.", elapsed(startedAt), "Set a strong OPENCODE_SERVER_PASSWORD and recreate affected sandboxes.")];
+      return [check("security-password", "warn", "Supervisor authentication", "PI_SERVER_PASSWORD (or legacy OPENCODE_SERVER_PASSWORD) is empty.", elapsed(startedAt), "Set a strong PI_SERVER_PASSWORD and recreate affected sandboxes.")];
     }
-    return [check("security-password", "pass", "Supervisor authentication", "OPENCODE_SERVER_PASSWORD is configured.", elapsed(startedAt))];
+    return [check("security-password", "pass", "Supervisor authentication", "PI_SERVER_PASSWORD is configured.", elapsed(startedAt))];
   } catch (error) {
     return [check("security-password", "fail", "Supervisor authentication", `Could not inspect security configuration: ${errorMessage(error)}`, elapsed(startedAt))];
   }

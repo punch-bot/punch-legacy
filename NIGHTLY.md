@@ -58,13 +58,13 @@ Successful DM turns create bounded daily notes for cross-session recall and extr
 | Variable | Purpose |
 |----------|---------|
 | `DISCORD_TOKEN` | Nightly Discord app |
-| `OPENCODE_SERVER_PASSWORD` | Legacy alias for shared wire authentication |
+| `PI_SERVER_PASSWORD` | Shared wire authentication (legacy `OPENCODE_SERVER_PASSWORD` still read as fallback) |
 | `PUNCH_STACK_NAME` | `punch-nightly` |
 | `PUNCH_SANDBOX_IMAGE` | `punch-nightly-sandbox:latest` |
 | `PUNCH_VNC_PORT_BASE` | Nightly VNC base, normally `26080` |
-| `OPENCODE_MODEL` | Legacy alias for default model |
+| `PI_MODEL` | Default model (legacy `OPENCODE_MODEL` still read as fallback) |
 
-`OPENCODE_SERVER_URL` stays empty; routing uses dynamic registry.
+`PI_SERVER_URL` stays empty; routing uses dynamic registry.
 
 ## Feature differences
 

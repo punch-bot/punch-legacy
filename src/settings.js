@@ -20,7 +20,7 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
     lines.push(lock ? `- Channel lock: <#${lock}>` : "- Channel lock: none (any channel)");
     lines.push(summon ? `- Summon word: \`${prefix}${summon}\`` : `- Summon word: none (use @${botUsername})`);
     lines.push(`- Reaction summon: ${gs.reactionSummonEnabled ? "on" : "off"} (emoji: ${gs.reactionSummonEmoji})`);
-    lines.push(`- Progress: ${gs.reactionProgressEnabled ? "on" : "off"} (mode: ${gs.reactionProgressMode})`);
+    lines.push("- Progress: live status message (reactions no longer used)");
     lines.push(`- Context: ${gs.contextMode === "thread" ? "thread (reply-scoped)" : "channel (recent)"}`);
   }
   const trigger = store.getUserTrigger(userId);
@@ -110,7 +110,7 @@ export function setReactionSummonEnabled(guildId, enabled) {
 
 export function setProgressEnabled(guildId, enabled) {
   store.patchGuildSettings(guildId, { reactionProgressEnabled: enabled });
-  return `Progress reactions ${enabled ? "enabled" : "disabled"}.`;
+  return "Progress is always shown as a live status message now — lifecycle reactions were removed.";
 }
 
 export function setProgressMode(guildId, mode) {
@@ -118,7 +118,7 @@ export function setProgressMode(guildId, mode) {
     throw new Error("Mode must be `both`, `text`, or `reactions`.");
   }
   store.patchGuildSettings(guildId, { reactionProgressMode: mode });
-  return `Progress mode set to **${mode}**.`;
+  return "Progress mode no longer applies — reactions were removed; progress is always the live status message.";
 }
 
 export function setMultitaskEnabled(userId, enabled) {

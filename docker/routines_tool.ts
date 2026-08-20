@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
 
-const BOT_URL = process.env.PUNCH_BOT_URL || "http://bot:4098";
-const AUTH = "Basic " + Buffer.from("opencode:" + (process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+const BOT_URL = process.env.PUNCH_BOT_URL || "http://localhost:4097/bot";
+const AUTH = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
 
 async function botFetch(path: string, init: RequestInit = {}) {
   const response = await fetch(`${BOT_URL}${path}`, {
@@ -39,10 +39,8 @@ export default tool({
     id: tool.schema.string().optional().describe("Routine id for remove/pause/resume"),
   },
   async execute(args) {
-    const headers = { "x-discord-user-id": args.userId };
-
     if (args.action === "list") {
-      const data = await botFetch(`/routines/list?userId=${encodeURIComponent(args.userId)}`, { headers });
+      const data = await botFetch(`/routines/list?userId=${encodeURIComponent(args.userId)}`);
       return JSON.stringify(data.routines || [], null, 2);
     }
 
@@ -50,7 +48,6 @@ export default tool({
       if (!args.id) throw new Error("id is required for remove");
       const data = await botFetch(`/routines/${encodeURIComponent(args.id)}`, {
         method: "DELETE",
-        headers,
         body: JSON.stringify({ userId: args.userId }),
       });
       return JSON.stringify(data, null, 2);
@@ -60,7 +57,6 @@ export default tool({
       if (!args.id) throw new Error("id is required for pause");
       const data = await botFetch(`/routines/${encodeURIComponent(args.id)}/pause`, {
         method: "POST",
-        headers,
         body: JSON.stringify({ userId: args.userId }),
       });
       return JSON.stringify(data, null, 2);
@@ -70,7 +66,6 @@ export default tool({
       if (!args.id) throw new Error("id is required for resume");
       const data = await botFetch(`/routines/${encodeURIComponent(args.id)}/resume`, {
         method: "POST",
-        headers,
         body: JSON.stringify({ userId: args.userId }),
       });
       return JSON.stringify(data, null, 2);
@@ -86,7 +81,6 @@ export default tool({
 
     const data = await botFetch("/routines/create", {
       method: "POST",
-      headers,
       body: JSON.stringify({
         userId: args.userId,
         channelId: args.channelId || null,

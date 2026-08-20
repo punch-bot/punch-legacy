@@ -45,6 +45,7 @@ RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
     && npm cache clean --force
 
 COPY docker/serve-supervisor.mjs /usr/local/bin/serve-supervisor.mjs
+COPY docker/supervisor/ /usr/local/bin/supervisor/
 COPY docker/doctor.mjs /usr/local/lib/doctor.mjs
 COPY docker/pi-gateway.mjs /usr/local/bin/pi-gateway.mjs
 COPY docker/pi-turn-completion.mjs /usr/local/lib/pi-turn-completion.mjs

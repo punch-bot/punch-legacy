@@ -74,13 +74,22 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 
 | Path | Role |
 |------|------|
-| `src/index.js` | Discord client, chat queue, bot HTTP `:4098` |
+| `src/index.js` | Thin bootstrap: wires client, listeners, slash commands, routine scheduler, bot HTTP `:4098` |
+| `src/core/config.js` | Constants: token, prefix, ports, limits, `MODEL_LIST`, `PROVIDER_NAMES`, auth helpers |
+| `src/core/registry.js` | Shared mutable state: client, queues, dedup keys, question state, run chains |
+| `src/core/discord.js` | Client factory + shared helpers (reactions, progress bar, doctor tokens, reply/chunk) |
+| `src/core/supervisor.js` | `ensureUserSandbox` (per-user sandbox routing/creation) |
 | `src/agent.js` | Pi HTTP client (via pi-gateway), `BASE_SYSTEM`, compress |
+| `src/chat/*` | Chat pipeline: `context.js` (thread fetch/filter, `settingsDeps`), `queue.js` (`enqueueChat`, `withUserRunLock`), `chat.js` (`handleChat`), `attachments.js`, `memory-tags.js`, `embeds-questions.js`, `multitask.js`, `routines-fire.js`, `message-create.js`, `reaction-add.js` |
+| `src/commands/*` | Discord interaction/prefix commands: `interactions.js` (component+slash handlers), `prefix.js` (`handleCommand` + `!`-commands), `questions.js`, `slash.js` (`buildSlashCommands`) |
+| `src/gateway/pigeon.js` | Pigeon DM plumbing: notify, permission prompts, `handleAgentPigeon`, `runApprovedAgentPigeon` |
+| `src/gateway/bot-server.js` | Bot HTTP `:4098`: worker progress/complete, routines/collabs/state APIs, pigeon notify |
 | `src/memory.js` | Selective cited memory retrieval, durable facts, DM-only daily notes, compaction |
 | `src/doctor/index.js` | Bot-side routing, Docker, scheduler, and report diagnostics |
 | `docker/doctor.mjs` | Sandbox-local Pi, provider, browser, Tailscale, storage, and security probes |
 | `docker/pi-gateway.mjs` | Internal HTTP `:4096` adapter over Pi RPC |
-| `docker/serve-supervisor.mjs` | Gateway child + `:4097` supervisor API |
+| `docker/serve-supervisor.mjs` | Thin sandbox entrypoint: pi-gateway child + `:4097` supervisor API dispatch |
+| `docker/supervisor/*` | Sandbox supervisor modules: `state.mjs` (consts/state), `gateway.mjs` (pi-gateway lifecycle), `models.mjs` (model/provider/env/auth), `mcp.mjs` (registry sync + routes), `routes.mjs` (doctor/pigeon/tasks/env/secrets/tools/extensions), `providers.mjs`, `skills.mjs`, `workers.mjs`, `tailscale.mjs` |
 | `docker/routines_extension.ts` | Seed Pi routines tool |
 | `docker/skills-manager.mjs` | Instruction-skill metadata, precedence, proposals, enable state |
 | `docker/worker-manager.mjs` | Isolated Pi worker process records/lifecycle |
@@ -113,7 +122,7 @@ Three-part memory management system:
 
 ## Env naming (legacy aliases)
 
-Compose and sandboxes still use `OPENCODE_*` variable names (`OPENCODE_SERVER_PASSWORD`, `OPENCODE_MODEL`, etc.) as **legacy aliases** so existing `.env` / containers keep working. Product copy and Discord should not say “OpenCode”; treat them as Punch/Pi stack secrets. Basic-auth username remains `opencode` for wire compatibility.
+Primary env names are `PI_*` (`PI_SERVER_PASSWORD`, `PI_MODEL`, etc.). The old `OPENCODE_*` names remain as **legacy aliases** (read as fallbacks) so existing `.env` / containers keep working. Product copy and Discord should not say “OpenCode”; treat them as Punch/Pi stack secrets. Basic-auth username remains `opencode` for wire compatibility.
 
 ## Security
 
@@ -144,11 +153,11 @@ Manually run the sandbox (Pi) stack to verify it end-to-end:
 docker network create punch-nightly_edge 2>/dev/null || true
 docker run -d --cgroupns=host --name punch-nightly_sandbox-hello_1 \
   --network punch-nightly_edge --network-alias sandbox-hello \
-  -e OPENCODE_SERVER_PASSWORD=devpassword -e SANDBOX_NAME=hello \
+  -e PI_SERVER_PASSWORD=devpassword -e SANDBOX_NAME=hello \
   -e SANDBOX_USER_ID=000000000000000000 -e PUNCH_DOCTOR_TOKEN=doctortoken \
   -p 4096:4096 -p 4097:4097 --device /dev/net/tun --cap-add NET_ADMIN \
   punch-nightly-sandbox:latest
-# gateway health (basic auth opencode:$OPENCODE_SERVER_PASSWORD):
+# gateway health (basic auth opencode:$PI_SERVER_PASSWORD):
 curl -su opencode:devpassword http://localhost:4096/health   # {"ok":true,"tools":[...]}
 ```
 
@@ -156,4 +165,4 @@ curl -su opencode:devpassword http://localhost:4096/health   # {"ok":true,"tools
 
 **Secrets needed for full end-to-end (not present in the VM):**
 - `DISCORD_TOKEN` — the bot exits immediately without it (`src/index.js`), so no Discord flow runs.
-- `POOLSIDE_API_KEY` — the provider used for tests here. A Pi turn reaches `pi --mode rpc` and fails with `No API key found for poolside` until set. Poolside is a built-in OpenAI-compatible provider seeded by the supervisor (`docker/serve-supervisor.mjs`, baseUrl `https://inference.poolside.ai/v1`); Pi resolves its key from the `POOLSIDE_API_KEY` env var. Run the sandbox with `OPENCODE_MODEL=poolside/poolside/laguna-m.1` (splits to `--provider poolside --model poolside/laguna-m.1`) and pass `POOLSIDE_API_KEY` into the container env, or set it via supervisor `/apikey`/`/env` (Discord `/apikey set poolside <key>`). Note `anthropic/claude-sonnet-4-5` is only an alias to the default `opencode/big-pickle`. There is no free bundled provider.
+- `POOLSIDE_API_KEY` — the provider used for tests here. A Pi turn reaches `pi --mode rpc` and fails with `No API key found for poolside` until set. Poolside is a built-in OpenAI-compatible provider seeded by the supervisor (`docker/serve-supervisor.mjs`, baseUrl `https://inference.poolside.ai/v1`); Pi resolves its key from the `POOLSIDE_API_KEY` env var. Run the sandbox with `PI_MODEL=poolside/poolside/laguna-m.1` (splits to `--provider poolside --model poolside/laguna-m.1`) and pass `POOLSIDE_API_KEY` into the container env, or set it via supervisor `/apikey`/`/env` (Discord `/apikey set poolside <key>`). Note `anthropic/claude-sonnet-4-5` is only an alias to the default `opencode/big-pickle`. There is no free bundled provider.
