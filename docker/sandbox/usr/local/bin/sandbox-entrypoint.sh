@@ -3,7 +3,6 @@ set -e
 
 # Start Xvfb for headful browser (Puppeteer Pi extension + noVNC)
 Xvfb :99 -screen 0 1280x800x24 > /var/log/xvfb.log 2>&1 &
-XVFB_PID=$!
 
 # Start fluxbox window manager
 fluxbox >/dev/null 2>&1 &
@@ -21,30 +20,16 @@ mkdir -p /var/run/tailscale /var/lib/tailscale
 tailscaled --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 2>&1 &
 tailscale set --accept-dns=false 2>/dev/null || true
 
-# Seed Pi extensions / tools dirs on the work volume
-mkdir -p /work/.pi/extensions /work/.pi/tools /work/screenshots /data/pi/sessions /data/pi/agent
-if [ ! -f /work/.pi/extensions/routines.ts ] && [ -f /opt/pi/extensions/routines.ts ]; then
-  cp /opt/pi/extensions/routines.ts /work/.pi/extensions/routines.ts
-fi
-if [ -f /opt/pi/extensions/collab.ts ]; then
-  cp /opt/pi/extensions/collab.ts /work/.pi/extensions/collab.ts
-fi
-# Built-in browser tools: always refresh from the image so deploys pick up fixes
-if [ -f /opt/pi/extensions/browser.ts ]; then
-  cp /opt/pi/extensions/browser.ts /work/.pi/extensions/browser.ts
-fi
-if [ -f /opt/pi/extensions/searxng.ts ]; then
-  cp /opt/pi/extensions/searxng.ts /work/.pi/extensions/searxng.ts
-fi
-if [ -f /opt/pi/extensions/webfetch.ts ]; then
-  cp /opt/pi/extensions/webfetch.ts /work/.pi/extensions/webfetch.ts
-fi
-if [ -f /opt/pi/extensions/report_progress.ts ]; then
-  cp /opt/pi/extensions/report_progress.ts /work/.pi/extensions/report_progress.ts
-fi
-if [ -f /opt/pi/extensions/compress_context.ts ]; then
-  cp /opt/pi/extensions/compress_context.ts /work/.pi/extensions/compress_context.ts
-fi
+# Seed Pi extensions into the writable work volume (self-extension reload).
+# routines.ts preserves user edits; the rest refresh from the image each start.
+mkdir -p /work/.pi/extensions
+for ext in routines collab browser searxng webfetch report_progress compress_context; do
+  [ -f "/opt/pi/extensions/$ext.ts" ] || continue
+  if [ "$ext" = "routines" ] && [ -f "/work/.pi/extensions/routines.ts" ]; then
+    continue
+  fi
+  cp "/opt/pi/extensions/$ext.ts" "/work/.pi/extensions/$ext.ts"
+done
 if [ -f /opt/pi/context-pruning-state.mjs ]; then
   cp /opt/pi/context-pruning-state.mjs /work/.pi/context-pruning-state.mjs
 fi

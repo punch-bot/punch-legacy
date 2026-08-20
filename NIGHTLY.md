@@ -1,5 +1,7 @@
 # Punch Nightly — operations
 
+> **Warning:** The **"Cursor Cloud specific instructions"** in `AGENTS.md` (Firecracker VM, `dockerd` startup, `fuse-overlayfs` `daemon.json`, cgroup quirks) are **irrelevant** here. This runs on a **normal computer with a standard Docker daemon** — do not assume the VM environment or apply that setup guidance.
+
 Experimental stack at **`/Punch Nightly`**. Production is **`/punch`** — separate compose project, Discord app, volumes, and code path.
 
 Nightly is **Pi everywhere** from user perspective. `pi-gateway` is an internal HTTP adapter only.

@@ -1448,7 +1448,7 @@ export function registerInteractions(client) {
             }
           } else if (type === "local") {
             if (!commandStr?.trim()) throw new Error("Local MCP requires `command`");
-            // Simple argv split (supports "quoted" tokens). Same rules as docker/mcp-config.mjs.
+            // Simple argv split (supports "quoted" tokens). Same rules as docker/sandbox/usr/local/lib/mcp-config.mjs.
             const argv = [];
             let cur = "";
             let quote = null;

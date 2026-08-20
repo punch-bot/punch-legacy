@@ -1,4 +1,4 @@
-// Shared mutable state + constants for the sandbox supervisor (docker/serve-supervisor.mjs
+// Shared mutable state + constants for the sandbox supervisor (docker/sandbox/usr/local/bin/serve-supervisor.mjs
 // entrypoint). Route groups in this directory read/mutate these values.
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash, timingSafeEqual } from "node:crypto";

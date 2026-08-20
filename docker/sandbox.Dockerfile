@@ -34,42 +34,17 @@ ENV HOME=/root \
     PI_TELEMETRY=0 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pi/playwright-browsers
 
-RUN mkdir -p /data/pi/sessions /data/pi/agent /data/cache /data/state /work \
-      /opt/pi/extensions /opt/pi/playwright-browsers /opt/picfg /work/.pi/extensions /work/.pi/tools /work/.pi/skills /data/pi/skills /data/pi/skill-proposals /data/workers \
-      /root/.chrome-profile /work/screenshots /var/log
-
 # Playwright + Chromium under /opt/pi (not /root — home is a runtime volume mount).
-COPY docker/pi-package.json /opt/pi/package.json
+# docker/sandbox/ holds the sandbox filesystem tree (incl. package.json), copied
+# before the Pi deps install; runtime dirs are created by the entrypoint/supervisor.
+COPY docker/sandbox/ /
 RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
     && npx playwright install --with-deps chromium \
     && npm cache clean --force
 
-COPY docker/serve-supervisor.mjs /usr/local/bin/serve-supervisor.mjs
-COPY docker/supervisor/ /usr/local/bin/supervisor/
-COPY docker/doctor.mjs /usr/local/lib/doctor.mjs
-COPY docker/pi-gateway.mjs /usr/local/bin/pi-gateway.mjs
-COPY docker/pi-turn-completion.mjs /usr/local/lib/pi-turn-completion.mjs
-COPY docker/pi-progress.mjs /usr/local/lib/pi-progress.mjs
-COPY docker/mcp-config.mjs /usr/local/lib/mcp-config.mjs
+# pigeon-peer.js stays single-source in src/ (shared with the bot).
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js
-COPY docker/skills-manager.mjs /usr/local/lib/skills-manager.mjs
-COPY docker/worker-manager.mjs /usr/local/lib/worker-manager.mjs
-COPY docker/pi-worker-runner.mjs /usr/local/bin/pi-worker-runner.mjs
-COPY docker/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
-COPY docker/routines_extension.ts /opt/pi/extensions/routines.ts
-COPY docker/collab_extension.ts /opt/pi/extensions/collab.ts
-COPY docker/browser_extension.ts /opt/pi/extensions/browser.ts
-COPY docker/searxng_extension.ts /opt/pi/extensions/searxng.ts
-COPY docker/webfetch_extension.ts /opt/pi/extensions/webfetch.ts
-COPY docker/report_progress_extension.ts /opt/pi/extensions/report_progress.ts
-COPY docker/compress_context_extension.ts /opt/pi/extensions/compress_context.ts
-COPY docker/mcp_extension.ts /opt/pi/extensions/mcp.ts
-COPY docker/mcp-config.mjs /opt/pi/mcp-config.mjs
-COPY docker/context-pruning-state.mjs /opt/pi/context-pruning-state.mjs
-COPY docker/pi-SYSTEM.md /opt/pi/SYSTEM.md
-COPY docker/skills/ /opt/pi/skills/
 # API keys for Pi come from supervisor /env and /apikey (provider env vars).
-RUN echo '{}' > /opt/picfg/seed-auth.json
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
 
 WORKDIR /work
