@@ -954,16 +954,20 @@ async function handleCommand(message, cmd, rest) {
       const tailRest = tail.join(" ").trim();
 
       if (sub === "history") {
-        const entries = await routines.listHistory(uid, tailRest || null, 15);
-        if (entries.length === 0) {
-          await reply(message, "No routine history.");
-        } else {
-          const lines = entries.map((entry) => {
-            const icon = entry.status === "succeeded" ? "✅" : entry.status === "failed" ? "❌" : "⏳";
-            const error = entry.error ? ` — ${entry.error.slice(0, 180)}` : "";
-            return `${icon} \`${entry.routineId}\` attempt ${entry.attempt} ${new Date(entry.startedAt).toLocaleString()}${error}`;
-          });
-          await reply(message, `**Routine history:**\n${lines.join("\n")}`);
+        try {
+          const entries = await routines.listHistory(uid, tailRest || null, 15);
+          if (entries.length === 0) {
+            await reply(message, "No routine history.");
+          } else {
+            const lines = entries.map((entry) => {
+              const icon = entry.status === "succeeded" ? "✅" : entry.status === "failed" ? "❌" : "⏳";
+              const error = entry.error ? ` — ${entry.error.slice(0, 180)}` : "";
+              return `${icon} \`${entry.routineId}\` attempt ${entry.attempt} ${new Date(entry.startedAt).toLocaleString()}${error}`;
+            });
+            await reply(message, `**Routine history:**\n${lines.join("\n")}`);
+          }
+        } catch (err) {
+          await reply(message, `⚠️ ${err.message}`);
         }
         return true;
       }
@@ -971,16 +975,24 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "remove") {
         const id = tailRest.trim();
         if (!id) return void (await reply(message, `Usage: \`${PREFIX}routine remove <id>\``)), true;
-        const ok = await routines.removeRoutine(id, uid);
-        await reply(message, ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`);
+        try {
+          const ok = await routines.removeRoutine(id, uid);
+          await reply(message, ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`);
+        } catch (err) {
+          await reply(message, `⚠️ ${err.message}`);
+        }
         return true;
       }
 
       if (sub === "pause" || sub === "resume") {
         const id = tailRest.trim();
         if (!id) return void (await reply(message, `Usage: \`${PREFIX}routine ${sub} <id>\``)), true;
-        const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
-        await reply(message, r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`);
+        try {
+          const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
+          await reply(message, r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`);
+        } catch (err) {
+          await reply(message, `⚠️ ${err.message}`);
+        }
         return true;
       }
 
@@ -2593,7 +2605,7 @@ async function fireRoutine(routine) {
         response: "sandbox unreachable", status: "error", duration: Date.now() - start,
         routineId: routine.id,
       });
-      return;
+      return false;
     }
 
     const existingSession = state.getHeartbeatSession(uid);
@@ -2656,6 +2668,7 @@ async function fireRoutine(routine) {
         duration: Date.now() - start, routineId: routine.id,
         ...statistics.tokenFieldsFromAgent(res),
       });
+      return true;
     } catch (err) {
       console.error(`[heartbeat] routine ${routine.id} failed:`, err.message);
       try {
@@ -2667,8 +2680,8 @@ async function fireRoutine(routine) {
         response: err.message.slice(0, 2000), sessionId: existingSession || null,
         status: "error", duration: Date.now() - start, routineId: routine.id,
       });
+      return false;
     }
-    return;
   }
 
   // message / llm routines require a channel
@@ -2687,7 +2700,7 @@ async function fireRoutine(routine) {
         allowedMentions: { users: [routine.userId] },
       });
       console.log(`[routines] routine ${routine.id} sent via DM fallback (channel unavailable)`);
-      return;
+      return true;
     } catch (dmErr) {
       throw new Error(`Channel ${routine.channelId} not found and DM fallback failed: ${dmErr.message}`);
     }
@@ -2704,7 +2717,7 @@ async function fireRoutine(routine) {
       prompt: routine.payload.slice(0, 500), status: "success", duration: 0,
       routineId: routine.id,
     });
-    return;
+    return true;
   }
 
   const sandboxUrl = await ensureUserSandbox(routine.userId);
@@ -2713,7 +2726,7 @@ async function fireRoutine(routine) {
       content: `⚠️ <@${routine.userId}> Scheduled automation failed — sandbox unreachable.`,
       allowedMentions: { users: [routine.userId] },
     });
-    return;
+    return false;
   }
 
   const uid = routine.userId;
@@ -2787,6 +2800,7 @@ async function fireRoutine(routine) {
     duration: Date.now() - start, routineId: routine.id,
     ...statistics.tokenFieldsFromAgent(res),
   });
+  return true;
 }
 
 function verifyRoutineUser(bodyUserId, headerUserId) {
@@ -5156,7 +5170,11 @@ const botHttpServer = createServer(async (req, res) => {
   if (url.pathname === "/internal/routines/fire" && req.method === "POST") {
     try {
       if (!body?.routine) throw new Error("Missing routine");
-      await fireRoutine(body.routine);
+      const delivered = await fireRoutine(body.routine);
+      if (!delivered) {
+        res.writeHead(502, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ ok: false, error: "Routine delivery failed" }));
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ ok: true }));
     } catch (err) {
@@ -5197,17 +5215,18 @@ const botHttpServer = createServer(async (req, res) => {
   if (url.pathname === "/internal/exec" && req.method === "POST") {
     try {
       const expected = process.env.PUNCH_SUPERVISOR_TOKEN || "";
-      const offered = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-      if (expected && offered !== expected) {
+      const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ""));
+      if (!expected || !bearer || bearer[1] !== expected) {
         res.writeHead(401, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ error: "Unauthorized" }));
       }
       const participant = String(body?.participant || "");
       const argv = body?.argv;
       if (!participant) throw new Error("participant is required");
-      const result = await sandbox.execInSandbox(participant, argv, { cwd: body?.cwd || undefined });
+      if (!Array.isArray(argv) || argv[0] !== "git") throw new Error("Only git commands may be executed.");
+      const result = await sandbox.gitInSandbox(participant, argv.slice(1), { cwd: body?.cwd || undefined });
       res.writeHead(200, { "content-type": "application/json" });
-      return void res.end(JSON.stringify(result));
+      return void res.end(JSON.stringify({ code: 0, stdout: result.stdout, stderr: result.stderr }));
     } catch (err) {
       res.writeHead(400, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: err.message }));

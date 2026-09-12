@@ -1,7 +1,10 @@
+import "./helpers/supervisor-env.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import * as routines from "../src/routines.js";
+
+const SUPERVISOR_TOKEN = process.env.PUNCH_SUPERVISOR_TOKEN;
 
 test("parseTime resolves shorthand relative to now", () => {
   const before = Date.now();
@@ -47,7 +50,11 @@ function withFetch(handler, run) {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url: String(url), method: init.method, body: init.body });
+    const headers = init.headers || {};
+    if (headers.authorization !== `Bearer ${SUPERVISOR_TOKEN}`) {
+      throw new Error(`Supervisor request missing bearer token: ${init.method} ${url}`);
+    }
+    calls.push({ url: String(url), method: init.method, body: init.body, headers });
     const result = await handler(String(url), init);
     return {
       ok: result.status ? result.status < 400 : true,
@@ -80,6 +87,10 @@ test("CRUD proxies to the supervisor", async () => {
       assert.match(calls.find((c) => c.method === "DELETE").url, /\/routines\/r1\?userId=u1/);
       assert.match(calls.find((c) => c.url.includes("/pause")).url, /\/routines\/r1\/pause/);
       assert.match(calls.find((c) => c.url.includes("/resume")).url, /\/routines\/r1\/resume/);
+      const createCall = calls.find((c) => c.method === "POST" && /\/routines$/.test(c.url));
+      assert.ok(createCall, "expected a POST /routines call");
+      assert.deepEqual(JSON.parse(createCall.body), { userId: "u1", when: "30m" });
+      assert.ok(calls.every((c) => c.headers.authorization === `Bearer ${SUPERVISOR_TOKEN}`));
     },
   );
 });

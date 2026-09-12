@@ -1,6 +1,7 @@
 const BASE = (process.env.PUNCH_SUPERVISOR_URL || "http://supervisor:4100").replace(/\/+$/, "");
 const TOKEN = process.env.PUNCH_SUPERVISOR_TOKEN || "";
 const ENABLED = process.env.PUNCH_SUPERVISOR_URL !== "0" && process.env.PUNCH_SUPERVISOR_URL !== "";
+const TIMEOUT_MS = Number(process.env.PUNCH_SUPERVISOR_TIMEOUT_MS) || 15000;
 
 function headers(extra = {}) {
 	const result = { "content-type": "application/json", ...extra };
@@ -9,13 +10,27 @@ function headers(extra = {}) {
 }
 
 async function request(method, path, { body, sandboxName } = {}) {
+	if (!ENABLED) {
+		throw new Error('Supervisor is disabled (PUNCH_SUPERVISOR_URL is empty or "0").');
+	}
 	const extra = {};
 	if (sandboxName) extra["x-punch-sandbox"] = sandboxName;
-	const response = await fetch(`${BASE}${path}`, {
-		method,
-		headers: headers(extra),
-		body: body === undefined ? undefined : JSON.stringify(body),
-	});
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+	let response;
+	try {
+		response = await fetch(`${BASE}${path}`, {
+			method,
+			headers: headers(extra),
+			body: body === undefined ? undefined : JSON.stringify(body),
+			signal: controller.signal,
+		});
+	} catch (err) {
+		if (err?.name === "AbortError") throw new Error(`Supervisor request timed out after ${TIMEOUT_MS}ms: ${method} ${path}`);
+		throw err;
+	} finally {
+		clearTimeout(timer);
+	}
 	const text = await response.text();
 	let data;
 	try {

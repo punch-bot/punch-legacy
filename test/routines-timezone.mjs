@@ -94,5 +94,6 @@ test("computeNextRun honors active hours", () => {
   const inside = routines.computeNextRun({ kind: "interval", everyMs: 60_000 }, Date.parse("2026-08-10T15:00:00Z"), "America/New_York", activeHours);
   assert.equal(new Date(inside).toISOString(), "2026-08-10T15:01:00.000Z");
   const outside = routines.computeNextRun({ kind: "interval", everyMs: 60_000 }, Date.parse("2026-08-10T03:00:00Z"), "America/New_York", activeHours);
-  assert.ok(outside > Date.parse("2026-08-10T03:00:00Z"));
+  assert.equal(new Date(outside).toISOString(), "2026-08-10T13:00:00.000Z");
+  assert.match(routines.formatInTimeZone(outside, "America/New_York"), /9:00 AM/);
 });
