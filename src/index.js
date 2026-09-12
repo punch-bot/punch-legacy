@@ -33,7 +33,7 @@ import { isBotDirectlyMentioned } from "./message-mentions.js";
 import { formatReplyNewlines } from "./reply-format.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
-import * as routines from "./routines.js";
+import * as supervisor from "./supervisor.js";
 import * as settings from "./settings.js";
 import { formatInTimeZone, formatMessageTimestamp } from "./timezone.js";
 import { assessAgentPigeon, scanOutbound, pigeonTurnPreamble } from "./pigeon-supervisor.js";
@@ -55,7 +55,6 @@ import { setPigeonTrust, setPigeonDeny } from "./settings.js";
 import * as logs from "./logs.js";
 import * as state from "./state.js";
 import * as statistics from "./statistics.js";
-import * as collabs from "./collabs.js";
 import { renderDoctorReport, runDoctor } from "./doctor/index.js";
 import {
   createProgressRenderer,
@@ -616,16 +615,16 @@ function userTimeZone(userId) {
   return store.getUserSettings(userId).timeZone || "UTC";
 }
 
-function statisticsExtrasForUser(userId) {
+async function statisticsExtrasForUser(userId) {
   const sandboxName = sandbox.loadUsers().find((entry) => entry.userId === userId)?.name || null;
-  const activeRoutines = routines.listRoutines(userId).filter((routine) => routine.enabled !== false).length;
+  const activeRoutines = (await routines.listRoutines(userId)).filter((routine) => routine.enabled !== false).length;
   const memoryRecords = store.list("user", userId).length;
   return { sandboxName, activeRoutines, memoryRecords };
 }
 
 async function createRoutineReply(message, opts) {
   const timezone = opts.timezone || userTimeZone(opts.userId || message.author.id);
-  const routine = routines.addRoutine({ ...opts, timezone });
+  const routine = await routines.addRoutine({ ...opts, timezone });
   const when = formatInTimeZone(routine.nextRunAt, routine.timezone || timezone) || new Date(routine.nextRunAt).toISOString();
   await reply(message, `⏰ Scheduled (\`${routine.id}\`) — fires ${when}`);
   return routine;
@@ -954,7 +953,7 @@ async function handleCommand(message, cmd, rest) {
       const tailRest = tail.join(" ").trim();
 
       if (sub === "history") {
-        const entries = routines.listHistory(uid, tailRest || null, 15);
+        const entries = await routines.listHistory(uid, tailRest || null, 15);
         if (entries.length === 0) {
           await reply(message, "No routine history.");
         } else {
@@ -971,7 +970,7 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "remove") {
         const id = tailRest.trim();
         if (!id) return void (await reply(message, `Usage: \`${PREFIX}routine remove <id>\``)), true;
-        const ok = routines.removeRoutine(id, uid);
+        const ok = await routines.removeRoutine(id, uid);
         await reply(message, ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`);
         return true;
       }
@@ -979,7 +978,7 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "pause" || sub === "resume") {
         const id = tailRest.trim();
         if (!id) return void (await reply(message, `Usage: \`${PREFIX}routine ${sub} <id>\``)), true;
-        const r = routines.setRoutineEnabled(id, uid, sub === "resume");
+        const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
         await reply(message, r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`);
         return true;
       }
@@ -1491,7 +1490,9 @@ client.once(Events.ClientReady, async (c) => {
     console.error("Failed to register slash commands:", err.message);
   }
 
-  routines.startScheduler(fireRoutine);
+  if (!supervisor.supervisorEnabled) {
+    console.warn("PUNCH_SUPERVISOR_URL unset; routine firing disabled (slash-command scheduling still local)");
+  }
 });
 
 const userQueues = new Map();
@@ -3518,7 +3519,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     try {
       if (sub === "status") {
-        const records = collabs.listFor(owner);
+        const records = await supervisor.collabs.listFor(owner);
         const text = records.length
           ? records.map((record) => {
               const proposal = record.proposal;
@@ -3532,7 +3533,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const workspace = interaction.options.getString("workspace", true);
       const task = sub === "start" ? interaction.options.getString("task", true) : "";
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const collab = await collabs.create({ owner, reviewer, workspace });
+      const collab = await supervisor.collabs.create({ owner, reviewer, workspace, task });
       if (task) {
         const reviewerId = sandbox.loadUsers().find((user) => user.name === reviewer)?.userId;
         if (reviewerId) {
@@ -4088,7 +4089,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const activeEnd = interaction.options.getInteger("active_end");
         const activeHours = activeStart === null || activeEnd === null ? null : { start: activeStart, end: activeEnd, timezone };
         const schedule = routines.parseRecurrence(when, recurrence, timezone);
-        const routine = routines.addRoutine({
+        const routine = await routines.addRoutine({
           ...ctx,
           channelId: type === "heartbeat" ? null : ctx.channelId,
           type, payload: text, schedule, timezone, activeHours,
@@ -4109,7 +4110,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (sub === "history") {
       const id = interaction.options.getString("id") || null;
-      const entries = routines.listHistory(ctx.userId, id, 20);
+      const entries = await routines.listHistory(ctx.userId, id, 20);
       const body = entries.length
         ? `**Routine history:**\n${entries.map((entry) => `${entry.status === "succeeded" ? "✅" : entry.status === "failed" ? "❌" : "⏳"} \`${entry.routineId}\` attempt ${entry.attempt} ${new Date(entry.startedAt).toLocaleString()}${entry.error ? ` — ${entry.error.slice(0, 180)}` : ""}`).join("\n")}`
         : "No routine history.";
@@ -4119,7 +4120,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (sub === "remove") {
       const id = interaction.options.getString("id", true);
-      const ok = routines.removeRoutine(id, ctx.userId);
+      const ok = await routines.removeRoutine(id, ctx.userId);
       await interaction.reply({
         content: ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`,
         flags: MessageFlags.Ephemeral,
@@ -4129,7 +4130,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (sub === "pause" || sub === "resume") {
       const id = interaction.options.getString("id", true);
-      const r = routines.setRoutineEnabled(id, ctx.userId, sub === "resume");
+      const r = await routines.setRoutineEnabled(id, ctx.userId, sub === "resume");
       await interaction.reply({
         content: r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`,
         flags: MessageFlags.Ephemeral,
@@ -4197,7 +4198,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const ctx = routineContextFromInteraction(interaction);
     try {
       const zone = userTimeZone(ctx.userId);
-      const routine = routines.addRoutine({
+      const routine = await routines.addRoutine({
         ...ctx,
         type: "message",
         payload: message,
@@ -4327,7 +4328,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try {
         const zone = userTimeZone(uid);
         const schedule = routines.parseRecurrence(when, "once", zone);
-        const routine = routines.addRoutine({
+        const routine = await routines.addRoutine({
           userId: uid, channelId: null, guildId: interaction.guild?.id || null,
           type: "heartbeat", payload: prompt, schedule, timezone: zone,
         });
@@ -4343,7 +4344,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (sub === "list") {
-      const list = routines.listRoutines(uid).filter((r) => r.type === "heartbeat");
+      const list = (await routines.listRoutines(uid)).filter((r) => r.type === "heartbeat");
       const body = list.length === 0
         ? "No heartbeat automations scheduled."
         : `**Your heartbeats (${list.length}):**\n${list.map(routines.formatRoutine).join("\n")}`;
@@ -4353,7 +4354,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (sub === "remove") {
       const id = interaction.options.getString("id", true);
-      const ok = routines.removeRoutine(id, uid);
+      const ok = await routines.removeRoutine(id, uid);
       await interaction.reply({
         content: ok ? `Removed heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.`,
         flags: MessageFlags.Ephemeral,
@@ -4363,7 +4364,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (sub === "pause" || sub === "resume") {
       const id = interaction.options.getString("id", true);
-      const r = routines.setRoutineEnabled(id, uid, sub === "resume");
+      const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
       await interaction.reply({
         content: r ? `${sub === "pause" ? "Paused" : "Resumed"} heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.`,
         flags: MessageFlags.Ephemeral,
@@ -5058,9 +5059,9 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const list = routines.listRoutines(userId);
+        const data = await supervisor.routines.list(userId);
         res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ routines: list }));
+        return void res.end(JSON.stringify({ routines: data.routines }));
       }
 
       if (req.method === "POST" && url.pathname === "/routines/create") {
@@ -5077,26 +5078,19 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing channelId (required for non-heartbeat types)" }));
         }
-        const timezone = body.timezone || userTimeZone(userId);
-        let schedule = body.schedule;
-        if (body.when) {
-          schedule = routines.parseRecurrence(body.when, body.recurrence || "once", timezone);
-        }
-        if (!schedule) {
-          res.writeHead(400, { "content-type": "application/json" });
-          return void res.end(JSON.stringify({ error: "Missing schedule or when" }));
-        }
-        const routine = routines.addRoutine({
+        const data = await supervisor.routines.create({
           userId,
-          channelId: body.channelId,
+          channelId: body.channelId || null,
           guildId: body.guildId || null,
           type: body.type,
           payload: body.payload,
-          schedule,
-          timezone,
+          when: body.when,
+          recurrence: body.recurrence || "once",
+          timezone: body.timezone || userTimeZone(userId),
+          schedule: body.schedule,
         });
         res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ routine }));
+        return void res.end(JSON.stringify({ routine: data.routine }));
       }
 
       const deleteMatch = url.pathname.match(/^\/routines\/([^/]+)$/);
@@ -5110,9 +5104,9 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const ok = routines.removeRoutine(deleteMatch[1], userId);
-        res.writeHead(ok ? 200 : 404, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ success: ok }));
+        const data = await supervisor.routines.remove(deleteMatch[1], userId);
+        res.writeHead(data.ok ? 200 : 404, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ success: data.ok }));
       }
 
       const pauseMatch = url.pathname.match(/^\/routines\/([^/]+)\/pause$/);
@@ -5126,9 +5120,9 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const r = routines.pauseRoutine(pauseMatch[1], userId);
-        res.writeHead(r ? 200 : 404, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ routine: r }));
+        const data = await supervisor.routines.pause(pauseMatch[1], userId);
+        res.writeHead(data.routine ? 200 : 404, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ routine: data.routine }));
       }
 
       const resumeMatch = url.pathname.match(/^\/routines\/([^/]+)\/resume$/);
@@ -5142,13 +5136,54 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const r = routines.resumeRoutine(resumeMatch[1], userId);
-        res.writeHead(r ? 200 : 404, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ routine: r }));
+        const data = await supervisor.routines.resume(resumeMatch[1], userId);
+        res.writeHead(data.routine ? 200 : 404, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ routine: data.routine }));
       }
 
       res.writeHead(404);
       return void res.end("Not Found");
+    } catch (err) {
+      res.writeHead(500, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  if (url.pathname === "/internal/routines/fire" && req.method === "POST") {
+    try {
+      if (!body?.routine) throw new Error("Missing routine");
+      await fireRoutine(body.routine);
+      res.writeHead(200, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ ok: true }));
+    } catch (err) {
+      res.writeHead(500, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
+  if (url.pathname === "/internal/collabs/event" && req.method === "POST") {
+    try {
+      const collab = body?.collab;
+      if (!collab) throw new Error("Missing collab");
+      const id = collab.id;
+      if (body.type === "proposed") {
+        const reviewerId = sandbox.loadUsers().find((user) => user.name === collab.proposal?.reviewer)?.userId;
+        if (reviewerId) {
+          handleAgentPigeon(
+            reviewerId,
+            collab.owner,
+            `Collaboration ${id} needs review. Fetch branch ${collab.proposal.branch} at ${collab.proposal.head}, inspect diff and tests, then use the collab tool to approve or request changes.`,
+            0,
+          ).catch(() => {});
+        }
+      } else if (body.type === "merged") {
+        for (const participant of collab.participants) {
+          const userId = sandbox.loadUsers().find((user) => user.name === participant)?.userId;
+          if (userId) notifyPigeonDM(userId, "collab", `Collaboration **${id}** auto-merged \`${collab.base.slice(0, 12)}\` into main.`).catch(() => {});
+        }
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ ok: true }));
     } catch (err) {
       res.writeHead(500, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: err.message }));
@@ -5168,7 +5203,12 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing reviewer or workspace." }));
         }
-        const collab = await collabs.create({ owner: actor, reviewer: String(body.reviewer).toLowerCase(), workspace: body.workspace });
+        const collab = await supervisor.collabs.create({
+          owner: actor,
+          reviewer: String(body.reviewer).toLowerCase(),
+          workspace: body.workspace,
+          task: body.task,
+        });
         const reviewerId = sandbox.loadUsers().find((user) => user.name === collab.participants[1])?.userId;
         if (reviewerId) {
           const task = String(body.task || "Review future collaboration proposals carefully, run relevant tests, and request changes until code is good.").slice(0, 3000);
@@ -5178,8 +5218,9 @@ const botHttpServer = createServer(async (req, res) => {
         return void res.end(JSON.stringify({ collab }));
       }
       if (req.method === "GET" && url.pathname === "/collabs") {
+        const records = await supervisor.collabs.listFor(actor);
         res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ collabs: collabs.listFor(actor) }));
+        return void res.end(JSON.stringify({ collabs: records }));
       }
       const match = url.pathname.match(/^\/collabs\/(col_[a-f0-9]{12})(?:\/(propose|review))?$/);
       if (!match) {
@@ -5188,31 +5229,21 @@ const botHttpServer = createServer(async (req, res) => {
       }
       const [, id, action] = match;
       if (req.method === "GET" && !action) {
+        const collab = await supervisor.collabs.getFor(id, actor);
         res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ collab: collabs.getFor(id, actor) }));
+        return void res.end(JSON.stringify({ collab }));
       }
       if (!body) {
         res.writeHead(400, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ error: "Invalid JSON" }));
       }
       if (req.method === "POST" && action === "propose") {
-        const collab = await collabs.propose({ id, actor, head: body.head });
-        const reviewer = collab.proposal.reviewer;
-        const reviewerId = sandbox.loadUsers().find((user) => user.name === reviewer)?.userId;
-        if (reviewerId) {
-          handleAgentPigeon(reviewerId, actor, `Collaboration ${id} needs review. Fetch branch ${collab.proposal.branch} at ${collab.proposal.head}, inspect diff and tests, then use the collab tool to approve or request changes.`, 0).catch(() => {});
-        }
+        const collab = await supervisor.collabs.propose({ id, actor, head: body.head });
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ collab }));
       }
       if (req.method === "POST" && action === "review") {
-        const collab = await collabs.review({ id, actor, approve: body.approve === true, notes: body.notes });
-        if (collab.proposal.status === "merged") {
-          for (const participant of collab.participants) {
-            const userId = sandbox.loadUsers().find((user) => user.name === participant)?.userId;
-            if (userId) notifyPigeonDM(userId, "collab", `Collaboration **${id}** auto-merged \`${collab.base.slice(0, 12)}\` into main.`).catch(() => {});
-          }
-        }
+        const collab = await supervisor.collabs.review({ id, actor, approve: body.approve === true, notes: body.notes });
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ collab }));
       }

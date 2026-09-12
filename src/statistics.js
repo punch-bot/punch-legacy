@@ -189,7 +189,7 @@ export async function handleStatisticsInteraction(interaction, extrasForUser) {
     return true;
   }
 
-  const extras = typeof extrasForUser === "function" ? extrasForUser(parsed.userId) : (extrasForUser || {});
+  const extras = typeof extrasForUser === "function" ? await extrasForUser(parsed.userId) : (extrasForUser || {});
   const embed = buildStatisticsEmbed(parsed.userId, parsed.period, extras);
   const components = buildStatisticsComponents(parsed.userId, parsed.period);
 
@@ -203,7 +203,7 @@ export async function handleStatisticsInteraction(interaction, extrasForUser) {
 
 export async function handleStatisticsCommand(interaction, extrasForUser) {
   const uid = interaction.user.id;
-  const extras = typeof extrasForUser === "function" ? extrasForUser(uid) : (extrasForUser || {});
+  const extras = typeof extrasForUser === "function" ? await extrasForUser(uid) : (extrasForUser || {});
   const embed = buildStatisticsEmbed(uid, "week", extras);
   const components = buildStatisticsComponents(uid, "week");
   await interaction.reply({

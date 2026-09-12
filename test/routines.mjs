@@ -1,57 +1,44 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
-const dataDir = mkdtempSync(join(tmpdir(), "punch-routines-"));
-process.env.DATA_DIR = dataDir;
-process.env.PUNCH_ROUTINE_RETRY_BASE_MS = "1000";
-const moduleUrl = new URL("../src/routines.js", import.meta.url);
-moduleUrl.searchParams.set("test", `${Date.now()}-${Math.random()}`);
-const routines = await import(moduleUrl.href);
+import * as routines from "../src/routines.js";
 
-test.after(() => {
-  routines.stopScheduler();
-  rmSync(dataDir, { recursive: true, force: true });
+test("parseTime resolves shorthand relative to now", () => {
+  const before = Date.now();
+  const at = routines.parseTime("30m");
+  assert.ok(at >= before + 29 * 60_000 && at <= Date.now() + 31 * 60_000);
 });
 
-test("routine storage is atomic-looking JSON with durable execution history", () => {
-  const routine = routines.addRoutine({
-    userId: "user", channelId: "channel", type: "message", payload: "hello",
-    schedule: { kind: "once", at: Date.now() + 60_000 },
-  });
-  const stored = JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8"));
-  assert.equal(stored[0].id, routine.id);
-  assert.equal(stored[0].state, "queued");
-  assert.equal(stored[0].attempts, 0);
+test("parseRecurrence: once, daily, and every", () => {
+  assert.equal(routines.parseRecurrence("tomorrow 9am", "once").kind, "once");
+  assert.deepEqual(routines.parseRecurrence("9am", "daily", "UTC"), { kind: "cron", cron: "0 9 * * *" });
+  assert.deepEqual(routines.parseRecurrence("", "every 6h"), { kind: "interval", everyMs: 6 * 3_600_000 });
 });
 
-test("one-shot succeeds once then cleans up while retaining history", async () => {
-  const routine = routines.addRoutine({
-    userId: "once-user", channelId: "channel", type: "message", payload: "once",
-    schedule: { kind: "once", at: Date.now() + 20 },
-  });
-  let runs = 0;
-  routines.startScheduler(async () => { runs += 1; });
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  assert.equal(runs, 1);
-  assert.equal(routines.getRoutine(routine.id), null);
-  assert.equal(routines.listHistory("once-user", routine.id)[0].status, "succeeded");
-  routines.stopScheduler();
+test("parseEveryInterval maps minutes and hours", () => {
+  assert.deepEqual(routines.parseEveryInterval("15m"), { kind: "interval", everyMs: 15 * 60_000 });
+  assert.deepEqual(routines.parseEveryInterval("2h"), { kind: "interval", everyMs: 2 * 3_600_000 });
+  assert.throws(() => routines.parseEveryInterval("daily"), /Could not parse interval/);
 });
 
-test("failed routine gets bounded retry backoff rather than next-tick loop", async () => {
-  const routine = routines.addRoutine({
-    userId: "retry-user", channelId: "channel", type: "message", payload: "retry",
-    schedule: { kind: "once", at: Date.now() + 20 },
+test("computeNextRun handles once, interval, and cron", () => {
+  const future = Date.now() + 60_000;
+  assert.equal(routines.computeNextRun({ kind: "once", at: future }, Date.now()), future);
+  assert.equal(routines.computeNextRun({ kind: "interval", everyMs: 1_000 }, 1_000), 2_000);
+  assert.ok(routines.computeNextRun({ kind: "cron", cron: "0 9 * * *" }, Date.now(), "UTC") > Date.now());
+});
+
+test("formatRoutine renders a human label", () => {
+  const text = routines.formatRoutine({
+    id: "abc12345",
+    type: "message",
+    payload: "standup",
+    schedule: { kind: "interval", everyMs: 3_600_000 },
+    timezone: "UTC",
+    nextRunAt: Date.now() + 3_600_000,
+    enabled: true,
+    state: "queued",
   });
-  routines.startScheduler(async () => { throw new Error("delivery failed"); });
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  const afterFailure = routines.getRoutine(routine.id);
-  assert.equal(afterFailure.state, "queued");
-  assert.equal(afterFailure.attempts, 1);
-  assert.ok(afterFailure.nextRunAt >= Date.now() + 800);
-  assert.equal(routines.listHistory("retry-user", routine.id)[0].error, "delivery failed");
-  routines.stopScheduler();
+  assert.match(text, /\[remind\]/);
+  assert.match(text, /standup/);
 });

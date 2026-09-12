@@ -3,6 +3,31 @@
 name: ${PUNCH_STACK_NAME:-punch}
 
 services:
+  supervisor:
+    build:
+      context: ${PUNCH_SUPERVISOR_REPO:-https://github.com/punch-bot/supervisor.git#main}
+    image: ${PUNCH_STACK_NAME:-punch}-supervisor
+    env_file: .env
+    environment:
+      SUPERVISOR_PORT: "4100"
+      SUPERVISOR_DATA_DIR: /data
+      SUPERVISOR_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:-}
+      ROUTINE_FIRE_URL: http://bot:4098
+      ROUTINE_FIRE_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:-}
+      COLLAB_EVENT_URL: http://bot:4098
+      COLLAB_EVENT_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:-}
+      PUNCH_WORKSPACE_ROOT: /work
+    tmpfs:
+      - /tmp
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - edge
+    volumes:
+      - supervisor_state:/data
+    restart: unless-stopped
+
   bot:
     build:
       context: .
@@ -12,6 +37,8 @@ services:
     environment:
       PUNCH_STACK_NAME: ${PUNCH_STACK_NAME:-punch}
       PUNCH_SANDBOX_IMAGE: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
+      PUNCH_SUPERVISOR_URL: ${PUNCH_SUPERVISOR_URL:-http://supervisor:4100}
+      PUNCH_SUPERVISOR_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:-}
       OPENCODE_SERVER_URL: ""
       SANDBOX_MAP: "{}"
       OPENCODE_REMOTE_DIR: /work
@@ -55,3 +82,4 @@ volumes:
   octl_bot:
   bot_state:
   searxng-data:
+  supervisor_state:
