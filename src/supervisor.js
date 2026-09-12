@@ -1,6 +1,7 @@
-const BASE = (process.env.PUNCH_SUPERVISOR_URL || "http://supervisor:4100").replace(/\/+$/, "");
+const RAW_URL = process.env.PUNCH_SUPERVISOR_URL || "";
+const BASE = (RAW_URL || "http://supervisor:4100").replace(/\/+$/, "");
 const TOKEN = process.env.PUNCH_SUPERVISOR_TOKEN || "";
-const ENABLED = process.env.PUNCH_SUPERVISOR_URL !== "0" && process.env.PUNCH_SUPERVISOR_URL !== "";
+const ENABLED = RAW_URL !== "0" && RAW_URL !== "";
 const TIMEOUT_MS = Number(process.env.PUNCH_SUPERVISOR_TIMEOUT_MS) || 15000;
 
 function headers(extra = {}) {

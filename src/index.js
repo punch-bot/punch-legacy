@@ -4338,6 +4338,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const sub = interaction.options.getSubcommand();
     const uid = interaction.user.id;
     const cid = interaction.channelId;
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (sub === "add") {
       const when = interaction.options.getString("when", true);
@@ -4350,42 +4351,45 @@ client.on(Events.InteractionCreate, async (interaction) => {
           type: "heartbeat", payload: prompt, schedule, timezone: zone,
         });
         const whenLabel = formatInTimeZone(routine.nextRunAt, zone) || new Date(routine.nextRunAt).toISOString();
-        await interaction.reply({
-          content: `💓 Heartbeat scheduled (\`${routine.id}\`) — fires ${whenLabel}\nI'll DM you the results each time.`,
-          flags: MessageFlags.Ephemeral,
-        });
+        await interaction.editReply({ content: `💓 Heartbeat scheduled (\`${routine.id}\`) — fires ${whenLabel}\nI'll DM you the results each time.` });
       } catch (err) {
-        await interaction.reply({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
       }
       return;
     }
 
     if (sub === "list") {
-      const list = (await routines.listRoutines(uid)).filter((r) => r.type === "heartbeat");
-      const body = list.length === 0
-        ? "No heartbeat automations scheduled."
-        : `**Your heartbeats (${list.length}):**\n${list.map(routines.formatRoutine).join("\n")}`;
-      await interaction.reply({ content: body, flags: MessageFlags.Ephemeral });
+      try {
+        const list = (await routines.listRoutines(uid)).filter((r) => r.type === "heartbeat");
+        const body = list.length === 0
+          ? "No heartbeat automations scheduled."
+          : `**Your heartbeats (${list.length}):**\n${list.map(routines.formatRoutine).join("\n")}`;
+        await interaction.editReply({ content: body });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
       return;
     }
 
     if (sub === "remove") {
-      const id = interaction.options.getString("id", true);
-      const ok = await routines.removeRoutine(id, uid);
-      await interaction.reply({
-        content: ok ? `Removed heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      try {
+        const id = interaction.options.getString("id", true);
+        const ok = await routines.removeRoutine(id, uid);
+        await interaction.editReply({ content: ok ? `Removed heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.` });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
       return;
     }
 
     if (sub === "pause" || sub === "resume") {
-      const id = interaction.options.getString("id", true);
-      const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
-      await interaction.reply({
-        content: r ? `${sub === "pause" ? "Paused" : "Resumed"} heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      try {
+        const id = interaction.options.getString("id", true);
+        const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
+        await interaction.editReply({ content: r ? `${sub === "pause" ? "Paused" : "Resumed"} heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.` });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
       return;
     }
 
@@ -4402,10 +4406,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const preview = a.response?.slice(0, 80) || "(no output)";
         return `${status} \`${t}\` ${dur} — ${preview}`;
       });
-      await interaction.reply({
-        content: `**Recent heartbeat activity:**\n${lines.join("\n")}`,
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ content: `**Recent heartbeat activity:**\n${lines.join("\n")}` });
       return;
     }
   }
@@ -4794,6 +4795,11 @@ function botHttpAuth(req) {
   return false;
 }
 
+function isSupervisorRequest(req) {
+  const token = process.env.PUNCH_SUPERVISOR_TOKEN || "";
+  return Boolean(token) && req.headers.authorization === "Bearer " + token;
+}
+
 async function notifyPigeonDM(recipientId, from, text) {
   try {
     const user = await client.users.fetch(recipientId);
@@ -5171,6 +5177,10 @@ const botHttpServer = createServer(async (req, res) => {
 
   if (url.pathname === "/internal/routines/fire" && req.method === "POST") {
     try {
+      if (!isSupervisorRequest(req)) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Unauthorized" }));
+      }
       if (!body?.routine) throw new Error("Missing routine");
       const delivered = await fireRoutine(body.routine);
       if (!delivered) {
@@ -5187,6 +5197,10 @@ const botHttpServer = createServer(async (req, res) => {
 
   if (url.pathname === "/internal/collabs/event" && req.method === "POST") {
     try {
+      if (!isSupervisorRequest(req)) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Unauthorized" }));
+      }
       const collab = body?.collab;
       if (!collab) throw new Error("Missing collab");
       const id = collab.id;
@@ -5216,9 +5230,7 @@ const botHttpServer = createServer(async (req, res) => {
 
   if (url.pathname === "/internal/exec" && req.method === "POST") {
     try {
-      const expected = process.env.PUNCH_SUPERVISOR_TOKEN || "";
-      const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ""));
-      if (!expected || !bearer || bearer[1] !== expected) {
+      if (!isSupervisorRequest(req)) {
         res.writeHead(401, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ error: "Unauthorized" }));
       }
