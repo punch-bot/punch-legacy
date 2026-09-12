@@ -3490,14 +3490,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const up = await sandbox.composeUp(name);
       if (!up.ok) {
         sandbox.removeUser(name);
-        await hostRegistration.refresh();
+        void hostRegistration.refresh();
         const err = up.error.length > 1500 ? up.error.slice(0, 1500) + "..." : up.error;
         await interaction.editReply({ content: `⚠️ Failed to create sandbox: ${err}` });
         return;
       }
 
       reloadSandboxMap();
-      await hostRegistration.refresh();
+      void hostRegistration.refresh();
       const vp = sandbox.vncPorts(name);
       const vncNote = process.env.VNC_PASSWORD
         ? `\n🌐 VNC: http://<host>:${vp.web}/ (password-protected) or raw VNC on port ${vp.vnc}.`
@@ -3522,8 +3522,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       reloadSandboxMap();
-      await hostRegistration.refresh();
       await interaction.reply({ content: `✅ Sandbox **${name}** removed.`, flags: MessageFlags.Ephemeral });
+      void hostRegistration.refresh();
       return;
     }
   }
