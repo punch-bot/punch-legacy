@@ -1,5 +1,3 @@
-import * as sandbox from "./sandbox-manager.js";
-
 const BASE = (process.env.PUNCH_SUPERVISOR_URL || "http://supervisor:4100").replace(/\/+$/, "");
 const TOKEN = process.env.PUNCH_SUPERVISOR_TOKEN || "";
 const ENABLED = process.env.PUNCH_SUPERVISOR_URL !== "0" && process.env.PUNCH_SUPERVISOR_URL !== "";
@@ -41,6 +39,11 @@ export const routines = {
 		request(
 			"GET",
 			`/routines/${encodeURIComponent(id)}/history?userId=${encodeURIComponent(userId)}&limit=${limit}`,
+		),
+	historyAll: (userId, limit = 20) =>
+		request(
+			"GET",
+			`/routines/history?userId=${encodeURIComponent(userId)}&limit=${limit}`,
 		),
 };
 
@@ -98,17 +101,3 @@ export function registerHost({ name, url, participants, token, intervalMs = 3000
 	};
 }
 
-
-/**
- * Git runner the supervisor uses for collab work. The supervisor owns the state
- * machine; hosts own execution, so each git call names the participant whose
- * host should run it. Kept for in-process use (tests); the supervisor service
- * routes to hosts over HTTP via ../supervisor/src/exec.js.
- */
-export function collabGitRunner() {
-	return async (args, sandboxName) => {
-		if (!sandboxName) throw new Error("collab git call requires a sandbox name");
-		const result = await sandbox.gitInSandbox(sandboxName, args);
-		return result.stdout.trim();
-	};
-}

@@ -33,6 +33,7 @@ import { isBotDirectlyMentioned } from "./message-mentions.js";
 import { formatReplyNewlines } from "./reply-format.js";
 import * as store from "./memory.js";
 import * as sandbox from "./sandbox-manager.js";
+import * as routines from "./routines.js";
 import * as supervisor from "./supervisor.js";
 import * as settings from "./settings.js";
 import { formatInTimeZone, formatMessageTimestamp } from "./timezone.js";
@@ -4771,7 +4772,10 @@ const BOT_HTTP_PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
 function botHttpAuth(req) {
   const auth = req.headers.authorization || "";
   const expected = "Basic " + Buffer.from("opencode:" + BOT_HTTP_PASS).toString("base64");
-  return auth === expected;
+  if (auth === expected) return true;
+  const supervisorToken = process.env.PUNCH_SUPERVISOR_TOKEN || "";
+  if (supervisorToken && auth === "Bearer " + supervisorToken) return true;
+  return false;
 }
 
 async function notifyPigeonDM(recipientId, from, text) {

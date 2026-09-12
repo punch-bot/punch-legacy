@@ -77,6 +77,17 @@ test("parseDailyTime builds a cron from the user timezone", () => {
   assert.equal(schedule.cron, "0 9 * * *");
 });
 
+test("computeNextRun keeps a cron on the local wall clock across DST", () => {
+  // Winter is GMT (+0): next 9am London is 09:00Z.
+  const winter = routines.computeNextRun({ kind: "cron", cron: "0 9 * * *" }, Date.parse("2026-01-15T12:00:00Z"), "Europe/London");
+  assert.match(routines.formatInTimeZone(winter, "Europe/London"), /9:00 AM/);
+  assert.equal(new Date(winter).getUTCHours(), 9);
+  // Summer is BST (+1): still 9am local, i.e. 08:00Z.
+  const summer = routines.computeNextRun({ kind: "cron", cron: "0 9 * * *" }, Date.parse("2026-07-15T12:00:00Z"), "Europe/London");
+  assert.match(routines.formatInTimeZone(summer, "Europe/London"), /9:00 AM/);
+  assert.equal(new Date(summer).getUTCHours(), 8);
+});
+
 test("computeNextRun honors active hours", () => {
   const activeHours = { start: 9, end: 17, timezone: "America/New_York" };
   // 2026-08-10T15:00Z is 11:00 EDT (inside), 2026-08-10T03:00Z is 23:00 EDT (outside).

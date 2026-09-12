@@ -42,3 +42,55 @@ test("formatRoutine renders a human label", () => {
   assert.match(text, /\[remind\]/);
   assert.match(text, /standup/);
 });
+
+function withFetch(handler, run) {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method, body: init.body });
+    const result = await handler(String(url), init);
+    return {
+      ok: result.status ? result.status < 400 : true,
+      status: result.status ?? 200,
+      text: async () => JSON.stringify(result.data ?? {}),
+    };
+  };
+  return Promise.resolve(run(calls)).finally(() => {
+    globalThis.fetch = original;
+  });
+}
+
+test("CRUD proxies to the supervisor", async () => {
+  const routine = { id: "r1", userId: "u1", payload: "ping" };
+  await withFetch(
+    (url) => {
+      if (url.includes("/routines?userId=")) return { data: { routines: [routine] } };
+      if (url.includes("/routines/history")) return { data: { history: [{ id: "h1" }] } };
+      if (/\/routines\/r1\/history/.test(url)) return { data: { history: [{ id: "h2" }] } };
+      return { data: { routine, ok: true } };
+    },
+    async (calls) => {
+      assert.deepEqual(await routines.listRoutines("u1"), [routine]);
+      assert.deepEqual(await routines.listHistory("u1"), [{ id: "h1" }]);
+      assert.deepEqual(await routines.listHistory("u1", "r1"), [{ id: "h2" }]);
+      assert.deepEqual(await routines.addRoutine({ userId: "u1", when: "30m" }), routine);
+      assert.equal(await routines.removeRoutine("r1", "u1"), true);
+      assert.equal((await routines.setRoutineEnabled("r1", "u1", false)).id, "r1");
+      assert.equal((await routines.setRoutineEnabled("r1", "u1", true)).id, "r1");
+      assert.match(calls.find((c) => c.method === "DELETE").url, /\/routines\/r1\?userId=u1/);
+      assert.match(calls.find((c) => c.url.includes("/pause")).url, /\/routines\/r1\/pause/);
+      assert.match(calls.find((c) => c.url.includes("/resume")).url, /\/routines\/r1\/resume/);
+    },
+  );
+});
+
+test("supervisor errors propagate", async () => {
+  await withFetch(
+    () => ({ status: 503, data: { error: "supervisor down" } }),
+    async () => {
+      await assert.rejects(() => routines.listRoutines("u1"), /supervisor down/);
+      await assert.rejects(() => routines.addRoutine({ userId: "u1" }), /supervisor down/);
+      await assert.rejects(() => routines.listHistory("u1"), /supervisor down/);
+    },
+  );
+});

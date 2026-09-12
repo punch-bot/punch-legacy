@@ -144,8 +144,8 @@ export async function listHistory(userId, routineId = null, limit = 20) {
     const data = await supervisorRoutines.history(routineId, userId, limit);
     return data.history;
   }
-  const data = await supervisorRoutines.list(userId);
-  return data.routines;
+  const data = await supervisorRoutines.historyAll(userId, limit);
+  return data.history;
 }
 
 export async function removeRoutine(id, userId) {
