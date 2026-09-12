@@ -14,6 +14,7 @@ import {
 
 import * as store from "../memory.js";
 import * as sandbox from "../sandbox-manager.js";
+import { createSandbox, removeSandbox, restartAllSandboxes, restartSandbox } from "../core/sandbox-provider.js";
 import * as settings from "../settings.js";
 import * as statistics from "../statistics.js";
 import * as state from "../state.js";
@@ -115,8 +116,7 @@ export function registerInteractions(client) {
       try {
         let message;
         if (repair.action === "restart-container") {
-          const restarted = await sandbox.restartContainer(repair.sandboxName);
-          if (!restarted.ok) throw new Error(restarted.error);
+          await restartSandbox(repair.sandboxName);
           message = `Sandbox **${repair.sandboxName}** restarted.`;
         } else {
           const apiUrl = apiUrlFor(mapping.userId);
@@ -377,19 +377,13 @@ export function registerInteractions(client) {
           return;
         }
 
-        const add = sandbox.addUser(name, userId);
-        if (!add.ok) {
-          await interaction.reply({ content: `⚠️ ${add.error}`, flags: MessageFlags.Ephemeral });
-          return;
-        }
-
         await interaction.reply({ content: `Creating sandbox for **${name}** (\`${userId}\`)…`, flags: MessageFlags.Ephemeral });
 
-        const up = await sandbox.composeUp(name);
-        if (!up.ok) {
-          sandbox.removeUser(name);
-          const err = up.error.length > 1500 ? up.error.slice(0, 1500) + "..." : up.error;
-          await interaction.editReply({ content: `⚠️ Failed to create sandbox: ${err}` });
+        try {
+          await createSandbox(name, userId);
+        } catch (err) {
+          const errText = err.message.length > 1500 ? err.message.slice(0, 1500) + "..." : err.message;
+          await interaction.editReply({ content: `⚠️ Failed to create sandbox: ${errText}` });
           return;
         }
 
@@ -401,15 +395,10 @@ export function registerInteractions(client) {
       if (sub === "remove") {
         const name = interaction.options.getString("name", true).toLowerCase();
 
-        const down = await sandbox.composeDown(name);
-        if (!down.ok) {
-          await interaction.reply({ content: `⚠️ Failed to remove sandbox container: ${down.error}`, flags: MessageFlags.Ephemeral });
-          return;
-        }
-
-        const del = sandbox.removeUser(name);
-        if (!del.ok) {
-          await interaction.reply({ content: `⚠️ ${del.error}`, flags: MessageFlags.Ephemeral });
+        try {
+          await removeSandbox(name);
+        } catch (err) {
+          await interaction.reply({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
           return;
         }
 
@@ -437,7 +426,13 @@ export function registerInteractions(client) {
           flags: MessageFlags.Ephemeral,
         });
 
-        const res = await sandbox.restartAllSandboxes({ recreate });
+        let res;
+        try {
+          res = await restartAllSandboxes({ recreate });
+        } catch (err) {
+          await interaction.editReply({ content: `⚠️ ${err.message}` });
+          return;
+        }
         reloadSandboxMap();
 
         const lines = res.results.map((r) =>

@@ -4,8 +4,8 @@
 
 import "dotenv/config";
 import { REST, Routes, Events } from "discord.js";
-import * as sandbox from "./sandbox-manager.js";
 import * as routines from "./routines.js";
+import { listSandboxes, restartSandbox, sandboxProviderEnabled } from "./core/sandbox-provider.js";
 import { reloadSandboxMap } from "./agent.js";
 import { TOKEN } from "./core/config.js";
 import { createClient } from "./core/discord.js";
@@ -73,13 +73,23 @@ client.once(Events.ClientReady, async (c) => {
     );
   }
 
-  // Boot all dynamic sandboxes on startup
-  for (const u of sandbox.loadUsers()) {
-    const up = await sandbox.composeUp(u.name);
-    if (up.ok) {
-      console.log(`[sandbox] booted sandbox-${u.name}`);
-    } else {
-      console.error(`[sandbox] failed to boot sandbox-${u.name}: ${up.error}`);
+  // Ensure all dynamic sandboxes are running (lifecycle owned by the sandbox host)
+  if (sandboxProviderEnabled) {
+    try {
+      for (const entry of await listSandboxes()) {
+        if (entry.running) {
+          console.log(`[sandbox] sandbox-${entry.name} running`);
+          continue;
+        }
+        try {
+          await restartSandbox(entry.name);
+          console.log(`[sandbox] started sandbox-${entry.name}`);
+        } catch (err) {
+          console.error(`[sandbox] failed to start sandbox-${entry.name}: ${err.message}`);
+        }
+      }
+    } catch (err) {
+      console.error(`[sandbox] sandbox provider unreachable: ${err.message}`);
     }
   }
 

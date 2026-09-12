@@ -12,6 +12,8 @@ services:
     environment:
       PUNCH_STACK_NAME: ${PUNCH_STACK_NAME:-punch}
       PUNCH_SANDBOX_IMAGE: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
+      PUNCH_SUPERVISOR_URL: ${PUNCH_SUPERVISOR_URL:-http://supervisor:4100}
+      PUNCH_SUPERVISOR_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
       PI_SERVER_URL: ""
       SANDBOX_MAP: "{}"
       PI_REMOTE_DIR: /work
@@ -30,6 +32,66 @@ services:
       - octl_bot:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - "${PUNCH_HOST_SOURCE:-/punch}:/punch:ro"
+    restart: unless-stopped
+    depends_on:
+      - supervisor
+
+  supervisor:
+    build:
+      context: ${PUNCH_SUPERVISOR_REPO:-https://github.com/punch-bot/supervisor.git#main}
+    image: ${PUNCH_STACK_NAME:-punch}-supervisor
+    user: "0:0"
+    environment:
+      SUPERVISOR_PORT: "4100"
+      SUPERVISOR_DATA_DIR: /data
+      SUPERVISOR_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
+      ROUTINE_FIRE_URL: http://bot:4098
+      ROUTINE_FIRE_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
+      COLLAB_EVENT_URL: http://bot:4098
+      COLLAB_EVENT_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
+      PUNCH_WORKSPACE_ROOT: /work
+    tmpfs:
+      - /tmp
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - edge
+    ports:
+      - "${PUNCH_SUPERVISOR_PORT:-4100}:4100"
+    volumes:
+      - supervisor_state:/data
+    restart: unless-stopped
+
+  # Owns Docker: builds the sandbox image, runs/removes/restarts sandboxes, and
+  # serves git exec to the supervisor. Registers as a `kind: sandbox` host.
+  sandbox-host:
+    build:
+      context: .
+      dockerfile: docker/sandbox-host.Dockerfile
+    image: ${PUNCH_STACK_NAME:-punch}-sandbox-host
+    environment:
+      PUNCH_STACK_NAME: ${PUNCH_STACK_NAME:-punch}
+      PUNCH_SANDBOX_IMAGE: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
+      SANDBOX_HOST_PORT: "4110"
+      SANDBOX_HOST_NAME: ${PUNCH_SANDBOX_HOST_NAME:-${PUNCH_STACK_NAME:-punch}-sandbox-host}
+      SANDBOX_HOST_URL: ${PUNCH_SANDBOX_HOST_URL:-http://sandbox-host:4110}
+      SANDBOX_HOST_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
+      SUPERVISOR_URL: http://supervisor:4100
+      SUPERVISOR_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
+    tmpfs:
+      - /tmp
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - edge
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - "${PUNCH_HOST_SOURCE:-/punch}:/punch:ro"
+      - bot_state:/state
+    depends_on:
+      - supervisor
     restart: unless-stopped
 
   # Base sandbox image/container. Builds from THIS source (not host /punch).
@@ -79,3 +141,4 @@ volumes:
   octl_bot:
   bot_state:
   searxng-data:
+  supervisor_state:
