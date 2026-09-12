@@ -5190,6 +5190,26 @@ const botHttpServer = createServer(async (req, res) => {
     }
   }
 
+  if (url.pathname === "/internal/exec" && req.method === "POST") {
+    try {
+      const expected = process.env.PUNCH_SUPERVISOR_TOKEN || "";
+      const offered = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      if (expected && offered !== expected) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Unauthorized" }));
+      }
+      const participant = String(body?.participant || "");
+      const argv = body?.argv;
+      if (!participant) throw new Error("participant is required");
+      const result = await sandbox.execInSandbox(participant, argv, { cwd: body?.cwd || undefined });
+      res.writeHead(200, { "content-type": "application/json" });
+      return void res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(400, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
   if (url.pathname.startsWith("/collabs")) {
     try {
       const peer = await resolvePeerSandbox(req);
@@ -5341,6 +5361,17 @@ const botHttpServer = createServer(async (req, res) => {
     res.writeHead(500, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: err.message }));
   }
+});
+
+function hostParticipantNames() {
+  return sandbox.loadUsers().map((user) => user.name).filter(Boolean);
+}
+
+supervisor.registerHost({
+  name: process.env.PUNCH_HOST_NAME || "discord-bot",
+  url: process.env.PUNCH_HOST_URL || `http://bot:${BOT_HTTP_PORT}`,
+  token: process.env.PUNCH_SUPERVISOR_TOKEN || "",
+  participants: hostParticipantNames,
 });
 
 botHttpServer.listen(BOT_HTTP_PORT, "0.0.0.0", () => {

@@ -56,9 +56,54 @@ export const collabs = {
 };
 
 /**
+ * Host registration. A host is wherever participant workspaces live: this bot's
+ * Docker sandboxes, a Desktop app's local worktrees, a remote worker. The
+ * supervisor routes collab exec calls to whichever live host serves a
+ * participant, so each host advertises its base URL and participant names.
+ */
+export const hosts = {
+	register: (payload) => request("POST", "/hosts/register", { body: payload }),
+	unregister: (name) => request("POST", "/hosts/unregister", { body: { name } }),
+	list: async () => (await request("GET", "/hosts")).hosts,
+};
+
+/**
+ * Advertise this host to the supervisor and keep the registration fresh.
+ * Returns a stop function. No-op when the supervisor is disabled.
+ */
+export function registerHost({ name, url, participants, token, intervalMs = 30000 } = {}) {
+	if (!ENABLED) return () => {};
+	let stopped = false;
+	const tick = async () => {
+		if (stopped) return;
+		try {
+			const names = typeof participants === "function" ? await participants() : participants;
+			await hosts.register({
+				name: name || process.env.PUNCH_HOST_NAME || "discord-bot",
+				url: url || process.env.PUNCH_HOST_URL || "",
+				participants: names || [],
+				token: token || process.env.PUNCH_SUPERVISOR_TOKEN || "",
+				kind: "sandbox",
+			});
+		} catch (err) {
+			console.warn(`[supervisor] host registration failed: ${err.message}`);
+		}
+	};
+	void tick();
+	const timer = setInterval(tick, intervalMs);
+	timer.unref?.();
+	return () => {
+		stopped = true;
+		clearInterval(timer);
+	};
+}
+
+
+/**
  * Git runner the supervisor uses for collab work. The supervisor owns the state
- * machine; the bot owns Docker, so each git call names the sandbox it must run in.
- * `git(args, sandboxName)` executes inside that participant's container.
+ * machine; hosts own execution, so each git call names the participant whose
+ * host should run it. Kept for in-process use (tests); the supervisor service
+ * routes to hosts over HTTP via ../supervisor/src/exec.js.
  */
 export function collabGitRunner() {
 	return async (args, sandboxName) => {
