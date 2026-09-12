@@ -112,7 +112,6 @@ const REACTION_DEDUP_MS = 5000;
 /** @type {null | { stop: () => Promise<void> }} */
 let spectrumHandle = null;
 let spectrumShuttingDown = false;
-let spectrumSignalsBound = false;
 
 const LIFECYCLE_PROGRESS_EMOJI = "👀";
 
@@ -1069,15 +1068,6 @@ client.once(Events.ClientReady, async (c) => {
   try {
     const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
     spectrumHandle = await startSpectrumAlongsideBot();
-    if (spectrumHandle && !spectrumSignalsBound) {
-      spectrumSignalsBound = true;
-      for (const signal of ["SIGINT", "SIGTERM"]) {
-        process.on(signal, () => {
-          // Discord owns process lifetime; only sync-stop Spectrum here.
-          void shutdownSpectrum(signal);
-        });
-      }
-    }
   } catch (err) {
     console.error(
       "[spectrum] failed to boot alongside Discord:",
@@ -5423,9 +5413,27 @@ async function stopHostRegistration() {
   hostRegistrationStopped = true;
   await hostRegistration.stop();
 }
+
+let shutdownStarted = false;
+async function shutdown(signal) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  console.log(`[shutdown] ${signal} received; unregistering host and stopping Spectrum`);
+  await Promise.race([
+    Promise.allSettled([stopHostRegistration(), shutdownSpectrum(signal)]),
+    new Promise((resolve) => setTimeout(resolve, 5000)),
+  ]);
+  botHttpServer.close();
+  try {
+    await client.destroy();
+  } catch (err) {
+    console.warn(`[shutdown] client teardown failed: ${err && err.message ? err.message : String(err)}`);
+  }
+  process.exit(0);
+}
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    void stopHostRegistration();
+    void shutdown(signal);
   });
 }
 
