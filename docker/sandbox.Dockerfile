@@ -1,6 +1,6 @@
 FROM node:22-bookworm
 
-ARG PI_VERSION=latest
+ARG PI_VERSION=0.85.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl wget ca-certificates openssh-client openssh-server \
@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends tailscale \
     && rm -rf /var/lib/apt/lists/*
 
-# Pi coding agent (replaces opencode-ai). --ignore-scripts per Pi install docs.
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
+# Punch core coding agent (@punch-bot/cli, fork of pi). --ignore-scripts per Pi install docs.
+RUN npm install -g --ignore-scripts @punch-bot/cli@${PI_VERSION} \
     && npm cache clean --force \
     && pi --version
 
@@ -30,6 +30,7 @@ ENV HOME=/root \
     PI_OFFLINE=1 \
     PI_SKIP_VERSION_CHECK=1 \
     PI_TELEMETRY=0 \
+    PI_MCP_FILE=/data/mcp.json \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pi/playwright-browsers
 
 # Playwright + Chromium under /opt/pi (not /root — home is a runtime volume mount).

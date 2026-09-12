@@ -50,7 +50,7 @@ Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/sandbox/usr/lo
 | **Browser** via Pi extension `browser.ts` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
 | Progress SSE → Discord thinking UI | |
 | Routines via Pi extension `/work/.pi/extensions/routines.ts` | |
-| **MCP** via `pi-mcp-adapter` + Discord `/mcp` list/add/remove (`mcp` proxy tool) | |
+| **MCP** via Pi core's native MCP + Discord `/mcp` list/add/remove (`mcp` proxy tool) | |
 
 Self-addendum: `/work/.pi/SYSTEM.md` (Pi identity; legacy `.opencode/SYSTEM.md` is not loaded).  
 Self-extensions: `/work/.pi/extensions/*.ts` (`pi.registerTool`).
@@ -100,7 +100,7 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 
 ## Supervisor API (sandbox `:4097`)
 
-Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (registry + Pi reload via pi-mcp-adapter), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
+Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (registry + Pi reload via native MCP), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
 
 ## Active Context Pruning (PNCH-6)
 

@@ -45,7 +45,6 @@ export const MODELS_FILE = join(
   "models.json",
 );
 export const MCP_FILE = "/data/mcp.json";
-export const PI_MCP_FILE = "/data/pi/agent/mcp.json";
 
 export const API_PORT = 4097;
 

@@ -34,7 +34,7 @@ import {
   saveModel,
   syncEnvApiKeysToAuth,
 } from "./supervisor/models.mjs";
-import { handleMcpRoutes, syncMcpConfig } from "./supervisor/mcp.mjs";
+import { handleMcpRoutes } from "./supervisor/mcp.mjs";
 import { handleProviderRoutes } from "./supervisor/providers.mjs";
 import { handleSkillsRoutes } from "./supervisor/skills.mjs";
 import { handleTailscaleRoutes } from "./supervisor/tailscale.mjs";
@@ -90,7 +90,6 @@ if (SANDBOX_USER_ID) {
     }
     log("migrated legacy MCP API key env vars to collision-free names");
   }
-  syncMcpConfig();
   log(`pi sandbox ready for user: ${SANDBOX_USER_ID || "(none)"}`);
 })();
 
