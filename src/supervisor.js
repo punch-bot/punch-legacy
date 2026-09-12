@@ -91,17 +91,20 @@ export const hosts = {
  * Returns a stop function. No-op when the supervisor is disabled.
  */
 export function registerHost({ name, url, participants, token, intervalMs = 30000 } = {}) {
-	if (!ENABLED) return () => {};
+	if (!ENABLED) return { refresh: async () => {}, stop: async () => {} };
+	const hostName = name || process.env.PUNCH_HOST_NAME || "discord-bot";
+	const hostUrl = url || process.env.PUNCH_HOST_URL || "";
+	const hostToken = token || process.env.PUNCH_SUPERVISOR_TOKEN || "";
 	let stopped = false;
 	const tick = async () => {
 		if (stopped) return;
 		try {
 			const names = typeof participants === "function" ? await participants() : participants;
 			await hosts.register({
-				name: name || process.env.PUNCH_HOST_NAME || "discord-bot",
-				url: url || process.env.PUNCH_HOST_URL || "",
+				name: hostName,
+				url: hostUrl,
 				participants: names || [],
-				token: token || process.env.PUNCH_SUPERVISOR_TOKEN || "",
+				token: hostToken,
 				kind: "sandbox",
 			});
 		} catch (err) {
@@ -111,9 +114,18 @@ export function registerHost({ name, url, participants, token, intervalMs = 3000
 	void tick();
 	const timer = setInterval(tick, intervalMs);
 	timer.unref?.();
-	return () => {
-		stopped = true;
-		clearInterval(timer);
+	return {
+		refresh: () => tick(),
+		stop: async () => {
+			if (stopped) return;
+			stopped = true;
+			clearInterval(timer);
+			try {
+				await hosts.unregister(hostName);
+			} catch (err) {
+				console.warn(`[supervisor] host unregistration failed: ${err.message}`);
+			}
+		},
 	};
 }
 

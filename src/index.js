@@ -3490,12 +3490,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const up = await sandbox.composeUp(name);
       if (!up.ok) {
         sandbox.removeUser(name);
+        await hostRegistration.refresh();
         const err = up.error.length > 1500 ? up.error.slice(0, 1500) + "..." : up.error;
         await interaction.editReply({ content: `⚠️ Failed to create sandbox: ${err}` });
         return;
       }
 
       reloadSandboxMap();
+      await hostRegistration.refresh();
       const vp = sandbox.vncPorts(name);
       const vncNote = process.env.VNC_PASSWORD
         ? `\n🌐 VNC: http://<host>:${vp.web}/ (password-protected) or raw VNC on port ${vp.vnc}.`
@@ -3520,6 +3522,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       reloadSandboxMap();
+      await hostRegistration.refresh();
       await interaction.reply({ content: `✅ Sandbox **${name}** removed.`, flags: MessageFlags.Ephemeral });
       return;
     }
@@ -5407,12 +5410,24 @@ function hostParticipantNames() {
   return sandbox.loadUsers().map((user) => user.name).filter(Boolean);
 }
 
-supervisor.registerHost({
+const hostRegistration = supervisor.registerHost({
   name: process.env.PUNCH_HOST_NAME || "discord-bot",
   url: process.env.PUNCH_HOST_URL || `http://bot:${BOT_HTTP_PORT}`,
   token: process.env.PUNCH_SUPERVISOR_TOKEN || "",
   participants: hostParticipantNames,
 });
+
+let hostRegistrationStopped = false;
+async function stopHostRegistration() {
+  if (hostRegistrationStopped) return;
+  hostRegistrationStopped = true;
+  await hostRegistration.stop();
+}
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    void stopHostRegistration();
+  });
+}
 
 botHttpServer.listen(BOT_HTTP_PORT, "0.0.0.0", () => {
   console.log(`Bot HTTP API listening on port ${BOT_HTTP_PORT}`);
