@@ -7,13 +7,15 @@ tailscaled --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 
 tailscale set --accept-dns=false 2>/dev/null || true
 
 # Seed Pi extensions into the writable work volume (self-extension reload).
-# routines.ts preserves user edits; the rest refresh from the image each start.
+# Pi core ships browser, webfetch, report_progress, context-pruning, routines,
+# collab and todos as built-ins, so only the SearXNG websearch shim is seeded.
+# Drop stale copies of the now built-in extensions left in the work volume.
 mkdir -p /work/.pi/extensions
-for ext in routines collab browser searxng webfetch report_progress compress_context; do
+for stale in browser webfetch report_progress compress_context routines collab; do
+  rm -f "/work/.pi/extensions/$stale.ts"
+done
+for ext in searxng; do
   [ -f "/opt/pi/extensions/$ext.ts" ] || continue
-  if [ "$ext" = "routines" ] && [ -f "/work/.pi/extensions/routines.ts" ]; then
-    continue
-  fi
   cp "/opt/pi/extensions/$ext.ts" "/work/.pi/extensions/$ext.ts"
 done
 if [ -f /opt/pi/context-pruning-state.mjs ]; then
@@ -37,7 +39,7 @@ Update sections with the `update_memory` tool.
 - next steps
 PUNCH_MEMORY_EOF
 fi
-# Seed Pi identity addendum (always refresh so persona stays Pi-only)
+# Seed Pi identity addendum (punch system prompt; runAgent reads it from /work/.pi/SYSTEM.md)
 if [ -f /opt/pi/SYSTEM.md ]; then
   cp /opt/pi/SYSTEM.md /work/.pi/SYSTEM.md
 fi

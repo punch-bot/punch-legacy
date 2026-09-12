@@ -232,11 +232,8 @@ test("sandbox image and workdir seeding include context-pruning state and memory
     readFile(new URL("../docker/sandbox/usr/local/bin/sandbox-entrypoint.sh", import.meta.url), "utf8"),
   ]);
   assert.match(dockerfile, /COPY docker\/sandbox\/ \//);
-  assert.ok(
-    await readFile(new URL("../docker/sandbox/opt/pi/extensions/compress_context.ts", import.meta.url), "utf8"),
-  );
   assert.match(entrypoint, /cp \/opt\/pi\/context-pruning-state\.mjs \/work\/\.pi\/context-pruning-state\.mjs/);
-  assert.match(entrypoint, /for ext in routines collab browser searxng webfetch report_progress compress_context/);
+  assert.match(entrypoint, /for ext in searxng/);
   assert.match(entrypoint, /punch-memory\.md/);
   assert.match(entrypoint, /## Guidelines/);
   assert.match(entrypoint, /## Open work/);

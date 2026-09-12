@@ -47,9 +47,9 @@ Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/sandbox/usr/lo
 | `/reset` (new session), `/compress` (Pi `compact`) | MCP OAuth — use `/mcp auth` for API keys or headers/env for custom tokens |
 | `/models`, `/env`, `/apikey`, `/secrets`, `/tailscale`, `/doctor`, `/memory`, `/skills`, `/workers`, `/multitask` | Legacy `/work/.opencode/tools` (not loaded; only `/work/.pi/extensions` reload) |
 | Built-in Pi tools: bash, read, write, edit; isolated worker Pi processes | Full multi-session concurrency for main chat gateway (it switches logical sessions) |
-| **Browser** via Pi extension `browser.ts` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
+| **Browser** via Pi core built-in `browser` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
 | Progress SSE → Discord thinking UI | |
-| Routines via Pi extension `/work/.pi/extensions/routines.ts` | |
+| Routines via Pi core built-in `routines` tool | |
 | **MCP** via Pi core's native MCP + Discord `/mcp` list/add/remove (`mcp` proxy tool) | |
 
 Self-addendum: `/work/.pi/SYSTEM.md` (Pi identity; legacy `.opencode/SYSTEM.md` is not loaded).  
@@ -91,7 +91,7 @@ Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type:
 | `docker/sandbox/usr/local/bin/pi-gateway.mjs` | Internal HTTP `:4096` adapter over Pi RPC |
 | `docker/sandbox/usr/local/bin/serve-supervisor.mjs` | Thin sandbox entrypoint: pi-gateway child + `:4097` supervisor API dispatch |
 | `docker/sandbox/usr/local/bin/supervisor/*` | Sandbox supervisor modules: `state.mjs` (consts/state), `gateway.mjs` (pi-gateway lifecycle), `models.mjs` (model/provider/env/auth), `mcp.mjs` (registry sync + routes), `routes.mjs` (doctor/pigeon/tasks/env/secrets/tools/extensions), `providers.mjs`, `skills.mjs`, `workers.mjs`, `tailscale.mjs` |
-| `docker/sandbox/opt/pi/extensions/routines.ts` | Seed Pi routines tool |
+| `docker/sandbox/opt/pi/extensions/searxng.ts` | SearXNG `websearch` shim. Pi core ships browser, webfetch, report_progress, context-pruning, routines, collab and todos natively |
 | `docker/sandbox/usr/local/lib/skills-manager.mjs` | Instruction-skill metadata, precedence, proposals, enable state |
 | `docker/sandbox/usr/local/lib/worker-manager.mjs` | Isolated Pi worker process records/lifecycle |
 | `docker/sandbox/usr/local/bin/pi-worker-runner.mjs` | Single worker Pi RPC runner with tool allowlist |
@@ -106,11 +106,11 @@ Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/
 
 Three-part memory management system:
 
-1. **Selective Pi pruning tools** (`/opt/pi/extensions/compress_context.ts`) — `compress_context` replaces stale complete user-turn ranges with model-written summaries in provider context. Blocks have stable Pi entry IDs, preserve raw session entries, and can be searched (`search_context`), inspected (`context_status`), and restored (`decompress_context`). First user message is protected; uncertain mappings leave raw context intact.
+1. **Selective Pi pruning tools** (Pi core built-in `context-pruning`) — `compress_context` replaces stale complete user-turn ranges with model-written summaries in provider context. Blocks have stable Pi entry IDs, preserve raw session entries, and can be searched (`search_context`), inspected (`context_status`), and restored (`decompress_context`). First user message is protected; uncertain mappings leave raw context intact.
 
 2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
 
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (keep `docker/sandbox/opt/pi/extensions/compress_context.ts` `MAX_MEMORY_CHARS` — still used by the `update_memory` tool). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
+3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (Pi core's `update_memory` tool owns it). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
 
 **Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
 

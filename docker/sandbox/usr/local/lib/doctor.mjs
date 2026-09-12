@@ -289,10 +289,10 @@ async function runBrowserProbe() {
 
 async function browserChecks(deep) {
   const startedAt = Date.now();
-  const extensionPresent = existsSync("/work/.pi/extensions/browser.ts") || existsSync("/opt/pi/extensions/browser.ts");
-  const checks = [extensionPresent
-    ? result("browser-extension", "pass", "Browser extension", "Built-in browser extension is installed.", startedAt)
-    : result("browser-extension", "fail", "Browser extension", "Browser extension is missing.", startedAt, "restart-gateway")];
+  const coreInstalled = existsSync("/usr/local/lib/node_modules/@punch-bot/cli");
+  const checks = [coreInstalled
+    ? result("browser-extension", "pass", "Browser extension", "Pi core built-in browser extension is installed.", startedAt)
+    : result("browser-extension", "fail", "Browser extension", "Pi core (@punch-bot/cli) is missing.", startedAt, "restart-gateway")];
   if (!deep) return checks;
 
   const probe = await runBrowserProbe();
