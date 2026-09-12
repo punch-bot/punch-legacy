@@ -2,7 +2,8 @@ const RAW_URL = process.env.PUNCH_SUPERVISOR_URL || "";
 const BASE = (RAW_URL || "http://supervisor:4100").replace(/\/+$/, "");
 const TOKEN = process.env.PUNCH_SUPERVISOR_TOKEN || "";
 const ENABLED = RAW_URL !== "0" && RAW_URL !== "";
-const TIMEOUT_MS = Number(process.env.PUNCH_SUPERVISOR_TIMEOUT_MS) || 15000;
+const RAW_TIMEOUT_MS = Number(process.env.PUNCH_SUPERVISOR_TIMEOUT_MS);
+const TIMEOUT_MS = Number.isFinite(RAW_TIMEOUT_MS) && RAW_TIMEOUT_MS > 0 ? RAW_TIMEOUT_MS : 15000;
 
 function headers(extra = {}) {
 	const result = { "content-type": "application/json", ...extra };

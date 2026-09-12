@@ -1504,7 +1504,7 @@ client.once(Events.ClientReady, async (c) => {
   }
 
   if (!supervisor.supervisorEnabled) {
-    console.warn("PUNCH_SUPERVISOR_URL unset; routine firing disabled (slash-command scheduling still local)");
+    console.warn("PUNCH_SUPERVISOR_URL unset; supervisor-backed routine scheduling and firing are disabled (routine slash commands will report the supervisor is disabled)");
   }
 });
 
@@ -4396,7 +4396,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (sub === "history") {
       const activities = state.getActivities(uid, { type: "heartbeat", limit: 10 });
       if (activities.length === 0) {
-        await interaction.reply({ content: "No heartbeat activity yet.", flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: "No heartbeat activity yet." });
         return;
       }
       const lines = activities.map((a) => {
@@ -4791,7 +4791,10 @@ function botHttpAuth(req) {
   const expected = "Basic " + Buffer.from("opencode:" + BOT_HTTP_PASS).toString("base64");
   if (auth === expected) return true;
   const supervisorToken = process.env.PUNCH_SUPERVISOR_TOKEN || "";
-  if (supervisorToken && auth === "Bearer " + supervisorToken) return true;
+  if (supervisorToken && auth === "Bearer " + supervisorToken) {
+    const path = (req.url || "").split("?")[0];
+    return path.startsWith("/internal/");
+  }
   return false;
 }
 
