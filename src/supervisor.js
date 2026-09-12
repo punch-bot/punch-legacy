@@ -17,29 +17,28 @@ async function request(method, path, { body, sandboxName } = {}) {
 	if (sandboxName) extra["x-punch-sandbox"] = sandboxName;
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-	let response;
 	try {
-		response = await fetch(`${BASE}${path}`, {
+		const response = await fetch(`${BASE}${path}`, {
 			method,
 			headers: headers(extra),
 			body: body === undefined ? undefined : JSON.stringify(body),
 			signal: controller.signal,
 		});
+		const text = await response.text();
+		let data;
+		try {
+			data = JSON.parse(text);
+		} catch {
+			data = { raw: text };
+		}
+		if (!response.ok) throw new Error(data?.error || `${response.status} ${text}`);
+		return data;
 	} catch (err) {
 		if (err?.name === "AbortError") throw new Error(`Supervisor request timed out after ${TIMEOUT_MS}ms: ${method} ${path}`);
 		throw err;
 	} finally {
 		clearTimeout(timer);
 	}
-	const text = await response.text();
-	let data;
-	try {
-		data = JSON.parse(text);
-	} catch {
-		data = { raw: text };
-	}
-	if (!response.ok) throw new Error(data?.error || `${response.status} ${text}`);
-	return data;
 }
 
 export const supervisorEnabled = ENABLED;

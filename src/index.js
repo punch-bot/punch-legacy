@@ -4091,6 +4091,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.commandName === "routine") {
     const sub = interaction.options.getSubcommand();
     const ctx = routineContextFromInteraction(interaction);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (sub === "add") {
       const type = interaction.options.getString("type", true);
@@ -4113,43 +4114,46 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const label = type === "heartbeat" ? "💓 Heartbeat" : "⏰ Scheduled";
         const note = type === "heartbeat" ? "\nI'll DM you the results each time." : "";
         const whenLabel = formatInTimeZone(routine.nextRunAt, routine.timezone || timezone) || new Date(routine.nextRunAt).toISOString();
-        await interaction.reply({
-          content: `${label} (\`${routine.id}\`) — fires ${whenLabel}${note}`,
-          flags: MessageFlags.Ephemeral,
-        });
+        await interaction.editReply({ content: `${label} (\`${routine.id}\`) — fires ${whenLabel}${note}` });
       } catch (err) {
-        await interaction.reply({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
       }
       return;
     }
 
     if (sub === "history") {
-      const id = interaction.options.getString("id") || null;
-      const entries = await routines.listHistory(ctx.userId, id, 20);
-      const body = entries.length
-        ? `**Routine history:**\n${entries.map((entry) => `${entry.status === "succeeded" ? "✅" : entry.status === "failed" ? "❌" : "⏳"} \`${entry.routineId}\` attempt ${entry.attempt} ${new Date(entry.startedAt).toLocaleString()}${entry.error ? ` — ${entry.error.slice(0, 180)}` : ""}`).join("\n")}`
-        : "No routine history.";
-      await interaction.reply({ content: body, flags: MessageFlags.Ephemeral });
+      try {
+        const id = interaction.options.getString("id") || null;
+        const entries = await routines.listHistory(ctx.userId, id, 20);
+        const body = entries.length
+          ? `**Routine history:**\n${entries.map((entry) => `${entry.status === "succeeded" ? "✅" : entry.status === "failed" ? "❌" : "⏳"} \`${entry.routineId}\` attempt ${entry.attempt} ${new Date(entry.startedAt).toLocaleString()}${entry.error ? ` — ${entry.error.slice(0, 180)}` : ""}`).join("\n")}`
+          : "No routine history.";
+        await interaction.editReply({ content: body });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
       return;
     }
 
     if (sub === "remove") {
-      const id = interaction.options.getString("id", true);
-      const ok = await routines.removeRoutine(id, ctx.userId);
-      await interaction.reply({
-        content: ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      try {
+        const id = interaction.options.getString("id", true);
+        const ok = await routines.removeRoutine(id, ctx.userId);
+        await interaction.editReply({ content: ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.` });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
       return;
     }
 
     if (sub === "pause" || sub === "resume") {
-      const id = interaction.options.getString("id", true);
-      const r = await routines.setRoutineEnabled(id, ctx.userId, sub === "resume");
-      await interaction.reply({
-        content: r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      try {
+        const id = interaction.options.getString("id", true);
+        const r = await routines.setRoutineEnabled(id, ctx.userId, sub === "resume");
+        await interaction.editReply({ content: r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.` });
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ${err.message}` });
+      }
       return;
     }
   }
@@ -4211,6 +4215,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const when = interaction.options.getString("when", true);
     const message = interaction.options.getString("message", true);
     const ctx = routineContextFromInteraction(interaction);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
       const zone = userTimeZone(ctx.userId);
       const routine = await routines.addRoutine({
@@ -4221,12 +4226,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         schedule: { kind: "once", at: routines.parseTime(when, new Date(), zone) },
       });
       const whenLabel = formatInTimeZone(routine.nextRunAt, zone) || new Date(routine.nextRunAt).toISOString();
-      await interaction.reply({
-        content: `⏰ Scheduled (\`${routine.id}\`) — fires ${whenLabel}`,
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ content: `⏰ Scheduled (\`${routine.id}\`) — fires ${whenLabel}` });
     } catch (err) {
-      await interaction.reply({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `⚠️ ${err.message}` });
     }
     return;
   }

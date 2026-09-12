@@ -75,6 +75,12 @@ test("parseDailyTime builds a cron from the user timezone", () => {
   const schedule = routines.parseDailyTime("9am", "America/New_York");
   assert.equal(schedule.kind, "cron");
   assert.equal(schedule.cron, "0 9 * * *");
+  // The cron is wall-clock local, so the same 9am resolves to a different UTC
+  // instant across DST: 14:00Z in winter (EST) and 13:00Z in summer (EDT).
+  const winter = routines.computeNextRun(schedule, Date.parse("2026-01-15T12:00:00Z"), "America/New_York");
+  assert.equal(new Date(winter).toISOString(), "2026-01-15T14:00:00.000Z");
+  const summer = routines.computeNextRun(schedule, Date.parse("2026-07-15T12:00:00Z"), "America/New_York");
+  assert.equal(new Date(summer).toISOString(), "2026-07-15T13:00:00.000Z");
 });
 
 test("computeNextRun keeps a cron on the local wall clock across DST", () => {

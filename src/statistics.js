@@ -189,26 +189,37 @@ export async function handleStatisticsInteraction(interaction, extrasForUser) {
     return true;
   }
 
-  const extras = typeof extrasForUser === "function" ? await extrasForUser(parsed.userId) : (extrasForUser || {});
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferUpdate();
+  }
+  let extras = {};
+  try {
+    extras = typeof extrasForUser === "function" ? await extrasForUser(parsed.userId) : (extrasForUser || {});
+  } catch (err) {
+    console.warn(`[statistics] extras lookup failed: ${err.message}`);
+  }
   const embed = buildStatisticsEmbed(parsed.userId, parsed.period, extras);
   const components = buildStatisticsComponents(parsed.userId, parsed.period);
 
-  if (interaction.deferred || interaction.replied) {
-    await interaction.editReply({ embeds: [embed], components });
-  } else {
-    await interaction.update({ embeds: [embed], components });
-  }
+  await interaction.editReply({ embeds: [embed], components });
   return true;
 }
 
 export async function handleStatisticsCommand(interaction, extrasForUser) {
   const uid = interaction.user.id;
-  const extras = typeof extrasForUser === "function" ? await extrasForUser(uid) : (extrasForUser || {});
+  if (!interaction.deferred && !interaction.replied) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  }
+  let extras = {};
+  try {
+    extras = typeof extrasForUser === "function" ? await extrasForUser(uid) : (extrasForUser || {});
+  } catch (err) {
+    console.warn(`[statistics] extras lookup failed: ${err.message}`);
+  }
   const embed = buildStatisticsEmbed(uid, "week", extras);
   const components = buildStatisticsComponents(uid, "week");
-  await interaction.reply({
+  await interaction.editReply({
     embeds: [embed],
     components,
-    flags: MessageFlags.Ephemeral,
   });
 }
