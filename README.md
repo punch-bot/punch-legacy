@@ -40,6 +40,8 @@ Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-g
 
 ## Quick start
 
+`./install.sh` does all of the below: preflight, `.env`, `docker compose up --build -d`, and prints the bot invite URL. `--down`, `--logs`, and `--update` manage the stack afterward.
+
 1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
 2. Optional iMessage/Spectrum: set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` in `.env` — Spectrum starts with the bot; unknown numbers pair via `/pair` (see [docs/spectrum.md](docs/spectrum.md))
 3. `docker compose up --build -d`
