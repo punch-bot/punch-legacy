@@ -3,22 +3,25 @@ import assert from "node:assert/strict";
 import { extractCompressTag } from "../src/compress-tag.mjs";
 
 describe("extractCompressTag", () => {
-  it("preserves newlines when no tag is present (the every-reply path)", () => {
+  it("returns text untouched when no tag is present (the every-reply path)", () => {
     const text = "para one\n\npara two\n  indented line";
     const { clean, requested } = extractCompressTag(text);
     assert.equal(requested, false);
-    assert.equal(clean, text.trim());
-    assert.equal((clean.match(/\n/g) || []).length, 3);
+    // Exact equality: the old bug collapsed \n{2,} to a single space here.
+    assert.equal(clean, "para one\n\npara two\n  indented line");
   });
 
-  it("keeps newlines when stripping a tag", () => {
-    const text = "before\n\n<compress />\n\nafter";
-    const { clean, requested } = extractCompressTag(text);
+  it("strips the tag and preserves every newline around it", () => {
+    const { clean, requested } = extractCompressTag("before\n\n<compress />\n\nafter");
     assert.equal(requested, true);
-    assert.ok(clean.includes("before"));
-    assert.ok(clean.includes("after"));
-    assert.ok((clean.match(/\n/g) || []).length >= 1, "newlines must survive tag strip");
-    assert.ok(!clean.includes("<compress"));
+    // Exact equality: even \n\n -> \n (partial collapse) would be a regression.
+    assert.equal(clean, "before\n\n\n\nafter");
+  });
+
+  it("strips a paired tag without touching surrounding lines", () => {
+    const { clean, requested } = extractCompressTag("before\n<compress>mid</compress>\nafter");
+    assert.equal(requested, true);
+    assert.equal(clean, "before\nmid\nafter");
   });
 
   it("still collapses runs of spaces/tabs (not newlines)", () => {
