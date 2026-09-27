@@ -244,6 +244,19 @@ export function buildSlashCommands() {
     name: "reset",
     description: "Start a fresh Pi session in this channel (drops prior context)",
   }, {
+    name: "planmode",
+    description: "Plan gate: approve Punch's proposed plans before they run",
+    options: [
+      { type: 3, name: "mode", description: "confirm = ask first · auto = run without asking · off = auto + hide stop-asking · status = show current",
+        required: false,
+        choices: [
+          { name: "confirm", value: "confirm" },
+          { name: "auto", value: "auto" },
+          { name: "off", value: "off" },
+          { name: "status", value: "status" },
+        ] },
+    ],
+  }, {
     name: "botmode",
     description: "Experimental toggles: let bots trigger Punch, disable thinking message, or toggle git co-author",
     options: [

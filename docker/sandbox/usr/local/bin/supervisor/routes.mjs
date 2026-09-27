@@ -286,6 +286,81 @@ export function handleGeneralRoutes(req, res, url) {
     return true;
   }
 
+  // Plan gate: in-sandbox tools call /plan/propose and /plan/resolve on :4097.
+  // propose is forwarded to the bot (:4098) with the sandbox's Bearer token.
+  // resolve is dual-direction: a body with `decision` is the bot notifying the
+  // sandbox of a card outcome (recorded to /data/plan-resolutions.json); a
+  // body without it is a sandbox-side query, forwarded to the bot.
+  if (req.method === "POST" && url.pathname === "/plan/propose") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", async () => {
+      try {
+        const fwd = await fetch("http://bot:4098/plan/propose", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer " + (process.env.PUNCH_BOT_TOKEN || ""),
+          },
+          body,
+        });
+        const text = await fwd.text().catch(() => "");
+        res.writeHead(fwd.status, { "content-type": "application/json" });
+        res.end(text);
+      } catch (err) {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Forward failed" }));
+      }
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/plan/resolve") {
+    let body = "";
+    req.on("data", c => body += c);
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body || "{}");
+        if (!parsed.planId) {
+          res.writeHead(400); res.end(JSON.stringify({ error: "Missing planId" })); return;
+        }
+        if (parsed.decision) {
+          // Bot → sandbox notification: record the card outcome locally so
+          // in-sandbox consumers can inspect it later.
+          const file = "/data/plan-resolutions.json";
+          const all = loadJSON(file);
+          const list = Array.isArray(all.resolutions) ? all.resolutions : [];
+          list.push({
+            planId: String(parsed.planId),
+            decision: String(parsed.decision),
+            reason: parsed.reason ? String(parsed.reason).slice(0, 200) : null,
+            summary: parsed.summary ? String(parsed.summary).slice(0, 300) : null,
+            at: Date.now(),
+          });
+          saveJSON(file, { resolutions: list.slice(-50) });
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ success: true }));
+          return;
+        }
+        const fwd = await fetch("http://bot:4098/plan/resolve", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer " + (process.env.PUNCH_BOT_TOKEN || ""),
+          },
+          body: JSON.stringify({ planId: parsed.planId }),
+        });
+        const text = await fwd.text().catch(() => "");
+        res.writeHead(fwd.status, { "content-type": "application/json" });
+        res.end(text);
+      } catch (err) {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err.message || "Forward failed" }));
+      }
+    });
+    return true;
+  }
+
   if (req.method === "GET" && url.pathname === "/tasks") {
     exec('ps -eo pid,ppid,stat,start,time,cmd --no-headers', (err, stdout) => {
       if (err) { res.writeHead(500); res.end(JSON.stringify({ error: err.message })); return; }

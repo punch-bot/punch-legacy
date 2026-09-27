@@ -61,10 +61,20 @@ import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
 import { fetchProjectMemory, labelLineFor, withUserRunLock } from "./queue.js";
 import { notifyPigeonDM } from "../gateway/pigeon.js";
+import * as planGate from "../plan-gate.js";
 
 async function handleChat(message, text, contextMessages = [], existingThinking = null, signal = null, opts = {}) {
   const uid = opts.userId ?? message.author.id;
-  const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox" };
+  // planOrigin + channelId let /plan/propose (bot-server) stamp plan cards with
+  // the true turn origin (model-supplied origin is untrusted) and route the
+  // card back to the channel the plan was proposed from.
+  const turn = {
+    startedAt: Date.now(),
+    phase: "starting",
+    detail: "checking sandbox",
+    channelId: message.channelId,
+    planOrigin: opts.planOrigin || (opts.pigeonFrom ? `a2a:${opts.pigeonFrom}` : "user"),
+  };
   registry.activeTurns.set(uid, turn);
 
   // Ensure this user has their own sandbox workspace
@@ -195,6 +205,17 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   if (opts.pigeonFrom) {
     const sbName = opts.sandboxName || sandbox.loadUsers().find((u) => u.userId === uid)?.name;
     preambleParts.push(pigeonTurnPreamble(opts.pigeonFrom, opts.pigeonHop ?? 0, sbName));
+  }
+  // Denied/not-my-task plans are surfaced here (zero extra LLM calls): the
+  // gate ends the turn when a plan is proposed, so the rejection is reported
+  // to the agent on its next turn.
+  const deniedPlans = planGate.consumeDeniedNotices(uid);
+  if (deniedPlans.length) {
+    preambleParts.push(
+      `Denied plans (do not proceed with these): ${deniedPlans
+        .map((p) => `"${p.summary}" (${p.planId}${p.reason ? `, reason: ${p.reason}` : ""})`)
+        .join("; ")}`,
+    );
   }
   if (contextMessages.length > 0) preambleParts.push(channelContextBlock(contextMessages));
 

@@ -14,6 +14,8 @@ import { userTimeZone } from "../commands/prefix.js";
 import { sandboxNameForUser } from "../agent.js";
 import { notifyPigeonDM, handleAgentPigeon } from "./pigeon.js";
 import { isRegisteredSandboxName } from "../pigeon-peer.js";
+import * as planGate from "../plan-gate.js";
+import { postPlanCard } from "./plan.js";
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -366,6 +368,77 @@ const botHttpServer = createServer(async (req, res) => {
       res.writeHead(200);
       return void res.end(JSON.stringify({ success: true }));
     }
+    if (req.method === "POST" && url.pathname === "/plan/propose") {
+      const userId = req.sandboxIdentity.userId;
+      const { summary, steps, touch, commands, est } = body;
+      if (!summary || !Array.isArray(steps) || steps.length === 0) {
+        res.writeHead(400);
+        return void res.end(JSON.stringify({ error: "Missing summary or steps" }));
+      }
+      const callerSandbox = sandboxNameForUser(userId);
+      if (req.sandboxIdentity.name !== callerSandbox) {
+        res.writeHead(403);
+        return void res.end(JSON.stringify({ error: "Plan proposer sandbox verification failed" }));
+      }
+      // The model can't be trusted to self-report origin; stamp it from the
+      // active turn (a2a:<peer> when the turn came from a pigeon).
+      const turn = registry.activeTurns.get(userId);
+      const origin = turn?.planOrigin || "user";
+      const result = planGate.submitPlanProposal({
+        userId,
+        sandboxName: req.sandboxIdentity.name,
+        summary,
+        steps,
+        touches: touch,
+        commands,
+        est,
+        origin,
+        channelId: turn?.channelId || null,
+      });
+      if (result.decision === "pending" || result.decision === "approved") {
+        try {
+          await postPlanCard(result.record, { autoApproved: result.decision === "approved" });
+        } catch (err) {
+          console.error(`[plan] card post failed for ${result.planId}:`, err.message);
+          if (result.decision === "pending") {
+            planGate.resolvePlan(result.planId, { status: "denied", reason: "card delivery failed" });
+            res.writeHead(200, { "content-type": "application/json" });
+            return void res.end(JSON.stringify({
+              planId: result.planId,
+              decision: "denied",
+              reason: "plan card delivery failed — treat as denied",
+            }));
+          }
+        }
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({
+        planId: result.planId || null,
+        decision: result.decision,
+        reason: result.reason || null,
+      }));
+    }
+
+    if (req.method === "POST" && url.pathname === "/plan/resolve") {
+      const { planId } = body;
+      if (!planId) {
+        res.writeHead(400);
+        return void res.end(JSON.stringify({ error: "Missing planId" }));
+      }
+      const pending = planGate.getPending(planId);
+      if (!pending || pending.userId !== req.sandboxIdentity.userId) {
+        res.writeHead(404);
+        return void res.end(JSON.stringify({ decision: "not_found" }));
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({
+        planId,
+        decision: pending.status,
+        reason: pending.reason || null,
+        decidedAt: pending.decidedAt || null,
+      }));
+    }
+
     res.writeHead(404);
     return void res.end("Not Found");
   } catch (err) {

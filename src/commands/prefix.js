@@ -380,6 +380,21 @@ async function handleCommand(message, cmd, rest) {
       return true;
     }
 
+    case "planmode":
+    case "plangate": {
+      try {
+        const arg = rest.trim().split(/\s+/)[0]?.toLowerCase();
+        if (!arg || arg === "status") {
+          await reply(message, settings.formatPlanGateStatus(uid));
+        } else {
+          await reply(message, settings.setPlanGate(uid, arg));
+        }
+      } catch (err) {
+        await reply(message, `⚠️ ${err.message}`);
+      }
+      return true;
+    }
+
     case "remind": {
       if (!rest) return void (await reply(message, `Usage: \`${PREFIX}remind <when> <text>\` — e.g. \`${PREFIX}remind 30m take meds\``)), true;
       try {

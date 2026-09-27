@@ -81,6 +81,8 @@ export const USER_SETTINGS_DEFAULTS = {
   multitaskEnabled: false,
   multitaskWorkersCap: 3,
   autoCompressThreshold: 75,
+  planGate: "confirm", // "confirm" asks before plans run | "auto" runs them | "off" = auto without the stop-asking option
+  planGateSeen: false,
   timeZone: "UTC",
 };
 
