@@ -29,6 +29,11 @@ import { runAgent, getFile, listBackgroundTasks, killBackgroundTask, runBackgrou
 import { validateAutoCompressThreshold } from "./context-compression.js";
 import { extractCompressTag } from "./compress-tag.mjs";
 import { filterThreadSubtree } from "./thread-context.js";
+import {
+  fetchChannelContext,
+  mapContextMessage,
+  readableDiscordContent,
+} from "./channel-context.js";
 import { isBotDirectlyMentioned } from "./message-mentions.js";
 import { formatReplyNewlines } from "./reply-format.js";
 import * as store from "./memory.js";
@@ -192,50 +197,6 @@ function reactionDedupKey(userId, messageId) {
   return false;
 }
 
-// Discord message IDs the summoning user explicitly referenced: the message
-// they replied to plus any discord.com message links pasted into the summon.
-// These are the only references that can pull another user's messages into
-// the summoning user's context.
-function referencedMessageIds(message) {
-  const ids = new Set();
-  if (!message) return ids;
-  if (message.reference?.messageId) ids.add(message.reference.messageId);
-  if (message.content) {
-    for (const m of message.content.matchAll(/discord\.com\/channels\/\d+\/\d+\/(\d+)/g)) {
-      ids.add(m[1]);
-    }
-  }
-  return ids;
-}
-
-// Scope ambient channel context to the summoning user: keep only their own
-// messages plus any message they explicitly referenced (a reply or a pasted
-// discord.com link). Other people's messages and other punches' output never
-// enter a user's prompt through the ambient channel window (that was PNCH-18).
-function visibleToSummoner(m, summonerUserId, referenced) {
-  if (m.author.bot) {
-    return referenced.has(m.id);
-  }
-  return String(m.author.id) === String(summonerUserId) || referenced.has(m.id);
-}
-
-async function fetchChannelContext(channel, message, currentSandboxName = null, summonerUserId = null) {
-  if (!channel) return [];
-  try {
-    const fetched = await channel.messages.fetch({ limit: 15, before: message?.id });
-    const referenced = referencedMessageIds(message);
-    return fetched
-      .filter((m) => visibleToSummoner(m, summonerUserId, referenced))
-      .map((m) => mapContextMsg(m, currentSandboxName))
-      .filter((m) => m && m.content.length > 0)
-      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .slice(-15);
-  } catch (err) {
-    console.error("[context] failed to fetch recent messages:", err.message);
-    return [];
-  }
-}
-
 const THREAD_WINDOW = 100;
 const RESIDUE_LIMIT = 10;
 
@@ -256,34 +217,6 @@ async function resolveRoot(channel, startId) {
   return cur;
 }
 
-// Map a Discord message into the { author, content } context shape.
-// Human messages are tagged by display name. Bot messages are other punches'
-// output: we strip the `-# from sandbox:NAME` footer, attribute them as
-// `[punch:NAME]`, and skip the summoner's OWN prior output (the Pi
-// session already carries it). Attributed punch output lets one punch SEE what
-// another punch did in the thread without mistaking it for a command.
-function mapContextMsg(m, currentSandboxName) {
-  const raw = m.content.replace(/<@!?\d+>/g, "").trim();
-  if (m.author.bot) {
-    const m2 = raw.match(/-#\s*from sandbox:(\S+)/i);
-    const name = m2 ? m2[1] : null;
-    const content = raw.replace(/-#\s*from sandbox:\S+/i, "").trim().slice(0, 200);
-    if (!content) return null;
-    if (name && currentSandboxName && name.toLowerCase() === currentSandboxName.toLowerCase()) {
-      return null; // own prior output — session history already has it
-    }
-    // Known Punch sandboxes are tagged `punch:NAME`; foreign bots (no sandbox
-    // footer) are attributed by their own display name so context isn't
-    // mislabeled as a Punch.
-    const author = name ? `punch:${name}` : (m.member?.displayName || m.author.username);
-    return { author, content };
-  }
-  return {
-    author: m.member?.displayName || m.author.username,
-    content: raw.slice(0, 200),
-  };
-}
-
 // Thread-scoped context: ingest only the reply subtree rooted at the summoning
 // message's root. The subtree is the summoning user's own reply chain, so it
 // may include the neighbours it explicitly engaged with (other humans and other
@@ -293,20 +226,23 @@ function mapContextMsg(m, currentSandboxName) {
 async function fetchThreadContext(channel, message, opts = {}) {
   if (!channel) return [];
   const currentSandboxName = sandboxNameForUser(opts.userId) || null;
+  const timeZone = store.getUserSettings(opts.userId).timeZone;
   try {
     const root = await resolveRoot(channel, message.id);
     if (!root) {
-      return fetchChannelContext(channel, message, currentSandboxName, opts.userId).slice(-RESIDUE_LIMIT);
+      return fetchChannelContext(channel, message, {
+        currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
+      });
     }
 
     const fetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
-    const all = [root, ...fetched.values()];
+    const all = [...new Map([root, ...fetched.values()].map((m) => [m.id, m])).values()];
     const mapped = all.map((m) => ({ id: m.id, referenceMessageId: m.reference?.messageId || null }));
     const keep = filterThreadSubtree(mapped, root.id);
     const kept = all
-      .filter((m) => keep.has(m.id))
+      .filter((m) => keep.has(m.id) && m.id !== message.id)
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .map((m) => mapContextMsg(m, currentSandboxName))
+      .map((m) => mapContextMessage(m, currentSandboxName, timeZone))
       .filter((m) => m && m.content.length > 0);
     let result = kept;
 
@@ -314,8 +250,10 @@ async function fetchThreadContext(channel, message, opts = {}) {
     // add a small residue of recent messages for context. Like channel mode,
     // the residue is scoped to the summoning user (own messages + explicit
     // references) so other users' jobs never leak in.
-    if (root.id === message.id && result.length <= 1) {
-      const residue = fetchChannelContext(channel, message, currentSandboxName, opts.userId).slice(-RESIDUE_LIMIT);
+    if (root.id === message.id && result.length === 0) {
+      const residue = await fetchChannelContext(channel, message, {
+        currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
+      });
       result = result.concat(residue);
     }
 
@@ -330,20 +268,24 @@ async function fetchThreadContext(channel, message, opts = {}) {
         const linkedRoot = await resolveRoot(channel, linked.id);
         if (linkedRoot) {
           const lfetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
-          const lall = [linkedRoot, ...lfetched.values()];
+          const lall = [...new Map([linkedRoot, ...lfetched.values()].map((m) => [m.id, m])).values()];
           const lmapped = lall.map((m) => ({ id: m.id, referenceMessageId: m.reference?.messageId || null }));
           const lkeep = filterThreadSubtree(lmapped, linkedRoot.id);
           const lkept = lall
             .filter((m) => lkeep.has(m.id) && m.id !== message.id)
             .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-            .map((m) => mapContextMsg(m, currentSandboxName))
+            .map((m) => mapContextMessage(m, currentSandboxName, timeZone))
             .filter((m) => m && m.content.length > 0);
           result = result.concat(lkept);
         }
       }
     }
 
-    return result.slice(-THREAD_WINDOW);
+    // A linked subtree can overlap the active one. Keep each message once and
+    // restore chronological order before limiting the combined context.
+    return [...new Map(result.map((entry) => [entry.id, entry])).values()]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .slice(-THREAD_WINDOW);
   } catch (err) {
     console.error("[context] thread fetch failed:", err.message);
     return [];
@@ -1772,7 +1714,12 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const sbName = opts.sandboxName || sandbox.loadUsers().find((u) => u.userId === uid)?.name;
     preambleParts.push(pigeonTurnPreamble(opts.pigeonFrom, opts.pigeonHop ?? 0, sbName));
   }
-  if (contextMessages.length > 0) preambleParts.push(channelContextBlock(contextMessages));
+  // The focused reply block already carries the full referenced message.
+  // Omit that same message from ambient context so it is not repeated.
+  const ambientContext = opts.repliedTo && message.reference?.messageId
+    ? contextMessages.filter((ctx) => ctx.id !== message.reference.messageId)
+    : contextMessages;
+  if (ambientContext.length > 0) preambleParts.push(channelContextBlock(ambientContext));
 
   let thinking = existingThinking;
   const allowThinking = useThinking && !store.getUserSettings(uid).noThinking;
@@ -2850,7 +2797,11 @@ client.on(Events.MessageCreate, async (message) => {
   const useChannelContext =
     message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
   const contextMessages = useChannelContext
-    ? await fetchChannelContext(message.channel, message, sandboxNameForUser(message.author.id), message.author.id)
+    ? await fetchChannelContext(message.channel, message, {
+        currentSandboxName: sandboxNameForUser(message.author.id),
+        userId: message.author.id,
+        timeZone: store.getUserSettings(message.author.id).timeZone,
+      })
     : await fetchThreadContext(message.channel, message, { userId: message.author.id });
 
   await enqueueChat(message, text, contextMessages, repliedTo ? { repliedTo } : {});
@@ -2886,15 +2837,18 @@ async function buildRepliedToContext(message) {
   try {
     const refMsg = await message.channel.messages.fetch(message.reference.messageId);
     if (!refMsg) return null;
-    const authorName = refMsg.member?.displayName || refMsg.author.username;
-    let content = refMsg.content.replace(/<@!?\d+>/g, "").trim();
+    const displayName = refMsg.member?.displayName || refMsg.author.username;
+    const authorName = `${displayName} (@${refMsg.author.username}, id:${refMsg.author.id})`;
+    let content = readableDiscordContent(refMsg).trim();
     if (!content && isVoiceMessage(refMsg)) {
       content = "(voice memo)";
     } else if (!content && refMsg.attachments.size > 0) {
       content = `(message has ${refMsg.attachments.size} attachment(s))`;
     }
     if (!content) content = "(empty message)";
-    return repliedToBlock(authorName, content);
+    const timeZone = store.getUserSettings(message.author.id).timeZone;
+    const sentAt = formatMessageTimestamp(refMsg.createdTimestamp, timeZone);
+    return repliedToBlock(authorName, content, sentAt);
   } catch (err) {
     console.error("[reply-context] failed to fetch replied message:", err.message);
     return null;
@@ -2945,7 +2899,7 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     if (!sandboxUrl) return;
 
     const authorName = targetMessage.member?.displayName || targetMessage.author.username;
-    let content = targetMessage.content.replace(/<@!?\d+>/g, "").trim();
+    let content = readableDiscordContent(targetMessage).trim();
     if (!content && isVoiceMessage(targetMessage)) {
       content = "(voice memo — Punch will transcribe it)";
     } else if (!content && targetMessage.attachments.size > 0) {
@@ -2958,7 +2912,11 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const useChannelContext =
       targetMessage.guild && store.getGuildSettings(targetMessage.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(targetMessage.channel, targetMessage, sandboxNameForUser(user.id), user.id)
+      ? await fetchChannelContext(targetMessage.channel, targetMessage, {
+          currentSandboxName: sandboxNameForUser(user.id),
+          userId: user.id,
+          timeZone: store.getUserSettings(user.id).timeZone,
+        })
       : await fetchThreadContext(targetMessage.channel, targetMessage, { userId: user.id });
 
     console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
