@@ -5,6 +5,20 @@ export const CHANNEL_CONTEXT_LIMIT = 15;
 export const CONTEXT_CONTENT_CHARS = 500;
 const MAX_REFERENCED_CONTEXT = 5;
 
+// A reply or a pasted Discord message link explicitly brings that message
+// into the user's context, even when another person wrote it.
+export function referencedMessageIds(message) {
+  const ids = new Set();
+  if (!message) return ids;
+  if (message.reference?.messageId) ids.add(message.reference.messageId);
+  if (message.content) {
+    for (const match of message.content.matchAll(/discord\.com\/channels\/\d+\/\d+\/(\d+)/g)) {
+      ids.add(match[1]);
+    }
+  }
+  return ids;
+}
+
 function contextTimestamp(timestamp, timeZone) {
   if (!Number.isFinite(timestamp)) return "";
   const zone = normalizeTimeZone(timeZone);
@@ -91,4 +105,31 @@ export function selectChannelContext(messages, {
     : [];
   return [...referenced, ...recent]
     .sort((a, b) => a.createdTimestamp - b.createdTimestamp || a.id.localeCompare(b.id));
+}
+
+export async function fetchChannelContext(channel, message, {
+  userId = null,
+  currentSandboxName = null,
+  timeZone = "UTC",
+  limit = CHANNEL_CONTEXT_LIMIT,
+} = {}) {
+  if (!channel) return [];
+  try {
+    // Filter before taking the newest 15 eligible messages. A busy shared
+    // channel may have few of this user's messages among the last 15.
+    const fetched = await channel.messages.fetch({ limit: CHANNEL_CONTEXT_FETCH_LIMIT, before: message?.id });
+    const referenced = referencedMessageIds(message);
+    const extraIds = [...referenced].filter((id) => !fetched.has(id)).slice(0, MAX_REFERENCED_CONTEXT);
+    const extras = await Promise.all(extraIds.map((id) => channel.messages.fetch(id).catch(() => null)));
+    return selectChannelContext([...fetched.values(), ...extras.filter(Boolean)], {
+      userId,
+      referencedIds: referenced,
+      currentSandboxName,
+      timeZone,
+      limit,
+    });
+  } catch (err) {
+    console.error("[context] failed to fetch recent messages:", err.message);
+    return [];
+  }
 }

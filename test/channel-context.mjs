@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  CHANNEL_CONTEXT_FETCH_LIMIT,
   CONTEXT_CONTENT_CHARS,
+  fetchChannelContext,
   mapContextMessage,
   readableDiscordContent,
   selectChannelContext,
@@ -28,12 +28,38 @@ test("selects the newest relevant messages after filtering and orders them by se
     referencedIds: new Set(["reply"]),
     timeZone: "UTC",
   });
-  assert.equal(CHANNEL_CONTEXT_FETCH_LIMIT, 100);
   assert.deepEqual(result.map((entry) => entry.id), ["own", "reply"]);
   assert.equal(result[1].author, "Bob");
   assert.equal(result[1].username, "bobby");
   assert.equal(result[1].userId, "bob");
   assert.equal(result[1].sentAt, "2026-09-28 18:39 UTC");
+});
+
+test("fetches a 100-message window and retrieves older reply and link targets", async () => {
+  const now = Date.parse("2026-09-28T18:40:00Z");
+  const own = message("200", "alice", now, "current discussion");
+  const linked = message("101", "bob", now - 2000, "linked detail");
+  const replied = message("102", "carol", now - 1000, "reply detail");
+  const summon = message("300", "alice", now + 1000, "See https://discord.com/channels/1/2/101");
+  summon.reference = { messageId: "102" };
+  const calls = [];
+  const channel = {
+    messages: {
+      async fetch(arg) {
+        calls.push(arg);
+        if (typeof arg === "object") return new Map([[own.id, own]]);
+        if (arg === linked.id) return linked;
+        if (arg === replied.id) return replied;
+        throw new Error(`unexpected message ${arg}`);
+      },
+    },
+  };
+
+  const result = await fetchChannelContext(channel, summon, { userId: "alice", timeZone: "UTC" });
+  assert.deepEqual(calls[0], { limit: 100, before: "300" });
+  assert.deepEqual(new Set(calls.slice(1)), new Set(["101", "102"]));
+  assert.equal(calls.length, 3);
+  assert.deepEqual(result.map((entry) => entry.id), ["101", "102", "200"]);
 });
 
 test("truncates long context visibly and suppresses the user's own Punch output", () => {

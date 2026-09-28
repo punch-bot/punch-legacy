@@ -30,11 +30,9 @@ import { validateAutoCompressThreshold } from "./context-compression.js";
 import { extractCompressTag } from "./compress-tag.mjs";
 import { filterThreadSubtree } from "./thread-context.js";
 import {
-  CHANNEL_CONTEXT_FETCH_LIMIT,
-  CHANNEL_CONTEXT_LIMIT,
+  fetchChannelContext,
   mapContextMessage,
   readableDiscordContent,
-  selectChannelContext,
 } from "./channel-context.js";
 import { isBotDirectlyMentioned } from "./message-mentions.js";
 import { formatReplyNewlines } from "./reply-format.js";
@@ -199,45 +197,6 @@ function reactionDedupKey(userId, messageId) {
   return false;
 }
 
-// Discord message IDs the summoning user explicitly referenced: the message
-// they replied to plus any discord.com message links pasted into the summon.
-// These are the only references that can pull another user's messages into
-// the summoning user's context.
-function referencedMessageIds(message) {
-  const ids = new Set();
-  if (!message) return ids;
-  if (message.reference?.messageId) ids.add(message.reference.messageId);
-  if (message.content) {
-    for (const m of message.content.matchAll(/discord\.com\/channels\/\d+\/\d+\/(\d+)/g)) {
-      ids.add(m[1]);
-    }
-  }
-  return ids;
-}
-
-async function fetchChannelContext(channel, message, currentSandboxName = null, summonerUserId = null, limit = CHANNEL_CONTEXT_LIMIT) {
-  if (!channel) return [];
-  try {
-    // Filter first, then take the newest 15 relevant messages. A busy shared
-    // channel can contain few of the summoner's messages in its last 15.
-    const fetched = await channel.messages.fetch({ limit: CHANNEL_CONTEXT_FETCH_LIMIT, before: message?.id });
-    const referenced = referencedMessageIds(message);
-    // An explicit same-channel link or reply may be older than the fetch window.
-    const extraIds = [...referenced].filter((id) => !fetched.has(id)).slice(0, 5);
-    const extras = await Promise.all(extraIds.map((id) => channel.messages.fetch(id).catch(() => null)));
-    return selectChannelContext([...fetched.values(), ...extras.filter(Boolean)], {
-      userId: summonerUserId,
-      referencedIds: referenced,
-      currentSandboxName,
-      timeZone: store.getUserSettings(summonerUserId).timeZone,
-      limit,
-    });
-  } catch (err) {
-    console.error("[context] failed to fetch recent messages:", err.message);
-    return [];
-  }
-}
-
 const THREAD_WINDOW = 100;
 const RESIDUE_LIMIT = 10;
 
@@ -271,7 +230,9 @@ async function fetchThreadContext(channel, message, opts = {}) {
   try {
     const root = await resolveRoot(channel, message.id);
     if (!root) {
-      return fetchChannelContext(channel, message, currentSandboxName, opts.userId, RESIDUE_LIMIT);
+      return fetchChannelContext(channel, message, {
+        currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
+      });
     }
 
     const fetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
@@ -290,7 +251,9 @@ async function fetchThreadContext(channel, message, opts = {}) {
     // the residue is scoped to the summoning user (own messages + explicit
     // references) so other users' jobs never leak in.
     if (root.id === message.id && result.length === 0) {
-      const residue = await fetchChannelContext(channel, message, currentSandboxName, opts.userId, RESIDUE_LIMIT);
+      const residue = await fetchChannelContext(channel, message, {
+        currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
+      });
       result = result.concat(residue);
     }
 
@@ -2834,7 +2797,11 @@ client.on(Events.MessageCreate, async (message) => {
   const useChannelContext =
     message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
   const contextMessages = useChannelContext
-    ? await fetchChannelContext(message.channel, message, sandboxNameForUser(message.author.id), message.author.id)
+    ? await fetchChannelContext(message.channel, message, {
+        currentSandboxName: sandboxNameForUser(message.author.id),
+        userId: message.author.id,
+        timeZone: store.getUserSettings(message.author.id).timeZone,
+      })
     : await fetchThreadContext(message.channel, message, { userId: message.author.id });
 
   await enqueueChat(message, text, contextMessages, repliedTo ? { repliedTo } : {});
@@ -2945,7 +2912,11 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
     const useChannelContext =
       targetMessage.guild && store.getGuildSettings(targetMessage.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(targetMessage.channel, targetMessage, sandboxNameForUser(user.id), user.id)
+      ? await fetchChannelContext(targetMessage.channel, targetMessage, {
+          currentSandboxName: sandboxNameForUser(user.id),
+          userId: user.id,
+          timeZone: store.getUserSettings(user.id).timeZone,
+        })
       : await fetchThreadContext(targetMessage.channel, targetMessage, { userId: user.id });
 
     console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
