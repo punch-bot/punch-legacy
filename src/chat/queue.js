@@ -5,6 +5,7 @@ import { writeFileSync } from "node:fs";
 import { getFile, sandboxNameForUser } from "../agent.js";
 import { registry } from "../core/registry.js";
 import { shouldUseMultitaskWorker, trySpawnMultitaskWorker } from "./multitask.js";
+import { shouldSteerTurn, trySteerTurn } from "./steer.js";
 import { handleChat } from "./chat.js";
 
 async function withUserRunLock(uid, fn) {
@@ -27,6 +28,13 @@ async function withUserRunLock(uid, fn) {
 
 async function enqueueChat(message, text, contextMessages = [], opts = {}) {
   const uid = opts.userId ?? message.author.id;
+
+  // Steering mode takes precedence over queueing and multitasking: the
+  // message is injected into the in-flight turn for this channel.
+  if (shouldSteerTurn(uid, message, opts)) {
+    const steered = await trySteerTurn(message, text, opts);
+    if (steered) return;
+  }
 
   if (shouldUseMultitaskWorker(uid, opts)) {
     const spawned = await trySpawnMultitaskWorker(message, text, contextMessages, opts);

@@ -80,6 +80,8 @@ export const USER_SETTINGS_DEFAULTS = {
   gitCoAuthor: true,
   multitaskEnabled: false,
   multitaskWorkersCap: 3,
+  threadModeEnabled: false,
+  steeringEnabled: false,
   autoCompressThreshold: 75,
   timeZone: "UTC",
 };

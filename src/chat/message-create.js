@@ -8,6 +8,12 @@ import { PREFIX } from "../core/config.js";
 import { handleCommand } from "../commands/prefix.js";
 import { enqueueChat } from "../chat/queue.js";
 import { fetchChannelContext, fetchThreadContext } from "../chat/context.js";
+import {
+  isPunchThread,
+  shouldUseThreadMode,
+  startPunchThread,
+  threadBoundMessage,
+} from "../chat/threads.js";
 import { isBotDirectlyMentioned } from "../message-mentions.js";
 import {
   isVoiceMessage,
@@ -25,6 +31,9 @@ function registerMessageCreate(client) {
 
     const isDM = !message.guild;
     const mentioned = isBotDirectlyMentioned(message, client.user);
+    // Messages inside a thread Punch created auto-summon — no mention or
+    // summon word needed (that's the whole point of thread mode).
+    const inPunchThread = isPunchThread(message.channel, client);
     const content = message.content.trim();
     const voiceMemo = isVoiceMessage(message);
 
@@ -37,16 +46,20 @@ function registerMessageCreate(client) {
       const rest = content.slice(PREFIX.length + cmd.length).trim();
       const handled = await handleCommand(message, cmd.toLowerCase(), rest);
       if (handled) return;
-      if (!isDM && !mentioned) return;
+      if (!isDM && !mentioned && !inPunchThread) return;
     }
 
     const allowedChannel = message.guild ? store.getAllowedChannel(message.guild.id) : null;
-    if (allowedChannel && message.channelId !== allowedChannel) {
+    if (
+      allowedChannel &&
+      message.channelId !== allowedChannel &&
+      message.channel?.parentId !== allowedChannel
+    ) {
       return;
     }
 
     const summonWord = (!isDM && message.guild) ? (store.getUserTrigger(message.author.id) || store.getSummonWord(message.guild.id)) : null;
-    if (!isDM && !mentioned && !message.content.startsWith(PREFIX)) {
+    if (!isDM && !mentioned && !inPunchThread && !message.content.startsWith(PREFIX)) {
       const replyToBot = voiceMemo ? await isReplyToBot(message, client) : false;
       const summonMatched = summonWord
         ? content.toLowerCase().split(/\s+/).includes(summonWord)
@@ -71,15 +84,27 @@ function registerMessageCreate(client) {
     // Collect the message this one is replying to (if any) as focused context
     const repliedTo = await buildRepliedToContext(message);
 
+    // Thread mode: a fresh channel-level summon opens a Punch-owned thread
+    // and the turn is redirected into it.
+    let turnMessage = message;
+    if (!isDM && !inPunchThread && shouldUseThreadMode(message, message.author.id)) {
+      try {
+        const thread = await startPunchThread(message, text);
+        if (thread) turnMessage = threadBoundMessage(message, thread);
+      } catch (err) {
+        console.error("[threads] failed to start punch thread:", err.message);
+      }
+    }
+
     // Collect context: thread-scoped by default, or legacy channel-scoped if the
     // guild opted into `channel` mode via /settings context.
     const useChannelContext =
       message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(message.channel, message.id, sandboxNameForUser(message.author.id))
-      : await fetchThreadContext(message.channel, message, { userId: message.author.id });
+      ? await fetchChannelContext(turnMessage.channel, turnMessage.id, sandboxNameForUser(message.author.id))
+      : await fetchThreadContext(turnMessage.channel, turnMessage, { userId: message.author.id });
 
-    await enqueueChat(message, text, contextMessages, repliedTo ? { repliedTo } : {});
+    await enqueueChat(turnMessage, text, contextMessages, repliedTo ? { repliedTo } : {});
   });
 }
 
