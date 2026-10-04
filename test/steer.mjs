@@ -28,10 +28,14 @@ describe("shouldSteerTurn", () => {
     assert.equal(shouldSteerTurn(uid, msg()), false);
   });
 
-  it("steers when enabled, a turn is running in the same channel, and queue is empty", () => {
+  it("steers when enabled, a turn is running in the same channel, and nothing is queued behind it", () => {
     memory.patchUserSettings(uid, { steeringEnabled: true });
     busy("chan-1");
     assert.equal(shouldSteerTurn(uid, msg("chan-1")), true);
+    // queue[0] is the in-flight turn itself — it must not block steering.
+    registry.userQueues.set(uid, [{ text: "in-flight" }]);
+    assert.equal(shouldSteerTurn(uid, msg("chan-1")), true);
+    registry.userQueues.delete(uid);
   });
 
   it("does not steer when idle, in a different channel, or with queued messages", () => {
@@ -43,7 +47,7 @@ describe("shouldSteerTurn", () => {
     busy("chan-1");
     assert.equal(shouldSteerTurn(uid, msg("chan-2")), false);
 
-    registry.userQueues.set(uid, [{ text: "earlier" }]);
+    registry.userQueues.set(uid, [{ text: "in-flight" }, { text: "waiting" }]);
     assert.equal(shouldSteerTurn(uid, msg("chan-1")), false);
     registry.userQueues.delete(uid);
   });

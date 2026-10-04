@@ -9,6 +9,7 @@ import { handleCommand } from "../commands/prefix.js";
 import { enqueueChat } from "../chat/queue.js";
 import { fetchChannelContext, fetchThreadContext } from "../chat/context.js";
 import {
+  canAutoSummon,
   isPunchThread,
   shouldUseThreadMode,
   startPunchThread,
@@ -32,8 +33,10 @@ function registerMessageCreate(client) {
     const isDM = !message.guild;
     const mentioned = isBotDirectlyMentioned(message, client.user);
     // Messages inside a thread Punch created auto-summon — no mention or
-    // summon word needed (that's the whole point of thread mode).
+    // summon word needed (that's the whole point of thread mode) — but only
+    // for the user who opened the thread; its session lives in their sandbox.
     const inPunchThread = isPunchThread(message.channel, client);
+    const autoSummon = canAutoSummon(message.channel, client, message.author.id);
     const content = message.content.trim();
     const voiceMemo = isVoiceMessage(message);
 
@@ -46,7 +49,7 @@ function registerMessageCreate(client) {
       const rest = content.slice(PREFIX.length + cmd.length).trim();
       const handled = await handleCommand(message, cmd.toLowerCase(), rest);
       if (handled) return;
-      if (!isDM && !mentioned && !inPunchThread) return;
+      if (!isDM && !mentioned && !autoSummon) return;
     }
 
     const allowedChannel = message.guild ? store.getAllowedChannel(message.guild.id) : null;
@@ -59,7 +62,7 @@ function registerMessageCreate(client) {
     }
 
     const summonWord = (!isDM && message.guild) ? (store.getUserTrigger(message.author.id) || store.getSummonWord(message.guild.id)) : null;
-    if (!isDM && !mentioned && !inPunchThread && !message.content.startsWith(PREFIX)) {
+    if (!isDM && !mentioned && !autoSummon && !message.content.startsWith(PREFIX)) {
       const replyToBot = voiceMemo ? await isReplyToBot(message, client) : false;
       const summonMatched = summonWord
         ? content.toLowerCase().split(/\s+/).includes(summonWord)
@@ -87,9 +90,9 @@ function registerMessageCreate(client) {
     // Thread mode: a fresh channel-level summon opens a Punch-owned thread
     // and the turn is redirected into it.
     let turnMessage = message;
-    if (!isDM && !inPunchThread && shouldUseThreadMode(message, message.author.id)) {
+    if (!isDM && !inPunchThread && shouldUseThreadMode(message, message.author.id, text)) {
       try {
-        const thread = await startPunchThread(message, text);
+        const thread = await startPunchThread(message, text, message.author.id);
         if (thread) turnMessage = threadBoundMessage(message, thread);
       } catch (err) {
         console.error("[threads] failed to start punch thread:", err.message);
@@ -97,12 +100,14 @@ function registerMessageCreate(client) {
     }
 
     // Collect context: thread-scoped by default, or legacy channel-scoped if the
-    // guild opted into `channel` mode via /settings context.
+    // guild opted into `channel` mode via /settings context. Context always
+    // reads the real message's channel — for a summon that just opened a
+    // thread that's the parent channel (the new thread is still empty).
     const useChannelContext =
       message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(turnMessage.channel, turnMessage.id, sandboxNameForUser(message.author.id))
-      : await fetchThreadContext(turnMessage.channel, turnMessage, { userId: message.author.id });
+      ? await fetchChannelContext(message.channel, message.id, sandboxNameForUser(message.author.id))
+      : await fetchThreadContext(message.channel, message, { userId: message.author.id });
 
     await enqueueChat(turnMessage, text, contextMessages, repliedTo ? { repliedTo } : {});
   });

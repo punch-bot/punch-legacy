@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 const MEM_FILE = join(DATA_DIR, "memory.json");
 const SESSION_FILE = join(DATA_DIR, "sessions.json");
+const THREAD_OWNERS_FILE = join(DATA_DIR, "thread-owners.json");
 const CONFIG_FILE = join(DATA_DIR, "config.json");
 const SECRETS_FILE = join(DATA_DIR, "secrets.json");
 const DAILY_DIR = join(DATA_DIR, "memory");
@@ -47,6 +48,7 @@ function save(file, obj) {
 
 let mem = load(MEM_FILE, { users: {}, channels: {} });
 let sessions = load(SESSION_FILE, {});
+let threadOwners = load(THREAD_OWNERS_FILE, {});
 let config = load(CONFIG_FILE, { allowedChannels: {}, summonWords: {}, guildSettings: {} });
 
 // Tolerate old or partially-written memory documents without changing their format.
@@ -497,6 +499,19 @@ export function clearSession(channelId) {
   clearMemoryRecall(sessions[channelId]);
   delete sessions[channelId];
   save(SESSION_FILE, sessions);
+}
+
+// Which user summoned a Punch-owned thread. Auto-summon inside the thread is
+// restricted to them — the thread's session lives in their sandbox, and other
+// members' messages shouldn't silently inject into it.
+export function getThreadOwner(threadId) {
+  return threadOwners[threadId] || null;
+}
+
+export function setThreadOwner(threadId, userId) {
+  if (!threadId || !userId) return;
+  threadOwners[threadId] = userId;
+  save(THREAD_OWNERS_FILE, threadOwners);
 }
 
 export function setAllowedChannel(guildId, channelId) {

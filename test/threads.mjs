@@ -61,23 +61,45 @@ describe("shouldUseThreadMode", () => {
   const uid = "user-thread-mode";
 
   it("defaults off", () => {
-    assert.equal(threads.shouldUseThreadMode(msg(), uid), false);
+    assert.equal(threads.shouldUseThreadMode(msg(), uid, "hello"), false);
   });
 
   it("is on for a top-level guild summon when enabled", () => {
     memory.patchUserSettings(uid, { threadModeEnabled: true });
-    assert.equal(threads.shouldUseThreadMode(msg(), uid), true);
+    assert.equal(threads.shouldUseThreadMode(msg(), uid, "hello"), true);
+  });
+
+  it("is off for empty summons", () => {
+    memory.patchUserSettings(uid, { threadModeEnabled: true });
+    assert.equal(threads.shouldUseThreadMode(msg(), uid, ""), false);
+    assert.equal(threads.shouldUseThreadMode(msg(), uid, "   "), false);
   });
 
   it("is off in DMs, in threads, and for messages that already have one", () => {
     memory.patchUserSettings(uid, { threadModeEnabled: true });
-    assert.equal(threads.shouldUseThreadMode(msg({ guildId: null }), uid), false);
+    assert.equal(threads.shouldUseThreadMode(msg({ guildId: null }), uid, "hi"), false);
     assert.equal(
-      threads.shouldUseThreadMode(msg({ channel: fakeChannel({ isThread: () => true }) }), uid),
+      threads.shouldUseThreadMode(msg({ channel: fakeChannel({ isThread: () => true }) }), uid, "hi"),
       false,
     );
-    assert.equal(threads.shouldUseThreadMode(msg({ hasThread: true }), uid), false);
-    assert.equal(threads.shouldUseThreadMode(msg({ startThread: undefined }), uid), false);
+    assert.equal(threads.shouldUseThreadMode(msg({ hasThread: true }), uid, "hi"), false);
+    assert.equal(threads.shouldUseThreadMode(msg({ startThread: undefined }), uid, "hi"), false);
+  });
+});
+
+describe("canAutoSummon", () => {
+  const botThread = () => fakeChannel({ isThread: () => true, ownerId: "bot-1", id: "t-1" });
+
+  it("is true only for the user who opened the thread", () => {
+    memory.setThreadOwner("t-1", "user-owner");
+    assert.equal(threads.canAutoSummon(botThread(), fakeClient(), "user-owner"), true);
+    assert.equal(threads.canAutoSummon(botThread(), fakeClient(), "user-other"), false);
+  });
+
+  it("is false for unknown owners and non-punch threads", () => {
+    const unknown = fakeChannel({ isThread: () => true, ownerId: "bot-1", id: "t-none" });
+    assert.equal(threads.canAutoSummon(unknown, fakeClient(), "user-owner"), false);
+    assert.equal(threads.canAutoSummon(fakeChannel(), fakeClient(), "user-owner"), false);
   });
 });
 

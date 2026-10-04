@@ -94,10 +94,10 @@ function registerReactionAdd(client) {
       if (
         !isDM &&
         !isPunchThread(targetMessage.channel, client) &&
-        shouldUseThreadMode(targetMessage, user.id)
+        shouldUseThreadMode(targetMessage, user.id, content)
       ) {
         try {
-          const thread = await startPunchThread(targetMessage, content);
+          const thread = await startPunchThread(targetMessage, content, user.id);
           if (thread) turnMessage = threadBoundMessage(targetMessage, thread);
         } catch (err) {
           console.error("[threads] failed to start punch thread:", err.message);

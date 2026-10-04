@@ -23,9 +23,11 @@ export function threadNameFor(text) {
 
 // Thread mode applies to fresh summons at channel top level only: not DMs, not
 // inside existing threads (a Punch thread auto-summons anyway; someone else's
-// thread keeps normal mention behavior).
-export function shouldUseThreadMode(message, userId) {
+// thread keeps normal mention behavior). Empty summons open no thread — the
+// turn would be rejected by handleChat anyway.
+export function shouldUseThreadMode(message, userId, text) {
   if (!message?.guildId) return false;
+  if (!String(text ?? "").trim()) return false;
   const channel = message.channel;
   if (!channel || channel.isThread?.()) return false;
   if (message.hasThread) return false;
@@ -33,15 +35,25 @@ export function shouldUseThreadMode(message, userId) {
   return Boolean(store.getUserSettings(userId).threadModeEnabled);
 }
 
+// Whether this user's message auto-summons inside the channel. Only the user
+// who opened the thread may auto-summon: the thread's Pi session lives in
+// their sandbox, so letting other members' messages inject into it would leak
+// their conversation. Others can still mention the bot for their own turn.
+export function canAutoSummon(channel, client, userId) {
+  if (!isPunchThread(channel, client)) return false;
+  return store.getThreadOwner(channel.id) === userId;
+}
+
 // Open a public thread on the summon message. The bot is the creator, so the
 // thread is Punch-owned — which is what makes later messages auto-summon.
-export async function startPunchThread(message, text) {
+export async function startPunchThread(message, text, userId) {
   const thread = await message.startThread({
     name: threadNameFor(text),
     autoArchiveDuration: 1440,
     reason: "Punch thread mode",
   });
   await thread.join().catch(() => {});
+  store.setThreadOwner(thread.id, userId);
   return thread;
 }
 

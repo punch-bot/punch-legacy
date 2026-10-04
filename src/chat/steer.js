@@ -16,8 +16,11 @@ export function shouldSteerTurn(uid, message, opts = {}) {
   if (!store.getUserSettings(uid).steeringEnabled) return false;
   const turn = registry.activeTurns.get(uid);
   if (!turn || turn.channelId !== message.channelId) return false;
+  // queue[0] is the in-flight turn itself (shifted only after handleChat
+  // returns), so length <= 1 means nothing is waiting behind it — steering
+  // must not jump ahead of already-queued messages.
   const queue = registry.userQueues.get(uid);
-  return !queue || queue.length === 0;
+  return !queue || queue.length <= 1;
 }
 
 export async function trySteerTurn(message, text, opts = {}) {
