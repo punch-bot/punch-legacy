@@ -870,7 +870,7 @@ const server = createServer(async (req, res) => {
     }
 
     const sessMatch = url.pathname.match(
-      /^\/session\/([^/]+)(?:\/(message|summarize|abort|prompt_async))?$/,
+      /^\/session\/([^/]+)(?:\/(message|summarize|abort|prompt_async|steer))?$/,
     );
     if (sessMatch) {
       const sid = decodeURIComponent(sessMatch[1]);
@@ -916,6 +916,40 @@ const server = createServer(async (req, res) => {
         void recoverStuckPi("session abort");
         finishTurnProgress(sid, "aborted");
         json(res, 200, { ok: true });
+        return;
+      }
+
+      // Inject a steering message into the in-flight turn. Deliberately
+      // bypasses enqueueTurn — steering only works mid-turn, so a finished
+      // or foreign session is a conflict and the caller queues instead.
+      if (req.method === "POST" && action === "steer") {
+        const body = await readBody(req).catch(() => ({}));
+        const textPart = (body.parts || []).find((p) => p.type === "text");
+        const text = String(body.message ?? textPart?.text ?? "");
+        const target = sid === "active" ? activeLogicalId : sid;
+        if (!target || !sessions.has(target)) {
+          json(res, 404, { error: "session not found" });
+          return;
+        }
+        if (activeLogicalId !== target || !turnProgress.has(target)) {
+          json(res, 409, { error: "no in-flight turn for this session" });
+          return;
+        }
+        if (!text.trim()) {
+          json(res, 400, { error: "empty steer text" });
+          return;
+        }
+        try {
+          const session = sessions.get(target);
+          session.messages.push({
+            info: { role: "user" },
+            parts: [{ type: "text", text }],
+          });
+          const r = await rpc("steer", { message: text }, 30000);
+          json(res, 200, { ok: true, disposition: r.data?.disposition || null });
+        } catch (e) {
+          json(res, 502, { error: e.message });
+        }
         return;
       }
 

@@ -64,7 +64,7 @@ import { notifyPigeonDM } from "../gateway/pigeon.js";
 
 async function handleChat(message, text, contextMessages = [], existingThinking = null, signal = null, opts = {}) {
   const uid = opts.userId ?? message.author.id;
-  const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox" };
+  const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox", channelId: message.channelId };
   registry.activeTurns.set(uid, turn);
 
   // Ensure this user has their own sandbox workspace

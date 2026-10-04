@@ -746,6 +746,35 @@ export async function getFile(filePath, userId) {
   return { buffer, name: filePath.split("/").pop() || "file" };
 }
 
+// Inject a steering message into the user's in-flight Pi turn via the
+// gateway `steer` RPC (delivered after the current assistant turn finishes
+// its tool calls, before the next LLM call). sessionId "active" resolves to
+// the gateway's currently-running session; !ok means the caller should fall
+// back to the normal queue.
+export async function steerSession(sessionId, text, userId) {
+  const srv = serverFor(userId);
+  if (!srv) return { ok: false, error: "No sandbox assigned." };
+  const dir = userDir(userId);
+  const q = `?directory=${encodeURIComponent(dir)}`;
+  const sid = sessionId || "active";
+  try {
+    const res = await fetch(`${srv}/session/${encodeURIComponent(sid)}/steer${q}`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ parts: [{ type: "text", text: String(text ?? "") }] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      return { ok: false, error: `steer API ${res.status}: ${t.slice(0, 160)}` };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: true, disposition: data.disposition || null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 export async function abortSession(sessionId, userId) {
    const srv = serverFor(userId);
    if (!srv) return false;

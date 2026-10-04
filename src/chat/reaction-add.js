@@ -14,6 +14,12 @@ import * as pigeonGate from "../pigeon-gate.js";
 import { notifyPigeonDM } from "../gateway/pigeon.js";
 import { isVoiceMessage } from "../stt.js";
 import { reactedToBlock } from "../prompt-blocks.js";
+import {
+  isPunchThread,
+  shouldUseThreadMode,
+  startPunchThread,
+  threadBoundMessage,
+} from "../chat/threads.js";
 
 function registerReactionAdd(client) {
   client.on(Events.MessageReactionAdd, async (reaction, user) => {
@@ -49,7 +55,11 @@ function registerReactionAdd(client) {
         if (!settings.reactionMatches(reaction, gs.reactionSummonEmoji)) return;
 
         const allowedChannel = store.getAllowedChannel(guildId);
-        if (allowedChannel && targetMessage.channelId !== allowedChannel) return;
+        if (
+          allowedChannel &&
+          targetMessage.channelId !== allowedChannel &&
+          targetMessage.channel?.parentId !== allowedChannel
+        ) return;
       } else {
         if (!settings.reactionMatches(reaction, store.GUILD_SETTINGS_DEFAULTS.reactionSummonEmoji)) return;
       }
@@ -78,8 +88,24 @@ function registerReactionAdd(client) {
 
       console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
 
+      // Thread mode: the reaction summon opens a Punch-owned thread on the
+      // reacted-to message and the turn is redirected into it.
+      let turnMessage = targetMessage;
+      if (
+        !isDM &&
+        !isPunchThread(targetMessage.channel, client) &&
+        shouldUseThreadMode(targetMessage, user.id, content)
+      ) {
+        try {
+          const thread = await startPunchThread(targetMessage, content, user.id);
+          if (thread) turnMessage = threadBoundMessage(targetMessage, thread);
+        } catch (err) {
+          console.error("[threads] failed to start punch thread:", err.message);
+        }
+      }
+
       await enqueueChat(
-        targetMessage,
+        turnMessage,
         "(reacted to the message above — respond to it)",
         contextMessages,
         {
