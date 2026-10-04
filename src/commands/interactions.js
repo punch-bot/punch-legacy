@@ -62,6 +62,7 @@ import {
 } from "./prefix.js";
 
 import { runApprovedAgentPigeon, handleAgentPigeon, notifyPigeonDM } from "../gateway/pigeon.js";
+import { handlePlanInteraction } from "../gateway/plan.js";
 
 export function registerInteractions(client) {
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -216,6 +217,17 @@ export function registerInteractions(client) {
 
     if (interaction.isButton()) {
       const [action, pendingId] = (interaction.customId || "").split(":");
+      if (pendingId?.startsWith("pl_") && action?.startsWith("plan_")) {
+        try {
+          await handlePlanInteraction(interaction, action, pendingId);
+        } catch (err) {
+          console.error(`[plan-gate] button handler failed:`, err);
+          const payload = { content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral };
+          if (interaction.replied || interaction.deferred) await interaction.followUp(payload).catch(() => {});
+          else await interaction.reply(payload).catch(() => {});
+        }
+        return;
+      }
       if (pendingId?.startsWith("pg_") && (action === "pigeon_allow" || action === "pigeon_deny" || action === "pigeon_trust" || action === "pigeon_deny_always")) {
         const pending = pigeonGate.getPending(pendingId);
         if (!pending) {
@@ -1095,6 +1107,21 @@ export function registerInteractions(client) {
       } else {
         const us = store.getUserSettings(uid);
         await interaction.reply({ content: `⏱️ Idle/stale timeouts are currently **${us.disableIdleTimeout ? "disabled" : "enabled (90s silence / ~3m stuck working)"}**.`, flags: MessageFlags.Ephemeral });
+      }
+      return;
+    }
+
+    if (interaction.commandName === "planmode") {
+      const uid = interaction.user.id;
+      const mode = interaction.options.getString("mode");
+      try {
+        if (!mode || mode === "status") {
+          await interaction.reply({ content: settings.formatPlanGateStatus(uid), flags: MessageFlags.Ephemeral });
+        } else {
+          await interaction.reply({ content: settings.setPlanGate(uid, mode), flags: MessageFlags.Ephemeral });
+        }
+      } catch (err) {
+        await interaction.reply({ content: `⚠️ ${err.message}`, flags: MessageFlags.Ephemeral });
       }
       return;
     }

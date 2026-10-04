@@ -56,6 +56,7 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
       ? `- Denied pigeon senders: ${denied.map((n) => `\`${n}\``).join(", ")}`
       : "- Denied pigeon senders: none",
   );
+  lines.push(`- Plan gate: \`${us.planGate || "confirm"}\` (/planmode to change)`);
   return lines.join("\n");
 }
 
@@ -234,6 +235,24 @@ export function setPigeonRateLimit(userId, count, minutes) {
   return `Pigeon rate limit: **${c}** per **${m}** min.`;
 }
 
+export function setPlanGate(userId, mode) {
+  const m = String(mode || "").toLowerCase();
+  if (!["confirm", "auto", "off"].includes(m)) {
+    throw new Error("Plan gate mode must be `confirm`, `auto`, or `off`.");
+  }
+  store.patchUserSettings(userId, { planGate: m });
+  return m === "confirm"
+    ? "Plan gate set to **confirm** — Punch asks before running a proposed plan."
+    : m === "auto"
+      ? "Plan gate set to **auto** — Punch runs proposed plans without asking."
+      : "Plan gate set to **off** — plans auto-run and the stop-asking option is hidden. Peer (a2a) plans still require approval.";
+}
+
+export function formatPlanGateStatus(userId) {
+  const m = store.getUserSettings(userId).planGate || "confirm";
+  return `Plan gate is **${m}**${m === "confirm" ? " — proposed plans ask before running" : m === "auto" ? " — proposed plans run without asking" : " — plans auto-run, stop-asking hidden"}. Peer (a2a) plans always require approval.`;
+}
+
 export async function handleSettingsPrefix(message, rest, { prefix, botUsername, setSecret, getSecrets }) {
   const uid = message.author.id;
   const guildId = message.guild?.id;
@@ -363,6 +382,12 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
     throw new Error(
       `Usage: \`${prefix}settings pigeon working|ask|buffer|trust|deny|rate|done ...\``,
     );
+  }
+
+  if (sub === "plan" || sub === "plangate" || sub === "planmode") {
+    const mode = tokens[1]?.toLowerCase();
+    if (!mode || mode === "status") return formatPlanGateStatus(uid);
+    return setPlanGate(uid, mode);
   }
 
   if (sub === "multitask") {
@@ -536,6 +561,16 @@ export async function handleSettingsSlash(interaction, { prefix, botUsername, se
       await interaction.reply({ content: setMultitaskEnabled(uid, true) });
     } else if (cmd === "disable") {
       await interaction.reply({ content: setMultitaskEnabled(uid, false) });
+    }
+    return;
+  }
+
+  if (sub === "plan") {
+    if (cmd === "set") {
+      const mode = interaction.options.getString("mode", true);
+      await interaction.reply({ content: setPlanGate(uid, mode) });
+    } else {
+      await interaction.reply({ content: formatPlanGateStatus(uid) });
     }
     return;
   }
@@ -744,6 +779,30 @@ export function getSlashCommandDefinition() {
               { type: 4, name: "minutes", description: "Window in minutes (default 10)", min_value: 1, max_value: 60 },
             ],
           },
+        ],
+      },
+      {
+        type: 2,
+        name: "plan",
+        description: "Plan gate — approve Punch's proposed plans before they run (personal)",
+        options: [
+          {
+            type: 1,
+            name: "set",
+            description: "Set plan gate mode",
+            options: [{
+              type: 3,
+              name: "mode",
+              description: "confirm = ask first, auto = run without asking, off = auto + hide stop-asking",
+              required: true,
+              choices: [
+                { name: "confirm", value: "confirm" },
+                { name: "auto", value: "auto" },
+                { name: "off", value: "off" },
+              ],
+            }],
+          },
+          { type: 1, name: "status", description: "Show current plan gate mode" },
         ],
       },
       {
