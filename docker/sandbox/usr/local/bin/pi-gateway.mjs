@@ -50,7 +50,7 @@ const ABORT_GRACE_MS = Number(process.env.PI_GATEWAY_ABORT_GRACE_MS) || 3000;
 const TURN_MAX_MS =
   (Number(process.env.PI_GATEWAY_TURN_MAX_MS) ||
     Number(process.env.PI_HARD_TIMEOUT || process.env.OPENCODE_HARD_TIMEOUT) ||
-    300) * 1000;
+    1800) * 1000;
 const TURN_IDLE_MS =
   (Number(process.env.PI_GATEWAY_TURN_IDLE_MS) ||
     Number(process.env.PI_IDLE_TIMEOUT || process.env.OPENCODE_IDLE_TIMEOUT) ||
