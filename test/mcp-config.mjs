@@ -15,7 +15,7 @@ import {
   sanitizeMcpEntryForDisplay,
   splitCommandString,
   usesMcpApiKeyAuth,
-} from "../docker/mcp-config.mjs";
+} from "../docker/sandbox/usr/local/lib/mcp-config.mjs";
 
 test("mcpApiKeyEnvVar uses collision-free base64url encoding", () => {
   assert.equal(mcpApiKeyEnvVar("linear"), "MCP_bGluZWFy_API_KEY");

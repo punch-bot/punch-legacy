@@ -13,7 +13,7 @@ import {
   safeToolSsePart,
   sanitizePublicIntent,
   sanitizedToolAction,
-} from "../docker/pi-progress.mjs";
+} from "../docker/sandbox/usr/local/lib/pi-progress.mjs";
 
 function apply(state, event, now) {
   return reduceProgress(state, event, now);
@@ -405,25 +405,21 @@ test("transient model errors remain open for retry and successful settlement", (
 
 test("Docker image and persisted workdir seeding include report_progress extension", () => {
   const dockerfile = readFileSync(new URL("../docker/sandbox.Dockerfile", import.meta.url), "utf8");
-  const entrypoint = readFileSync(new URL("../docker/sandbox-entrypoint.sh", import.meta.url), "utf8");
-  assert.match(
-    dockerfile,
-    /COPY docker\/report_progress_extension\.ts \/opt\/pi\/extensions\/report_progress\.ts/,
-  );
-  assert.match(
-    entrypoint,
-    /cp \/opt\/pi\/extensions\/report_progress\.ts \/work\/\.pi\/extensions\/report_progress\.ts/,
-  );
+  const entrypoint = readFileSync(new URL("../docker/sandbox/usr/local/bin/sandbox-entrypoint.sh", import.meta.url), "utf8");
+  const extension = readFileSync(new URL("../docker/sandbox/opt/pi/extensions/report_progress.ts", import.meta.url), "utf8");
+  assert.match(dockerfile, /COPY docker\/sandbox\/ \//);
+  assert.ok(extension.includes("report_progress"));
+  assert.match(entrypoint, /for ext in routines collab browser searxng webfetch report_progress compress_context/);
 });
 
 test("gateway keeps tool output private from SSE but available to final fallback", () => {
-  const gateway = readFileSync(new URL("../docker/pi-gateway.mjs", import.meta.url), "utf8");
+  const gateway = readFileSync(new URL("../docker/sandbox/usr/local/bin/pi-gateway.mjs", import.meta.url), "utf8");
   assert.match(
     gateway,
     /output: textOutputFromToolResult\(ev\.result \?\? ev\.error \?\? ""\)/,
   );
   const sseMapper = gateway.slice(
-    gateway.indexOf("function piEventToOpenCode"),
+    gateway.indexOf("function piEventToSse"),
     gateway.indexOf("function broadcastSse"),
   );
   assert.doesNotMatch(sseMapper, /textOutputFromToolResult|state:\s*\{[^}]*output:/s);

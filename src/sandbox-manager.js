@@ -5,14 +5,15 @@ import { randomBytes } from "node:crypto";
 
 const execFileAsync = promisify(execFile);
 
-const USERS_FILE = "/data/sandbox_users.json";
-const DOCTOR_TOKENS_FILE = "/data/sandbox_doctor_tokens.json";
+const DATA_DIR = process.env.DATA_DIR || "/data";
+export const USERS_FILE = `${DATA_DIR}/sandbox_users.json`;
+const DOCTOR_TOKENS_FILE = `${DATA_DIR}/sandbox_doctor_tokens.json`;
+const BOT_TOKENS_FILE = `${DATA_DIR}/sandbox_bot_tokens.json`;
 const MAIN_COMPOSE = "/punch/docker-compose.yml";
 const STACK = process.env.PUNCH_STACK_NAME || "punch";
 const NETWORK = `${STACK}_edge`;
 const VOL_PREFIX = `${STACK}_`;
 const SANDBOX_IMAGE = process.env.PUNCH_SANDBOX_IMAGE || "punch-sandbox:latest";
-const VNC_WEB_BASE = Number(process.env.PUNCH_VNC_PORT_BASE) || 16080;
 
 function vol(name) {
   return VOL_PREFIX + name;
@@ -55,6 +56,19 @@ function saveDoctorTokens(tokens) {
   writeFileSync(DOCTOR_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
 }
 
+function loadBotTokens() {
+  try {
+    const tokens = JSON.parse(readFileSync(BOT_TOKENS_FILE, "utf8"));
+    return tokens && typeof tokens === "object" && !Array.isArray(tokens) ? tokens : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveBotTokens(tokens) {
+  writeFileSync(BOT_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+}
+
 export function doctorTokenFor(name) {
   validateSandboxName(name);
   const tokens = loadDoctorTokens();
@@ -63,6 +77,28 @@ export function doctorTokenFor(name) {
     saveDoctorTokens(tokens);
   }
   return tokens[name];
+}
+
+/** Per-sandbox bearer token for authenticating to the bot HTTP API (:4098).
+ *  Minted like doctor tokens; gives the sandbox exactly its own identity. */
+export function botTokenFor(name) {
+  validateSandboxName(name);
+  const tokens = loadBotTokens();
+  if (!tokens[name]) {
+    tokens[name] = randomBytes(32).toString("base64url");
+    saveBotTokens(tokens);
+  }
+  return tokens[name];
+}
+
+/** Resolve a bearer token back to its sandbox owner identity, or null. */
+export function resolveBotToken(token) {
+  if (!token) return null;
+  const tokens = loadBotTokens();
+  const name = Object.keys(tokens).find((n) => tokens[n] === token);
+  if (!name) return null;
+  const user = loadUsers().find((u) => u.name === name);
+  return user ? { name, userId: user.userId } : null;
 }
 
 export function addUser(name, userId) {
@@ -88,6 +124,11 @@ export function removeUser(name) {
     delete tokens[name];
     saveDoctorTokens(tokens);
   }
+  const botTokens = loadBotTokens();
+  if (botTokens[name]) {
+    delete botTokens[name];
+    saveBotTokens(botTokens);
+  }
   return { ok: true, removed };
 }
 
@@ -96,11 +137,11 @@ function userEnvArgs(name) {
   return [
     "--env", `SANDBOX_NAME=${name}`,
     "--env", `SANDBOX_USER_ID=${user?.userId || ""}`,
-    "--env", `OPENCODE_SERVER_USERNAME=${process.env.OPENCODE_SERVER_USERNAME || "opencode"}`,
-    "--env", `OPENCODE_SERVER_PASSWORD=${process.env.OPENCODE_SERVER_PASSWORD || ""}`,
-    "--env", `VNC_PASSWORD=${process.env.VNC_PASSWORD || ""}`,
-    "--env", `OPENCODE_MODEL=${process.env.OPENCODE_MODEL || "opencode/big-pickle"}`,
+    "--env", `PI_SERVER_USERNAME=${process.env.PI_SERVER_USERNAME || "pi"}`,
+    "--env", `PI_SERVER_PASSWORD=${process.env.PI_SERVER_PASSWORD || ""}`,
+    "--env", `PI_MODEL=${process.env.PI_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
+    "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
   ];
 }
 
@@ -115,17 +156,6 @@ function volumeArgs(name) {
 }
 
 const CONTAINER_NAME = (name) => `${STACK}_sandbox-${name}_1`;
-
-// Dynamic sandboxes publish VNC on the host from PUNCH_VNC_PORT_BASE (nightly default 26080).
-function vncPorts(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  const offset = h % 4000; // 0..3999
-  const vncRawBase = VNC_WEB_BASE - 180;
-  return { web: VNC_WEB_BASE + offset, vnc: vncRawBase + offset };
-}
-
-export { vncPorts };
 
 export function getContainerDiagnostics(name) {
   validateSandboxName(name);
@@ -238,8 +268,26 @@ export async function gitInSandbox(name, args, { cwd } = {}) {
 }
 
 async function removeContainer(name) {
+  const targets = [];
+  for (const candidate of containerCandidates(name)) {
+    try {
+      const out = execFileSync("docker", ["inspect", "--format", "{{.State.Running}}", candidate], {
+        timeout: 5000,
+        encoding: "utf8",
+      }).trim();
+      if (out === "true" || out === "false") targets.push(candidate);
+    } catch (err) {
+      const message = err.stderr?.trim() || err.message || "";
+      // "No such object/container" means this candidate simply doesn't exist —
+      // keep probing other candidates. Anything else (daemon down, permissions,
+      // malformed name) is a real failure and must surface, not report success.
+      if (/No such (object|container)/i.test(message)) continue;
+      throw new Error(`Failed to inspect sandbox container ${candidate}: ${message}`);
+    }
+  }
+  if (targets.length === 0) return { stdout: "", stderr: "" };
   try {
-    return await execFileAsync("docker", ["rm", "--force", CONTAINER_NAME(name)], { timeout: 15000 });
+    return await execFileAsync("docker", ["rm", "--force", ...targets], { timeout: 15000 });
   } catch (err) {
     const message = err.stderr?.trim() || err.message || "";
     if (/No such container/i.test(message)) return { stdout: "", stderr: "" };
@@ -247,39 +295,91 @@ async function removeContainer(name) {
   }
 }
 
+export async function buildSandboxImage() {
+  if (!existsSync(MAIN_COMPOSE)) return { ok: false, error: "Main compose file not found at " + MAIN_COMPOSE };
+  try {
+    await execFileAsync("docker", ["build", "--tag", SANDBOX_IMAGE, "--file", "/punch/docker/sandbox.Dockerfile", "/punch"], { timeout: 120000 });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.stderr?.trim() || err.message };
+  }
+}
+
+// Create (or recreate) the container for one sandbox. Named volumes are
+// created if missing but never removed, so user data (/root, /work, /data,
+// /var/lib/tailscale, /collab) survives across recreations.
+async function runSandboxContainer(name) {
+  const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
+  for (const volumeName of volumeNames) {
+    await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
+  }
+  const args = [
+    "run", "--detach",
+    "--name", CONTAINER_NAME(name),
+    "--network", NETWORK,
+    "--network-alias", `sandbox-${name}`,
+    ...userEnvArgs(name),
+    "--device", "/dev/net/tun",
+    "--cap-add", "NET_ADMIN",
+    "--pids-limit", "512",
+    "--memory", "4g",
+    "--cpus", "3",
+    ...volumeArgs(name),
+    "--restart", "unless-stopped",
+    SANDBOX_IMAGE,
+  ];
+  const { stdout } = await execFileAsync("docker", args, { timeout: 60000 });
+  return { ok: true, output: stdout.trim() };
+}
+
 export async function composeUp(name) {
   if (!existsSync(MAIN_COMPOSE)) return { ok: false, error: "Main compose file not found at " + MAIN_COMPOSE };
   try {
     validateSandboxName(name);
     await removeContainer(name);
-    await execFileAsync("docker", ["build", "--tag", SANDBOX_IMAGE, "--file", "/punch/docker/sandbox.Dockerfile", "/punch"], { timeout: 120000 });
-    const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
-    for (const volumeName of volumeNames) {
-      await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
-    }
-    const ports = vncPorts(name);
-    const args = [
-      "run", "--detach",
-      "--name", CONTAINER_NAME(name),
-      "--network", NETWORK,
-      "--network-alias", `sandbox-${name}`,
-      ...userEnvArgs(name),
-      "--publish", `${ports.web}:6080`,
-      "--publish", `${ports.vnc}:5900`,
-      "--device", "/dev/net/tun",
-      "--cap-add", "NET_ADMIN",
-      "--pids-limit", "512",
-      "--memory", "4g",
-      "--cpus", "3",
-      ...volumeArgs(name),
-      "--restart", "unless-stopped",
-      SANDBOX_IMAGE,
-    ];
-    const { stdout } = await execFileAsync("docker", args, { timeout: 60000 });
-    return { ok: true, output: stdout.trim() };
+    const build = await buildSandboxImage();
+    if (!build.ok) return build;
+    return await runSandboxContainer(name);
   } catch (err) {
     return { ok: false, error: err.stderr?.trim() || err.message };
   }
+}
+
+// Restart every registered user's sandbox. Default: `docker restart` their
+// existing containers. With recreate:true, each container is removed and
+// recreated from the current SANDBOX_IMAGE (named volumes preserved). The bot
+// never rebuilds the image itself — that is a manual deploy-time step (builds
+// would use the host /punch source).
+export async function restartAllSandboxes({ recreate = false } = {}) {
+  const users = loadUsers();
+  if (users.length === 0) return { ok: false, error: "No sandbox users configured. Use /sandbox create first." };
+
+  const results = [];
+  let failures = 0;
+  for (const user of users) {
+    try {
+      validateSandboxName(user.name);
+      if (recreate) {
+        await removeContainer(user.name);
+        const run = await runSandboxContainer(user.name);
+        if (!run.ok) {
+          failures++;
+          results.push({ name: user.name, ok: false, error: run.error });
+          continue;
+        }
+        results.push({ name: user.name, ok: true, output: run.output });
+      } else {
+        const container = containerForSandbox(user.name) || CONTAINER_NAME(user.name);
+        if (!container) throw new Error("sandbox container not found");
+        const { stdout } = await execFileAsync("docker", ["restart", "--time", "10", container], { timeout: 30000 });
+        results.push({ name: user.name, ok: true, output: stdout.trim() });
+      }
+    } catch (err) {
+      failures++;
+      results.push({ name: user.name, ok: false, error: err.stderr?.trim() || err.message });
+    }
+  }
+  return { ok: failures === 0, results };
 }
 
 export async function composeDown(name) {
@@ -292,18 +392,24 @@ export async function composeDown(name) {
   }
 }
 
-// Resolve the running container name for a sandbox. compose-created sandboxes
-// are named `punch-sandbox-<name>-<n>` while composeUp() uses
-// `punch_sandbox-<name>_1`; probe both conventions plus suffixes.
-export function containerForSandbox(name) {
-  if (!isValidSandboxName(name)) return null;
+// All possible container names for a sandbox across conventions: composeUp
+// uses `${STACK}_sandbox-<name>_1`, compose-created sandboxes (compose project
+// `STACK`) use `${STACK}-sandbox-<name>-<n>`. All scoped to THIS stack so the
+// bot never picks up containers owned by another Punch instance on this host.
+function containerCandidates(name) {
   const candidates = [
     `${STACK}_sandbox-${name}_1`,
-    `punch-sandbox-${name}-1`,
-    `punch_sandbox-${name}_1`,
+    `${STACK}-sandbox-${name}-1`,
   ];
-  for (let i = 1; i <= 9; i++) candidates.push(`punch-sandbox-${name}-${i}`);
-  for (const candidate of candidates) {
+  for (let i = 1; i <= 9; i++) candidates.push(`${STACK}-sandbox-${name}-${i}`);
+  return candidates;
+}
+
+// Resolve the running container name for a sandbox. Returns null if no
+// matching container is currently running.
+export function containerForSandbox(name) {
+  if (!isValidSandboxName(name)) return null;
+  for (const candidate of containerCandidates(name)) {
     try {
       const out = execFileSync("docker", ["inspect", "--format", "{{.State.Running}}", candidate], {
         timeout: 5000,

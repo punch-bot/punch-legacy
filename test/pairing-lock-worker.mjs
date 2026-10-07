@@ -1,5 +1,10 @@
 import { parentPort, workerData } from "node:worker_threads";
 
+if (!workerData) {
+  console.log("pairing-lock-worker is a worker_threads entry; run via spectrum-pairing.test.mjs");
+  process.exit(0);
+}
+
 process.env.DATA_DIR = workerData.dataDir;
 const { issuePairingCode, completePairing } = await import("../src/spectrum/pairing.js");
 

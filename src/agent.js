@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
-import { doctorTokenFor } from "./sandbox-manager.js";
+import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
 
 // Talks to the sandbox's Pi gateway (HTTP on :4096 over `pi --mode rpc`).
 // All tool execution (bash/read/write/edit) happens SERVER-SIDE in the sandbox
@@ -9,9 +9,8 @@ import { doctorTokenFor } from "./sandbox-manager.js";
 //
 // Flow: POST /session (once per channel) -> POST /session/{id}/message per turn.
 // The Punch pi-gateway adapts this HTTP shape onto Pi RPC prompt/abort/compact/events.
-// Env vars OPENCODE_* are legacy aliases kept for compose compatibility.
 
-const DEFAULT_SERVER = (process.env.OPENCODE_SERVER_URL || "").replace(/\/$/, "");
+const DEFAULT_SERVER = (process.env.PI_SERVER_URL || "").replace(/\/$/, "");
 const DEFAULT_API_URL = (() => {
   try {
      const u = new URL(DEFAULT_SERVER);
@@ -21,13 +20,13 @@ const DEFAULT_API_URL = (() => {
      return DEFAULT_SERVER + ":4097";
   }
 })();
-const MODEL = process.env.OPENCODE_MODEL || "opencode/big-pickle";
+const MODEL = process.env.PI_MODEL || "opencode/big-pickle";
 const [PROVIDER_ID, ...rest] = MODEL.split("/");
 const MODEL_ID = rest.join("/");
-const USER = process.env.OPENCODE_SERVER_USERNAME || "opencode";
-const PASS = process.env.OPENCODE_SERVER_PASSWORD || "";
-const DIR_BASE = process.env.OPENCODE_REMOTE_DIR || "/work";
-const TIMEOUT_MS = (Number(process.env.OPENCODE_TIMEOUT) || 300) * 1000;
+const USER = process.env.PI_SERVER_USERNAME || "pi";
+const PASS = process.env.PI_SERVER_PASSWORD || "";
+const DIR_BASE = process.env.PI_REMOTE_DIR || "/work";
+const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT) || 1800) * 1000;
 
 // Map of Discord user IDs to sandbox hostnames.
 // e.g. {"12345":"sandbox-punch:4096","67890":"sandbox-ember:4096"}
@@ -45,7 +44,7 @@ function sandboxMap() {
 
 export function reloadSandboxMap() {
   try {
-    const users = JSON.parse(readFileSync("/data/sandbox_users.json", "utf8"));
+    const users = JSON.parse(readFileSync(USERS_FILE, "utf8"));
     _extraMap = {};
     for (const u of users) _extraMap[u.userId] = `http://sandbox-${u.name}:4096`;
   } catch { _extraMap = {}; }
@@ -60,7 +59,7 @@ function serverFor(userId) {
 export function sandboxNameForUser(userId) {
   if (!userId) return null;
   try {
-    const users = JSON.parse(readFileSync("/data/sandbox_users.json", "utf8"));
+    const users = JSON.parse(readFileSync(USERS_FILE, "utf8"));
     const u = users.find((x) => x.userId === userId);
     if (u) return u.name;
   } catch {}
@@ -98,10 +97,10 @@ export function getActivityLogs(userId, tail = 30) {
 
 // const BASE_SYSTEM = ""; // The system prompt is loaded from /work/.pi/SYSTEM.md.
 
-// Dynamic-only stacks omit OPENCODE_SERVER_URL; every Discord user must be in
+// Dynamic-only stacks omit PI_SERVER_URL; every Discord user must be in
 // sandbox_users.json (via /sandbox create). Mapped users never use DEFAULT_SERVER.
-if (!DEFAULT_SERVER && process.env.PUNCH_REQUIRE_OPENCODE_URL === "1") {
-  throw new Error("OPENCODE_SERVER_URL is not set and PUNCH_REQUIRE_OPENCODE_URL=1 (Punch uses dynamic /sandbox create instead)");
+if (!DEFAULT_SERVER && (process.env.PUNCH_REQUIRE_PI_URL === "1")) {
+  throw new Error("PI_SERVER_URL is not set but PUNCH_REQUIRE_PI_URL=1; Punch uses dynamic /sandbox create instead");
 }
 
 function headers() {
@@ -169,9 +168,9 @@ async function api(path, body, baseUrl, signal = null) {
   throw new Error(`cannot reach pi server at ${srv} (${lastCode})`);
 }
 
-const IDLE_MS = (Number(process.env.OPENCODE_IDLE_TIMEOUT) || 90) * 1000;
-const CEIL_MS = (Number(process.env.OPENCODE_MAX) || 1800) * 1000;
-const HARD_MS = (Number(process.env.OPENCODE_HARD_TIMEOUT) || 300) * 1000;
+const IDLE_MS = (Number(process.env.PI_IDLE_TIMEOUT) || 90) * 1000;
+const CEIL_MS = (Number(process.env.PI_MAX) || 1800) * 1000;
+const HARD_MS = (Number(process.env.PI_HARD_TIMEOUT) || 1800) * 1000;
 
 export function isStuckTurnError(message) {
   return /timed out|stalled|ceiling|hard timeout|hard cap|silent for|turn hung/i.test(String(message || ""));
@@ -366,7 +365,7 @@ export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
   return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
 }
 
-const TOOL_STALE_MS = (Number(process.env.OPENCODE_TOOL_STALE_TIMEOUT) || 180) * 1000;
+const TOOL_STALE_MS = (Number(process.env.PI_TOOL_STALE_TIMEOUT) || 180) * 1000;
 
 async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
   if (!baseUrl) throw new Error("No sandbox server assigned for this user");
@@ -532,7 +531,7 @@ const CONTEXT_LIMITS = {
   "opencode/north-mini-code-free": 256000,
   "opencode/nemotron-3-ultra-free": 1000000,
 };
-const DEFAULT_CONTEXT_LIMIT = Number(process.env.OPENCODE_CONTEXT_LIMIT) || 128000;
+const DEFAULT_CONTEXT_LIMIT = Number(process.env.PI_CONTEXT_LIMIT) || 128000;
 
 function contextLimitFor(model) {
   if (!model) return DEFAULT_CONTEXT_LIMIT;
@@ -542,7 +541,7 @@ function contextLimitFor(model) {
   if (prefixHit) return prefixHit[1];
   if (prov === "anthropic") return 200000;
   if (prov === "opencode" || prov === "opencode-go") return 200000;
-  if (prov === "nim") return 131072;
+  if (prov === "nvidia") return 131072;
   return DEFAULT_CONTEXT_LIMIT;
 }
 
@@ -746,6 +745,35 @@ export async function getFile(filePath, userId) {
   return { buffer, name: filePath.split("/").pop() || "file" };
 }
 
+// Inject a steering message into the user's in-flight Pi turn via the
+// gateway `steer` RPC (delivered after the current assistant turn finishes
+// its tool calls, before the next LLM call). sessionId "active" resolves to
+// the gateway's currently-running session; !ok means the caller should fall
+// back to the normal queue.
+export async function steerSession(sessionId, text, userId) {
+  const srv = serverFor(userId);
+  if (!srv) return { ok: false, error: "No sandbox assigned." };
+  const dir = userDir(userId);
+  const q = `?directory=${encodeURIComponent(dir)}`;
+  const sid = sessionId || "active";
+  try {
+    const res = await fetch(`${srv}/session/${encodeURIComponent(sid)}/steer${q}`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ parts: [{ type: "text", text: String(text ?? "") }] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      return { ok: false, error: `steer API ${res.status}: ${t.slice(0, 160)}` };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { ok: true, disposition: data.disposition || null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 export async function abortSession(sessionId, userId) {
    const srv = serverFor(userId);
    if (!srv) return false;
@@ -937,9 +965,9 @@ export async function summarizeSession(sessionId, userId, signal = null) {
   );
 }
 
-export async function getEnv(userId) {
+export async function getEnv(userId, signal = null) {
   const url = `${apiUrlFor(userId)}/env`;
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetch(url, { headers: headers(), signal });
   if (!res.ok) {
      const t = await res.text().catch(() => "");
      throw new Error(`getEnv API ${res.status}: ${t.slice(0, 200)}`);
@@ -947,5 +975,3 @@ export async function getEnv(userId) {
   return res.json();
 }
 
-/** @deprecated use runAgent */
-export const runOpencode = runAgent;
