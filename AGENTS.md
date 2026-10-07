@@ -5,7 +5,7 @@ Punch is a personal assistant that lives in Discord and, optionally, iMessage vi
 ## Branches and stacks
 
 - `main` is production and `nightly` is experimental. Open a PR against whichever branch the change is for.
-- `.env` sets the stack identity. `PUNCH_STACK_NAME` (`punch` or `punch-nightly`) determines the compose project, network, volume prefix, and sandbox image name. `PUNCH_BOT_PORT` and `PUNCH_VNC_PORT_BASE` set the host ports. Before you run `docker compose`, check which stack the current checkout drives.
+- `.env` sets the stack identity. `PUNCH_STACK_NAME` (`punch` or `punch-nightly`) determines the compose project, network, volume prefix, and sandbox image name. No host ports are published: the bot and sandboxes talk over the compose network. Before you run `docker compose`, check which stack the current checkout drives.
 
 ## Commands
 
