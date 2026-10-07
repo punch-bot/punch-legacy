@@ -115,9 +115,7 @@ test("runAgent opens SSE before POST, forwards progress, returns activity, and l
   const userId = "progress-test-user";
   process.env.SANDBOX_MAP = JSON.stringify({ [userId]: `http://127.0.0.1:${port}` });
   process.env.PI_SERVER_URL = "";
-  process.env.OPENCODE_SERVER_URL = "";
   process.env.PI_SERVER_PASSWORD = "";
-  process.env.OPENCODE_SERVER_PASSWORD = "";
 
   const logs = [];
   const originalLog = console.log;

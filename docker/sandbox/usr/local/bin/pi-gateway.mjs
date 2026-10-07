@@ -28,7 +28,7 @@ import {
 
 const HOST = process.env.PI_GATEWAY_HOST || "0.0.0.0";
 const PORT = Number(process.env.PI_GATEWAY_PORT || 4096);
-const WORK = process.env.PI_REMOTE_DIR || process.env.OPENCODE_REMOTE_DIR || "/work";
+const WORK = process.env.PI_REMOTE_DIR || "/work";
 const SESSION_DIR = process.env.PI_SESSION_DIR || "/data/pi/sessions";
 const SESSION_MAP_FILE =
   process.env.PI_SESSION_MAP || "/data/pi/gateway-sessions.json";
@@ -36,24 +36,22 @@ const EXT_DIR = process.env.PI_EXTENSIONS_DIR || "/opt/pi/extensions";
 const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
 const SKILL_ROOTS = ["/work/.pi/skills", "/data/pi/skills", "/opt/pi/skills"];
 const SKILL_ENABLED_FILE = "/data/pi/skills-enabled.json";
-const USER = process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode";
-const PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
+const USER = process.env.PI_SERVER_USERNAME || "pi";
+const PASS = process.env.PI_SERVER_PASSWORD || "";
 let MODEL =
   process.env.PI_DEFAULT_MODEL ||
   process.env.PI_MODEL ||
-  process.env.OPENCODE_DEFAULT_MODEL ||
-  process.env.OPENCODE_MODEL ||
   "anthropic/claude-sonnet-4-5";
 const MODEL_FALLBACK = "anthropic/claude-sonnet-4-5";
 const MAX_TOOL_STUBS = 40;
 const ABORT_GRACE_MS = Number(process.env.PI_GATEWAY_ABORT_GRACE_MS) || 3000;
 const TURN_MAX_MS =
   (Number(process.env.PI_GATEWAY_TURN_MAX_MS) ||
-    Number(process.env.PI_HARD_TIMEOUT || process.env.OPENCODE_HARD_TIMEOUT) ||
+    Number(process.env.PI_HARD_TIMEOUT) ||
     300) * 1000;
 const TURN_IDLE_MS =
   (Number(process.env.PI_GATEWAY_TURN_IDLE_MS) ||
-    Number(process.env.PI_IDLE_TIMEOUT || process.env.OPENCODE_IDLE_TIMEOUT) ||
+    Number(process.env.PI_IDLE_TIMEOUT) ||
     120) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
@@ -372,7 +370,7 @@ function dispatchPi(msg) {
     }
   } else {
     if (activeLogicalId) trackTurnProgress(activeLogicalId, msg);
-    broadcastSse(piEventToOpenCode(msg));
+    broadcastSse(piEventToSse(msg));
     if (activeLogicalId && sessions.has(activeLogicalId)) {
       trackMessageCache(activeLogicalId, msg);
     }
@@ -492,7 +490,7 @@ function extractTextFromParts(parts) {
     .join("");
 }
 
-/** OpenCode-shaped attachments (data URLs) for bot collectTurnMedia. */
+/** Attachments (data URLs) for bot collectTurnMedia. */
 function attachmentsFromToolResult(result) {
   const out = [];
   const content = result?.content;
@@ -605,7 +603,7 @@ function trackMessageCache(logicalId, ev) {
   }
 }
 
-function piEventToOpenCode(ev) {
+function piEventToSse(ev) {
   const sid = activeLogicalId || "unknown";
   if (!ev || !ev.type) return null;
 

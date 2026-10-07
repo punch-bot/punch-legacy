@@ -419,7 +419,7 @@ test("gateway keeps tool output private from SSE but available to final fallback
     /output: textOutputFromToolResult\(ev\.result \?\? ev\.error \?\? ""\)/,
   );
   const sseMapper = gateway.slice(
-    gateway.indexOf("function piEventToOpenCode"),
+    gateway.indexOf("function piEventToSse"),
     gateway.indexOf("function broadcastSse"),
   );
   assert.doesNotMatch(sseMapper, /textOutputFromToolResult|state:\s*\{[^}]*output:/s);
