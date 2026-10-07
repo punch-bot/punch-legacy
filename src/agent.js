@@ -27,7 +27,7 @@ const MODEL_ID = rest.join("/");
 const USER = process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode";
 const PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
 const DIR_BASE = process.env.PI_REMOTE_DIR || process.env.OPENCODE_REMOTE_DIR || "/work";
-const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT || process.env.OPENCODE_TIMEOUT) || 300) * 1000;
+const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT || process.env.OPENCODE_TIMEOUT) || 1800) * 1000;
 
 // Map of Discord user IDs to sandbox hostnames.
 // e.g. {"12345":"sandbox-punch:4096","67890":"sandbox-ember:4096"}
@@ -171,7 +171,7 @@ async function api(path, body, baseUrl, signal = null) {
 
 const IDLE_MS = (Number(process.env.PI_IDLE_TIMEOUT || process.env.OPENCODE_IDLE_TIMEOUT) || 90) * 1000;
 const CEIL_MS = (Number(process.env.PI_MAX || process.env.OPENCODE_MAX) || 1800) * 1000;
-const HARD_MS = (Number(process.env.PI_HARD_TIMEOUT || process.env.OPENCODE_HARD_TIMEOUT) || 300) * 1000;
+const HARD_MS = (Number(process.env.PI_HARD_TIMEOUT || process.env.OPENCODE_HARD_TIMEOUT) || 1800) * 1000;
 
 export function isStuckTurnError(message) {
   return /timed out|stalled|ceiling|hard timeout|hard cap|silent for|turn hung/i.test(String(message || ""));
