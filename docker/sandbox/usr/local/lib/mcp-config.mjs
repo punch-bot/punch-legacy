@@ -1,6 +1,6 @@
 /**
  * Punch MCP registry (/data/mcp.json) ↔ pi-mcp-adapter mcpServers conversion.
- * Registry keeps OpenCode-shaped local/remote entries; adapter wants mcpServers.
+ * Registry keeps `local`/`remote` entries; adapter wants mcpServers.
  */
 
 import { Buffer } from "node:buffer";

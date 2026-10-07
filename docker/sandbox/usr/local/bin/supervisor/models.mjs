@@ -54,7 +54,7 @@ export const BUILTIN_CUSTOM_PROVIDERS = {
         contextWindow: 262144,
         maxTokens: 32768,
       },
-      // legacy Discord / OpenCode model id
+      // legacy model id
       {
         id: "poolside/laguna-xs.2",
         name: "Laguna XS (legacy id)",

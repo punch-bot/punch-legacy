@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends tailscale \
     && rm -rf /var/lib/apt/lists/*
 
-# Pi coding agent (replaces opencode-ai). --ignore-scripts per Pi install docs.
+# Pi coding agent. --ignore-scripts per Pi install docs.
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
     && npm cache clean --force \
     && pi --version

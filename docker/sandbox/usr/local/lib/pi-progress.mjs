@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const REPORT_PROGRESS_TOOL = "report_progress";
-const WORKSPACE = resolve(process.env.PI_REMOTE_DIR || process.env.OPENCODE_REMOTE_DIR || "/work");
+const WORKSPACE = resolve(process.env.PI_REMOTE_DIR || "/work");
 const MAX_ACTIONS = 12;
 const MAX_MILESTONES = 6;
 const MAX_ACTION_LENGTH = 140;

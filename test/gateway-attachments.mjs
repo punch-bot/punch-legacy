@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unit-check: tool image results map to OpenCode-shaped attachments for collectTurnMedia.
+// Unit-check: tool image results map to data-URL attachments for collectTurnMedia.
 function attachmentsFromToolResult(result) {
   const out = [];
   const content = result?.content;

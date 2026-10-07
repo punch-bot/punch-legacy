@@ -48,4 +48,4 @@ ssh-keygen -A 2>/dev/null || true
 /usr/sbin/sshd
 
 # Start supervisor (API :4097 + pi-gateway :4096)
-exec node /usr/local/bin/serve-supervisor.mjs "${PI_MODEL:-${OPENCODE_MODEL:-opencode/big-pickle}}"
+exec node /usr/local/bin/serve-supervisor.mjs "${PI_MODEL:-opencode/big-pickle}"

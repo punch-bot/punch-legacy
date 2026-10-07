@@ -9,7 +9,7 @@ export const TOOL_DIRS = ["/work/.pi/extensions"];
 
 export const MODEL_FILE = "/data/model.json";
 export const MODEL_DEFAULT = "opencode/big-pickle";
-/** Legacy OpenCode / Discord ids → Pi-capable provider/model strings. */
+/** Legacy model ids → Pi-capable provider/model strings. */
 export const MODEL_ALIASES = {
   "anthropic/claude-sonnet-4-5": MODEL_DEFAULT,
   "poolside/poolside/laguna-xs.2": "poolside/poolside/laguna-xs-2.1",
@@ -26,7 +26,7 @@ export function probeAuth() {
   return (
     "Basic " +
     Buffer.from(
-      `${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`,
+      `${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`,
     ).toString("base64")
   );
 }
