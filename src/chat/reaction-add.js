@@ -9,7 +9,8 @@ import { registry } from "../core/registry.js";
 import { ensureUserSandbox } from "../core/supervisor.js";
 import { reactionDedupKey } from "../core/discord.js";
 import { enqueueChat } from "../chat/queue.js";
-import { fetchChannelContext, fetchThreadContext } from "../chat/context.js";
+import { fetchThreadContext } from "../chat/context.js";
+import { fetchChannelContext, readableDiscordContent } from "../channel-context.js";
 import * as pigeonGate from "../pigeon-gate.js";
 import { notifyPigeonDM } from "../gateway/pigeon.js";
 import { isVoiceMessage } from "../stt.js";
@@ -70,7 +71,7 @@ function registerReactionAdd(client) {
       if (!sandboxUrl) return;
 
       const authorName = targetMessage.member?.displayName || targetMessage.author.username;
-      let content = targetMessage.content.replace(/<@!?\d+>/g, "").trim();
+      let content = readableDiscordContent(targetMessage).trim();
       if (!content && isVoiceMessage(targetMessage)) {
         content = "(voice memo — Punch will transcribe it)";
       } else if (!content && targetMessage.attachments.size > 0) {
@@ -83,7 +84,11 @@ function registerReactionAdd(client) {
       const useChannelContext =
         targetMessage.guild && store.getGuildSettings(targetMessage.guild.id).contextMode === "channel";
       const contextMessages = useChannelContext
-        ? await fetchChannelContext(targetMessage.channel, targetMessage.id, sandboxNameForUser(user.id))
+        ? await fetchChannelContext(targetMessage.channel, targetMessage, {
+            currentSandboxName: sandboxNameForUser(user.id),
+            userId: user.id,
+            timeZone: store.getUserSettings(user.id).timeZone,
+          })
         : await fetchThreadContext(targetMessage.channel, targetMessage, { userId: user.id });
 
       console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
