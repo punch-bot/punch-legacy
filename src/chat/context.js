@@ -1,7 +1,10 @@
 // Thread- and channel-scoped context isolation. Pure helpers (no Discord
 // client needed) plus the fetch functions used to build turn context.
+// Channel-mode fetching and message mapping live in ../channel-context.js.
 
+import * as store from "../memory.js";
 import { sandboxNameForUser } from "../agent.js";
+import { fetchChannelContext, mapContextMessage } from "../channel-context.js";
 import { THREAD_WINDOW, RESIDUE_LIMIT } from "../core/config.js";
 import { PREFIX } from "../core/config.js";
 import { registry } from "../core/registry.js";
@@ -35,21 +38,6 @@ export function filterThreadSubtree(messages, rootId) {
   return out;
 }
 
-export async function fetchChannelContext(channel, beforeId, currentSandboxName = null) {
-  if (!channel) return [];
-  try {
-    const fetched = await channel.messages.fetch({ limit: 15, before: beforeId });
-    return fetched
-      .map((m) => mapContextMsg(m, currentSandboxName))
-      .filter((m) => m && m.content.length > 0)
-      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .slice(-15);
-  } catch (err) {
-    console.error("[context] failed to fetch recent messages:", err.message);
-    return [];
-  }
-}
-
 // Walk a message's reply chain upward to find the root of its thread.
 // Caps at 12 hops; fetches each parent individually.
 // v2: batch these individual fetches into one bulk fetch if it ever feels slow.
@@ -67,64 +55,44 @@ async function resolveRoot(channel, startId) {
   return cur;
 }
 
-// Map a Discord message into the { author, content } context shape.
-// Human messages are tagged by display name. Bot messages are other punches'
-// output: we strip the `-# from sandbox:NAME` footer, attribute them as
-// `[punch:NAME]`, and skip the summoner's OWN prior output (the Pi
-// session already carries it). Attributed punch output lets one punch SEE what
-// another punch did in the thread without mistaking it for a command.
-function mapContextMsg(m, currentSandboxName) {
-  const raw = m.content.replace(/<@!?\d+>/g, "").trim();
-  if (m.author.bot) {
-    const m2 = raw.match(/-#\s*from sandbox:(\S+)/i);
-    const name = m2 ? m2[1] : null;
-    const content = raw.replace(/-#\s*from sandbox:\S+/i, "").trim().slice(0, 200);
-    if (!content) return null;
-    if (name && currentSandboxName && name.toLowerCase() === currentSandboxName.toLowerCase()) {
-      return null; // own prior output — session history already has it
-    }
-    // Known Punch sandboxes are tagged `punch:NAME`; foreign bots (no sandbox
-    // footer) are attributed by their own display name so context isn't
-    // mislabeled as a Punch.
-    const author = name ? `punch:${name}` : (m.member?.displayName || m.author.username);
-    return { author, content };
-  }
-  return {
-    author: m.member?.displayName || m.author.username,
-    content: raw.slice(0, 200),
-  };
-}
-
 // Thread-scoped context: ingest only the reply subtree rooted at the summoning
-// message's root. Humans are always visible; other punches' output is included
-// (attributed as `[punch:NAME]`) so the summoning punch can see what its
-// neighbours are doing, while its OWN prior output is skipped to avoid loops.
+// message's root. The subtree is the summoning user's own reply chain, so it
+// may include the neighbours it explicitly engaged with (other humans and other
+// punches' output, attributed as `[punch:NAME]`), while its OWN prior output is
+// skipped to avoid loops. The ambient residue fallback below is scoped to the
+// summoning user only (own messages + explicit references).
 export async function fetchThreadContext(channel, message, opts = {}) {
   if (!channel) return [];
   const currentSandboxName = sandboxNameForUser(opts.userId) || null;
+  const timeZone = store.getUserSettings(opts.userId).timeZone;
   try {
     const root = await resolveRoot(channel, message.id);
     if (!root) {
-      const ambient = await fetchChannelContext(channel, message.id, currentSandboxName);
-      return ambient.slice(-RESIDUE_LIMIT);
+      return fetchChannelContext(channel, message, {
+        currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
+      });
     }
 
     const fetched = await channel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
-    const all = [root, ...fetched.values()];
+    const all = [...new Map([root, ...fetched.values()].map((m) => [m.id, m])).values()];
     const mapped = all.map((m) => ({ id: m.id, referenceMessageId: m.reference?.messageId || null }));
     const keep = filterThreadSubtree(mapped, root.id);
     const kept = all
-      .filter((m) => keep.has(m.id))
+      .filter((m) => keep.has(m.id) && m.id !== message.id)
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-      .map((m) => mapContextMsg(m, currentSandboxName))
+      .map((m) => mapContextMessage(m, currentSandboxName, timeZone))
       .filter((m) => m && m.content.length > 0);
     let result = kept;
 
     // Non-reply ping (root == the summon itself): no thread has formed yet, so
-    // add a small ambient residue of recent human messages for context.
-    if (root.id === message.id && result.length <= 1) {
-      const residue = await fetchChannelContext(channel, message.id, currentSandboxName);
-      result = result.concat(residue.slice(-RESIDUE_LIMIT));
+    // add a small residue of recent messages for context. Like channel mode,
+    // the residue is scoped to the summoning user (own messages + explicit
+    // references) so other users' jobs never leak in.
+    if (root.id === message.id && result.length === 0) {
+      const residue = await fetchChannelContext(channel, message, {
+        currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
+      });
+      result = result.concat(residue);
     }
 
     // Cross-ping escape hatch: a Discord message link in the summon pulls that
@@ -145,20 +113,24 @@ export async function fetchThreadContext(channel, message, opts = {}) {
         const linkedRoot = await resolveRoot(linkChannel, linked.id);
         if (linkedRoot) {
           const lfetched = await linkChannel.messages.fetch({ limit: THREAD_WINDOW, before: message.id });
-          const lall = [linkedRoot, ...lfetched.values()];
+          const lall = [...new Map([linkedRoot, ...lfetched.values()].map((m) => [m.id, m])).values()];
           const lmapped = lall.map((m) => ({ id: m.id, referenceMessageId: m.reference?.messageId || null }));
           const lkeep = filterThreadSubtree(lmapped, linkedRoot.id);
           const lkept = lall
             .filter((m) => lkeep.has(m.id) && m.id !== message.id)
             .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
-            .map((m) => mapContextMsg(m, currentSandboxName))
+            .map((m) => mapContextMessage(m, currentSandboxName, timeZone))
             .filter((m) => m && m.content.length > 0);
           result = result.concat(lkept);
         }
       }
     }
 
-    return result.slice(-THREAD_WINDOW);
+    // A linked subtree can overlap the active one. Keep each message once and
+    // restore chronological order before limiting the combined context.
+    return [...new Map(result.map((entry) => [entry.id, entry])).values()]
+      .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+      .slice(-THREAD_WINDOW);
   } catch (err) {
     console.error("[context] thread fetch failed:", err.message);
     return [];

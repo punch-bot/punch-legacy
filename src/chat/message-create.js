@@ -7,7 +7,8 @@ import { sandboxNameForUser } from "../agent.js";
 import { PREFIX } from "../core/config.js";
 import { handleCommand } from "../commands/prefix.js";
 import { enqueueChat } from "../chat/queue.js";
-import { fetchChannelContext, fetchThreadContext } from "../chat/context.js";
+import { fetchThreadContext } from "../chat/context.js";
+import { fetchChannelContext, readableDiscordContent } from "../channel-context.js";
 import {
   canAutoSummon,
   isPunchThread,
@@ -21,6 +22,7 @@ import {
   shouldAcceptChatTurn,
 } from "../stt.js";
 import { repliedToBlock } from "../prompt-blocks.js";
+import { formatMessageTimestamp } from "../timezone.js";
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -106,7 +108,11 @@ function registerMessageCreate(client) {
     const useChannelContext =
       message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext
-      ? await fetchChannelContext(message.channel, message.id, sandboxNameForUser(message.author.id))
+      ? await fetchChannelContext(message.channel, message, {
+          currentSandboxName: sandboxNameForUser(message.author.id),
+          userId: message.author.id,
+          timeZone: store.getUserSettings(message.author.id).timeZone,
+        })
       : await fetchThreadContext(message.channel, message, { userId: message.author.id });
 
     await enqueueChat(turnMessage, text, contextMessages, repliedTo ? { repliedTo } : {});
@@ -130,15 +136,18 @@ async function buildRepliedToContext(message) {
   try {
     const refMsg = await message.channel.messages.fetch(message.reference.messageId);
     if (!refMsg) return null;
-    const authorName = refMsg.member?.displayName || refMsg.author.username;
-    let content = refMsg.content.replace(/<@!?\d+>/g, "").trim();
+    const displayName = refMsg.member?.displayName || refMsg.author.username;
+    const authorName = `${displayName} (@${refMsg.author.username}, id:${refMsg.author.id})`;
+    let content = readableDiscordContent(refMsg).trim();
     if (!content && isVoiceMessage(refMsg)) {
       content = "(voice memo)";
     } else if (!content && refMsg.attachments.size > 0) {
       content = `(message has ${refMsg.attachments.size} attachment(s))`;
     }
     if (!content) content = "(empty message)";
-    return repliedToBlock(authorName, content);
+    const timeZone = store.getUserSettings(message.author.id).timeZone;
+    const sentAt = formatMessageTimestamp(refMsg.createdTimestamp, timeZone);
+    return repliedToBlock(authorName, content, sentAt);
   } catch (err) {
     console.error("[reply-context] failed to fetch replied message:", err.message);
     return null;
