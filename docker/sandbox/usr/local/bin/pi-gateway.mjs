@@ -451,11 +451,27 @@ async function ensureSession(logicalId) {
   return s;
 }
 
+/** Pull a one-line routing description out of a SKILL.md frontmatter block. */
+function skillDescription(frontmatter) {
+  const match = frontmatter.match(/^description:[ \t]*(.*)$/m);
+  if (!match) return "";
+  const inline = match[1].trim();
+  if (!/^[>|][-+]?$/.test(inline)) return inline.replace(/^["']|[ "']$/g, "");
+  const tail = frontmatter.slice(match.index + match[0].length).split("\n");
+  const parts = [];
+  for (const line of tail) {
+    if (!line.trim()) continue;
+    if (/^\s+\S/.test(line)) parts.push(line.trim());
+    else break;
+  }
+  return parts.join(" ");
+}
+
 function enabledSkillInstructions() {
   let enabled = {};
   try { enabled = JSON.parse(readFileSync(SKILL_ENABLED_FILE, "utf8")); } catch {}
   const seen = new Set();
-  const sections = [];
+  const lines = [];
   for (const root of SKILL_ROOTS) {
     let names = [];
     try { names = readdirSync(root); } catch { continue; }
@@ -464,13 +480,14 @@ function enabledSkillInstructions() {
       try {
         const text = readFileSync(join(root, name, "SKILL.md"), "utf8");
         seen.add(name);
-        const body = text.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "").trim();
-        if (body) sections.push(`<skill name="${name}">\n${body.slice(0, 12000)}\n</skill>`);
+        const frontmatter = text.match(/^---\s*\n([\s\S]*?)\n---/);
+        const description = skillDescription(frontmatter ? frontmatter[1] : "").slice(0, 500);
+        lines.push(`- ${name}: ${description} [${join(root, name, "SKILL.md")}]`);
       } catch {}
     }
   }
-  return sections.length
-    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
+  return lines.length
+    ? `\n\n--- Instruction skills (load on demand) ---\nEach skill lists its name, routing description, and SKILL.md path. When a task matches a description, read that SKILL.md before starting and follow it. Only enabled skills are listed. Do not ask the user to run /skill-name or pi --skill; read the file yourself.\n\n${lines.join("\n")}\n--- End instruction skills ---`
     : "";
 }
 
