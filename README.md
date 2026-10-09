@@ -4,13 +4,13 @@ An AI agent living in Discord, designed to be a personal assistant
 
 - **Path:** `/punch`
 - **Discord:** production app
-- **Agent:** [Pi](https://pi.dev) (`@earendil-works/pi-coding-agent`). The bot talks to each sandbox over HTTP; Punch’s `pi-gateway` is an internal adapter only.
+- **Agent:** Punch's [Pi runtime](https://github.com/punch-bot/core) (`@punch-bot/cli`). The bot talks to each sandbox over HTTP; Punch's `pi-gateway` is an internal adapter only.
 - **Deploy:** `docker compose up --build -d` — **bot only**; sandboxes via `/sandbox create`
 - **Docs for agents:** [`AGENTS.md`](AGENTS.md)
 
 ## What it does
 
-Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, layered health diagnostics, Discord voice-memo speech-to-text, and custom MCP servers via Discord `/mcp` (loaded into Pi through `pi-mcp-adapter`).
+Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, layered health diagnostics, Discord voice-memo speech-to-text, and custom MCP servers via Discord `/mcp` (loaded by the Punch runtime).
 
 **Not included:** Composio (`/link`). MCP OAuth is deferred — use `/mcp auth` for API keys, or pass custom bearer tokens via `/mcp add` headers or environment.
 
