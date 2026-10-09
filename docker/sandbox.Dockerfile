@@ -15,9 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends tailscale \
     && rm -rf /var/lib/apt/lists/*
 
-# Pi coding agent. --ignore-scripts per Pi install docs. Unpinned on purpose:
-# extensions import @earendil-works/* through Pi's loader aliases, so
-# /opt/pi/package.json must not install its own (drifting) copy.
+# Pi coding agent. --ignore-scripts per Pi install docs.
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
     && npm cache clean --force \
     && pi --version
