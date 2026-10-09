@@ -1,8 +1,8 @@
 // Model / provider / env / auth config for the sandbox supervisor.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { normalizeThinkingLevel, withDefaultThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
-import { AUTH_FILE, ENV_FILE, MODEL_ALIASES, MODEL_DEFAULT, MODEL_FILE, MODELS_FILE, PI_SETTINGS_FILE, log, loadJSON, saveJSON } from "./state.mjs";
+import { normalizeThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
+import { AUTH_FILE, ENV_FILE, MODEL_ALIASES, MODEL_DEFAULT, MODEL_FILE, MODELS_FILE, log, loadJSON, saveJSON } from "./state.mjs";
 
 export function normalizeModel(model) {
   const s = String(model || "").trim();
@@ -108,26 +108,6 @@ export function ensurePiModelsJson() {
     saveJSON(MODELS_FILE, existing);
     log("ensured Pi models.json custom providers:", Object.keys(BUILTIN_CUSTOM_PROVIDERS).join(", "));
   }
-}
-
-/** State Pi's default reasoning level ("medium") in its settings.json unless
- * it already names one. Runs before the gateway starts Pi. */
-export function ensurePiSettingsJson() {
-  let settings = {};
-  try {
-    settings = JSON.parse(readFileSync(PI_SETTINGS_FILE, "utf8"));
-  } catch (e) {
-    // Never replace a settings.json we can't read with one holding a single key.
-    if (e.code !== "ENOENT") {
-      log(`Pi settings.json unreadable, not setting a default reasoning level: ${e.message}`);
-      return;
-    }
-  }
-  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return;
-  const next = withDefaultThinkingLevel(settings);
-  if (!next) return;
-  saveJSON(PI_SETTINGS_FILE, next);
-  log(`Pi settings.json: defaultThinkingLevel=${next.defaultThinkingLevel}`);
 }
 
 export const PROVIDER_ENV_MAP = {

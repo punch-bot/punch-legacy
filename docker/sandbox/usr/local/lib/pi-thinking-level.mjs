@@ -19,17 +19,6 @@ export function normalizeThinkingLevel(level) {
   return THINKING_LEVELS.includes(s) ? s : null;
 }
 
-/**
- * Pi settings.json with the default level stated, or null when it already
- * names a valid one. With a stated default, set_model resets to it rather
- * than keeping the previous turn's level. Exact match: Pi doesn't normalize,
- * and would turn "High" into "off".
- */
-export function withDefaultThinkingLevel(settings) {
-  if (THINKING_LEVELS.includes(settings?.defaultThinkingLevel)) return null;
-  return { ...settings, defaultThinkingLevel: PI_DEFAULT_THINKING_LEVEL };
-}
-
 /** Pi's merge of global and project settings.json, for the keys read here. */
 export function mergePiSettings(global = {}, project = {}) {
   return {

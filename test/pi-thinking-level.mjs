@@ -8,7 +8,6 @@ import {
   normalizeThinkingLevel,
   piDefaultThinkingLevel,
   turnThinkingLevel,
-  withDefaultThinkingLevel,
 } from "../docker/sandbox/usr/local/lib/pi-thinking-level.mjs";
 import { THINKING_LEVEL_LIST } from "../src/core/config.js";
 
@@ -71,20 +70,4 @@ test("mergePiSettings lets project settings override global ones per key", () =>
   });
   assert.equal(mergePiSettings({ defaultThinkingLevel: "low" }, { defaultThinkingLevel: "off" }).defaultThinkingLevel, "off");
   assert.deepEqual(mergePiSettings(), { defaultThinkingLevel: undefined, modelThinkingLevels: {} });
-});
-
-test("withDefaultThinkingLevel states medium in Pi settings unless a valid default is there", () => {
-  assert.deepEqual(withDefaultThinkingLevel({}), { defaultThinkingLevel: "medium" });
-  assert.deepEqual(withDefaultThinkingLevel(undefined), { defaultThinkingLevel: "medium" });
-  // Other settings survive.
-  assert.deepEqual(
-    withDefaultThinkingLevel({ theme: "dark", modelThinkingLevels: { "a/b": "high" } }),
-    { theme: "dark", modelThinkingLevels: { "a/b": "high" }, defaultThinkingLevel: "medium" },
-  );
-  // A level the user (or Pi) already chose is kept.
-  assert.equal(withDefaultThinkingLevel({ defaultThinkingLevel: "high" }), null);
-  assert.equal(withDefaultThinkingLevel({ defaultThinkingLevel: "off" }), null);
-  // Pi would read these as "off", so they get replaced.
-  assert.deepEqual(withDefaultThinkingLevel({ defaultThinkingLevel: "High" }), { defaultThinkingLevel: "medium" });
-  assert.deepEqual(withDefaultThinkingLevel({ defaultThinkingLevel: "bogus" }), { defaultThinkingLevel: "medium" });
 });

@@ -44,10 +44,6 @@ export const MODELS_FILE = join(
   process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
   "models.json",
 );
-export const PI_SETTINGS_FILE = join(
-  process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
-  "settings.json",
-);
 export const MCP_FILE = "/data/mcp.json";
 export const PI_MCP_FILE = "/data/pi/agent/mcp.json";
 

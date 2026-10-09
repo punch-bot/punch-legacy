@@ -43,6 +43,10 @@ RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
     && npm cache clean --force \
     && rm -rf /root/.npm
 
+# Docker copies this default into an empty /data volume on first use.
+# Recreations mount the existing volume, preserving the user's settings.json.
+COPY docker/sandbox/opt/picfg/seed-settings.json /data/pi/agent/settings.json
+
 # pigeon-peer.js stays single-source in src/ (shared with the bot).
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js
 # API keys for Pi come from supervisor /env and /apikey (provider env vars).
