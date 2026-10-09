@@ -551,7 +551,7 @@ export function registerInteractions(client) {
           const data = await res.json();
           const entries = sub === "list" ? data.skills : data.proposals;
           const body = !entries?.length ? (sub === "list" ? "No instruction skills installed." : "No skill proposals pending review.") : sub === "list"
-            ? `**Instruction skills** (enabled skills auto-apply every Discord turn — no \`/skill-name\` or \`pi --skill\` needed):\n${entries.map((skill) => `${skill.enabled ? "✅" : "⏸️"} **${skill.name}** (${skill.source})${skill.description ? ` — ${skill.description}` : ""}${skill.requirements?.missingEnv?.length || skill.requirements?.missingBinaries?.length ? ` [missing: ${[...(skill.requirements?.missingEnv || []), ...(skill.requirements?.missingBinaries || [])].join(", ")}]` : ""}`).join("\n")}`
+            ? `**Skills** (Pi lists enabled skills; the agent reads relevant skills on demand):\n${entries.map((skill) => `${skill.enabled ? "✅" : "⏸️"} **${skill.name}** (${skill.source})${skill.description ? ` — ${skill.description}` : ""}${skill.requirements?.missingEnv?.length || skill.requirements?.missingBinaries?.length ? ` [missing: ${[...(skill.requirements?.missingEnv || []), ...(skill.requirements?.missingBinaries || [])].join(", ")}]` : ""}`).join("\n")}`
             : `**Pending skill proposals:**\n${entries.map((proposal) => `\`${proposal.id}\` **${proposal.name}** (${proposal.size}B)`).join("\n")}`;
           await interaction.reply({ content: body.slice(0, 1_900), flags: MessageFlags.Ephemeral });
           return;
@@ -561,7 +561,7 @@ export function registerInteractions(client) {
           const res = await fetch(`${url}/skills/proposals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify({ approve: sub === "approve" }) });
           if (!res.ok) throw new Error(`supervisor API ${res.status}`);
           const { result } = await res.json();
-          await interaction.reply({ content: result.approved ? `Installed instruction skill \`${result.name}\`. It is enabled and applies on the next Discord turn — no Pi restart or slash invoke needed.` : `Rejected skill proposal \`${result.name}\`.`, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: result.approved ? `Installed skill \`${result.name}\`. Pi discovers it when loading a session or reloading resources; the agent decides when to read it.` : `Rejected skill proposal \`${result.name}\`.`, flags: MessageFlags.Ephemeral });
           return;
         }
         const name = interaction.options.getString("name", true);
@@ -569,15 +569,15 @@ export function registerInteractions(client) {
           const res = await fetch(`${url}/skills/${encodeURIComponent(name)}`, { headers: { authorization: auth } });
           if (!res.ok) throw new Error(`supervisor API ${res.status}`);
           const { skill } = await res.json();
-          await interaction.reply({ content: `**${skill.name}** (${skill.source}, ${skill.enabled ? "enabled" : "disabled"})\nIn Discord, enabled skills are injected every turn — ignore any \`/${skill.name}\` or \`pi --${skill.name}\` notes inside the skill.\n\`\`\`\n${skill.content.slice(0, 1_500)}\n\`\`\``, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: `**${skill.name}** (${skill.source}, ${skill.enabled ? "enabled" : "disabled"})\nPi lists enabled skills by description; the agent reads the full instructions when relevant.\n\`\`\`\n${skill.content.slice(0, 1_500)}\n\`\`\``, flags: MessageFlags.Ephemeral });
           return;
         }
         const res = await fetch(`${url}/skills/${encodeURIComponent(name)}`, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify({ enabled: sub === "enable" }) });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         await interaction.reply({
           content: sub === "enable"
-            ? `Enabled skill \`${name}\`. It now applies automatically on every Discord turn — you do **not** need \`/${name}\`, \`pi --${name}\`, or a Pi restart.`
-            : `Disabled skill \`${name}\`. It will stop applying on the next turn.`,
+            ? `Enabled skill \`${name}\`. Pi makes it available when loading a session or reloading resources; the agent decides when to read it.`
+            : `Disabled skill \`${name}\`. Pi removes it from discovery when loading a session or reloading resources.`,
           flags: MessageFlags.Ephemeral,
         });
       } catch (error) {

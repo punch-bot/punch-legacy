@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import { syncPiSkillSettings } from "/usr/local/lib/skills-manager.mjs";
 import {
   mergePiSettings,
   normalizeThinkingLevel,
@@ -40,8 +41,6 @@ const SESSION_MAP_FILE =
   process.env.PI_SESSION_MAP || "/data/pi/gateway-sessions.json";
 const EXT_DIR = process.env.PI_EXTENSIONS_DIR || "/opt/pi/extensions";
 const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
-const SKILL_ROOTS = ["/work/.pi/skills", "/data/pi/skills", "/opt/pi/skills"];
-const SKILL_ENABLED_FILE = "/data/pi/skills-enabled.json";
 const PI_SETTINGS_FILES = [
   join(process.env.PI_CODING_AGENT_DIR || "/data/pi/agent", "settings.json"),
   join(WORK, ".pi", "settings.json"),
@@ -342,6 +341,7 @@ function startPi() {
   clearPiWaiters(new Error("pi restarted"));
 
   piSpawnedAt = Date.now();
+  syncPiSkillSettings();
   const { provider, modelId } = parseModel(MODEL);
   const args = [
     "--mode",
@@ -507,35 +507,11 @@ async function ensureSession(logicalId) {
   return s;
 }
 
-function enabledSkillInstructions() {
-  let enabled = {};
-  try { enabled = JSON.parse(readFileSync(SKILL_ENABLED_FILE, "utf8")); } catch {}
-  const seen = new Set();
-  const sections = [];
-  for (const root of SKILL_ROOTS) {
-    let names = [];
-    try { names = readdirSync(root); } catch { continue; }
-    for (const name of names) {
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(name) || seen.has(name) || enabled[name] === false) continue;
-      try {
-        const text = readFileSync(join(root, name, "SKILL.md"), "utf8");
-        seen.add(name);
-        const body = text.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "").trim();
-        if (body) sections.push(`<skill name="${name}">\n${body.slice(0, 12000)}\n</skill>`);
-      } catch {}
-    }
-  }
-  return sections.length
-    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
-    : "";
-}
-
 function buildUserPrompt(session, text, system) {
-  const enrichedSystem = `${system || ""}${enabledSkillInstructions()}`;
-  const h = enrichedSystem ? hashStr(enrichedSystem) : null;
-  if (enrichedSystem && h !== session.systemHash) {
+  const h = system ? hashStr(system) : null;
+  if (system && h !== session.systemHash) {
     session.systemHash = h;
-    return `<punch-system>\n${enrichedSystem}\n</punch-system>\n\n${String(text || "")}`;
+    return `<punch-system>\n${system}\n</punch-system>\n\n${String(text || "")}`;
   }
   return String(text || "");
 }
