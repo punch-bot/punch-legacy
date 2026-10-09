@@ -623,6 +623,32 @@ export async function createSession(userId) {
   return s.id;
 }
 
+// The user's model and reasoning level from the sandbox supervisor, sent with
+// every turn. Falls back to the default model and Pi's default level.
+async function fetchActiveModel(userId, signal = null) {
+  const active = { activeProvider: PROVIDER_ID, activeModel: MODEL_ID, thinkingLevel: null };
+  const apiUrl = apiUrlFor(userId);
+  if (!apiUrl) return active;
+  try {
+    const res = await fetch(`${apiUrl}/model`, {
+      headers: headers(),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2000)]) : AbortSignal.timeout(2000),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (d && d.model) {
+        const [p, ...r] = d.model.split("/");
+        active.activeProvider = p;
+        active.activeModel = r.join("/");
+      }
+      active.thinkingLevel = d?.thinkingLevel || null;
+    }
+  } catch (err) {
+    console.error(`[pi] failed to fetch active model from supervisor for ${userId}:`, err.message);
+  }
+  return active;
+}
+
 export async function runAgent(message, sessionId = null, onProgress = null, signal = null, userId = null, attachments = []) {
   const srv = serverFor(userId);
   if (!srv) throw new Error("No sandbox assigned. Ask an admin to create one with /sandbox, or wait for your turn.");
@@ -656,27 +682,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
     }
   }
 
-  let activeProvider = PROVIDER_ID;
-  let activeModel = MODEL_ID;
-  const apiUrl = apiUrlFor(userId);
-  if (apiUrl) {
-    try {
-      const res = await fetch(`${apiUrl}/model`, {
-        headers: headers(),
-        signal: AbortSignal.timeout(2000),
-      });
-      if (res.ok) {
-        const d = await res.json();
-        if (d && d.model) {
-          const [p, ...r] = d.model.split("/");
-          activeProvider = p;
-          activeModel = r.join("/");
-        }
-      }
-    } catch (err) {
-      console.error(`[pi] failed to fetch active model from supervisor for ${userId}:`, err.message);
-    }
-  }
+  const { activeProvider, activeModel, thinkingLevel } = await fetchActiveModel(userId);
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -691,6 +697,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
         `/session/${sid}/message${q}`,
         {
           model: { providerID: activeProvider, modelID: activeModel },
+          thinkingLevel,
           system: sysPrompt,
           parts,
         },
@@ -935,31 +942,11 @@ export async function summarizeSession(sessionId, userId, signal = null) {
   const dir = userDir(userId);
   const q = `?directory=${encodeURIComponent(dir)}`;
 
-  let activeProvider = PROVIDER_ID;
-  let activeModel = MODEL_ID;
-  const apiUrl = apiUrlFor(userId);
-  if (apiUrl) {
-    try {
-      const res = await fetch(`${apiUrl}/model`, {
-        headers: headers(),
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2000)]) : AbortSignal.timeout(2000),
-      });
-      if (res.ok) {
-        const d = await res.json();
-        if (d && d.model) {
-          const [p, ...r] = d.model.split("/");
-          activeProvider = p;
-          activeModel = r.join("/");
-        }
-      }
-    } catch (err) {
-      console.error(`[pi] failed to fetch active model from supervisor for ${userId}:`, err.message);
-    }
-  }
+  const { activeProvider, activeModel, thinkingLevel } = await fetchActiveModel(userId, signal);
 
   return api(
     `/session/${sessionId}/summarize${q}`,
-    { model: { providerID: activeProvider, modelID: activeModel }, providerID: activeProvider, modelID: activeModel },
+    { model: { providerID: activeProvider, modelID: activeModel }, providerID: activeProvider, modelID: activeModel, thinkingLevel },
     srv,
     signal,
   );

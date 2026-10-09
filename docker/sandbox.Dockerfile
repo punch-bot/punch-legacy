@@ -15,7 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends tailscale \
     && rm -rf /var/lib/apt/lists/*
 
-# Pi coding agent. --ignore-scripts per Pi install docs.
+# Pi coding agent. --ignore-scripts per Pi install docs. Unpinned on purpose:
+# extensions import @earendil-works/* through Pi's loader aliases, so
+# /opt/pi/package.json must not install its own (drifting) copy.
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION} \
     && npm cache clean --force \
     && pi --version
@@ -40,6 +42,10 @@ RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
     && npx playwright install chromium-headless-shell \
     && npm cache clean --force \
     && rm -rf /root/.npm
+
+# Docker copies this default into an empty /data volume on first use.
+# Recreations mount the existing volume, preserving the user's settings.json.
+COPY docker/sandbox/opt/picfg/seed-settings.json /data/pi/agent/settings.json
 
 # pigeon-peer.js stays single-source in src/ (shared with the bot).
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js

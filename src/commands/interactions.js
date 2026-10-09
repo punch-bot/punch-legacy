@@ -35,7 +35,7 @@ import {
   syncMultitaskWorkerCap,
 } from "../agent.js";
 
-import { MODEL_LIST, PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
+import { PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -62,6 +62,49 @@ import {
 } from "./prefix.js";
 
 import { runApprovedAgentPigeon, handleAgentPigeon, notifyPigeonDM } from "../gateway/pigeon.js";
+
+import {
+  CUSTOM_MODEL_MODAL_ID,
+  MODELS_MENU_EXPIRED,
+  MODELS_MENU_TTL_MS,
+  MODEL_SELECT_ID,
+  THINKING_SELECT_ID,
+  modelsMenuCustomId,
+  modelsMenuExpired,
+  parseModelsMenuCustomId,
+  renderModelsMenu,
+  thinkingLevelLabel,
+} from "./models-menu.js";
+
+// Supervisor model API for /models: GET without a body, POST with one.
+async function modelsSupervisor(uid, path, body) {
+  const auth = supervisorAuth();
+  const res = await fetch(`${apiUrlFor(uid)}${path}`, body === undefined
+    ? { headers: { authorization: auth } }
+    : { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || `supervisor API ${res.status}`), { status: res.status });
+  return data;
+}
+
+// The /models menu re-rendered with the sandbox's current model and level.
+async function modelsMenuFor(uid, expiresAt, notice) {
+  try {
+    const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
+    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice });
+  } catch (err) {
+    return { content: [notice, `⚠️ Error fetching model: ${err.message}`].filter(Boolean).join("\n"), components: [] };
+  }
+}
+
+async function setModelNotice(uid, model) {
+  try {
+    const { model: saved } = await modelsSupervisor(uid, "/model", { model });
+    return `✅ Model changed to \`${saved || model}\`. Sandbox LLM process restarting…`;
+  } catch (err) {
+    return `⚠️ Failed to set model: ${err.message}`;
+  }
+}
 
 export function registerInteractions(client) {
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -720,28 +763,14 @@ export function registerInteractions(client) {
 
     if (interaction.commandName === "models") {
       const uid = interaction.user.id;
-      const apiUrl = apiUrlFor(uid);
-      const auth = supervisorAuth();
+      if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       try {
-        const res = await fetch(`${apiUrl}/model`, { headers: { authorization: auth } });
-        if (!res.ok) throw new Error(`supervisor API ${res.status}`);
-        const { model: current } = await res.json();
-        const options = MODEL_LIST.map(m => ({
-          label: m.label,
-          value: m.value,
-          description: m.value === current ? "Currently selected" : undefined,
-        }));
-        const row = new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId("model_select")
-            .setPlaceholder(`Current: ${current}`)
-            .addOptions(options)
-        );
-        await interaction.reply({
-          content: `**Select a model** (current: \`${current}\`)\nChoose a model from the list or pick "Custom model..." to type one.`,
-          components: [row],
-          flags: MessageFlags.Ephemeral,
-        });
+        const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
+        const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
+        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt }), flags: MessageFlags.Ephemeral });
+        setTimeout(() => {
+          interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
+        }, MODELS_MENU_TTL_MS).unref();
       } catch (err) {
         await interaction.reply({ content: `⚠️ Error fetching model: ${err.message}`, flags: MessageFlags.Ephemeral });
       }
@@ -1760,14 +1789,20 @@ export function registerInteractions(client) {
     }
   });
 
-  // Handle model selection dropdown
+  // /models dropdowns (model + reasoning level). Each pick updates the menu in
+  // place so it can be used again until it expires.
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isStringSelectMenu() || interaction.customId !== "model_select") return;
+    if (!interaction.isStringSelectMenu()) return;
+    const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== MODEL_SELECT_ID && base !== THINKING_SELECT_ID) return;
+    if (modelsMenuExpired(expiresAt)) {
+      await interaction.update({ content: MODELS_MENU_EXPIRED, components: [] });
+      return;
+    }
     const value = interaction.values[0];
     const uid = interaction.user.id;
-    const auth = supervisorAuth();
 
-    if (value === "__custom__") {
+    if (base === MODEL_SELECT_ID && value === "__custom__") {
       try {
         const row = new ActionRowBuilder({
           components: [
@@ -1780,7 +1815,7 @@ export function registerInteractions(client) {
           ],
         });
         const modal = new ModalBuilder()
-          .setCustomId("custom_model")
+          .setCustomId(modelsMenuCustomId(CUSTOM_MODEL_MODAL_ID, expiresAt))
           .setTitle("Set custom model")
           .addComponents(row);
         console.error("[model_select] showing modal...");
@@ -1794,52 +1829,37 @@ export function registerInteractions(client) {
       return;
     }
 
-    try {
-      const res = await fetch(`${apiUrlFor(uid)}/model`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: auth },
-        body: JSON.stringify({ model: value }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `supervisor API ${res.status}`);
+    await interaction.deferUpdate();
+    let notice;
+    if (base === MODEL_SELECT_ID) {
+      notice = await setModelNotice(uid, value);
+    } else {
+      try {
+        const { thinkingLevel } = await modelsSupervisor(uid, "/model/thinking", { level: value });
+        notice = `✅ Reasoning level set to **${thinkingLevelLabel(thinkingLevel)}**. Applies from your next message.`;
+      } catch (err) {
+        notice = err.status === 404
+          ? "⚠️ This sandbox predates reasoning levels. Ask an admin to recreate it with `/sandbox restart-all recreate:true`."
+          : `⚠️ Failed to set reasoning level: ${err.message}`;
       }
-      await interaction.update({
-        content: `✅ Model changed to \`${value}\`. Sandbox LLM process restarting…`,
-        components: [],
-      });
-    } catch (err) {
-      await interaction.update({ content: `⚠️ Failed to set model: ${err.message}`, components: [] });
     }
+    await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
-  // Handle custom model modal submission
+  // Custom model modal (opened from the /models menu, which it then updates)
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isModalSubmit() || interaction.customId !== "custom_model") return;
+    if (!interaction.isModalSubmit()) return;
+    const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== CUSTOM_MODEL_MODAL_ID) return;
     const model = interaction.fields.getTextInputValue("model_name").trim();
     if (!model) {
       await interaction.reply({ content: "⚠️ Model name cannot be empty.", flags: MessageFlags.Ephemeral });
       return;
     }
     const uid = interaction.user.id;
-    const auth = supervisorAuth();
-    try {
-      const res = await fetch(`${apiUrlFor(uid)}/model`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: auth },
-        body: JSON.stringify({ model }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `supervisor API ${res.status}`);
-      }
-      await interaction.reply({
-        content: `✅ Model changed to \`${model}\`. Sandbox LLM process restarting…`,
-        flags: MessageFlags.Ephemeral,
-      });
-    } catch (err) {
-      await interaction.reply({ content: `⚠️ Failed to set model: ${err.message}`, flags: MessageFlags.Ephemeral });
-    }
+    await interaction.deferUpdate();
+    const notice = await setModelNotice(uid, model);
+    await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
   // Handle model edit modal submission

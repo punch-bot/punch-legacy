@@ -1,6 +1,6 @@
 // Shared mutable state + constants for the sandbox supervisor (docker/sandbox/usr/local/bin/serve-supervisor.mjs
 // entrypoint). Route groups in this directory read/mutate these values.
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -59,6 +59,8 @@ export const state = {
   loadedHash: "",
   armedForQuarantine: false,
   CURRENT_MODEL: null,
+  // Reasoning level for every turn, or null for Pi's default (pi-thinking-level.mjs).
+  THINKING_LEVEL: null,
 };
 
 export function log(...a) {
@@ -75,5 +77,9 @@ export function loadJSON(file) {
 }
 export function saveJSON(file, obj) {
   mkdirSync(join(file, ".."), { recursive: true });
-  writeFileSync(file, JSON.stringify(obj, null, 2));
+  // Atomic replace: Pi reads auth.json/models.json while we write them, and a
+  // half-written models.json makes Pi drop every custom provider.
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
+  renameSync(tmp, file);
 }
