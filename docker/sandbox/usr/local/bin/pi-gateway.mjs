@@ -138,7 +138,7 @@ function readPiSettings(file) {
 /**
  * Set `requested` on the active `model` only if Pi lists it for that model;
  * otherwise Pi's default (Pi would clamp to a neighbouring level instead).
- * Runs every turn: set_model and switch_session keep the previous level.
+ * Runs every turn, so no earlier turn's or session's level lingers.
  */
 async function applyThinkingLevel(requested, model) {
   let supported = null;

@@ -29,6 +29,7 @@ import {
 import { setupSignalHandlers, setupWatchers, start } from "./supervisor/gateway.mjs";
 import {
   ensurePiModelsJson,
+  ensurePiSettingsJson,
   loadModel,
   loadThinkingLevel,
   normalizeModel,
@@ -59,6 +60,7 @@ process.env.PI_MODEL = state.CURRENT_MODEL;
   if (Object.keys(env).length) log("injected stored env vars:", Object.keys(env).join(", "));
   syncEnvApiKeysToAuth();
   ensurePiModelsJson();
+  ensurePiSettingsJson();
 })();
 
 // Set up the user's work directory from env var
