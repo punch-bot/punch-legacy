@@ -17,10 +17,6 @@ import {
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
 import {
-  addedServiceSuffix,
-  planModelPin,
-} from "/usr/local/lib/pi-model-pin.mjs";
-import {
   mergePiSettings,
   normalizeThinkingLevel,
   piDefaultThinkingLevel,
@@ -57,7 +53,6 @@ let MODEL =
   process.env.PI_MODEL ||
   "anthropic/claude-sonnet-4-5";
 const MODEL_FALLBACK = "anthropic/claude-sonnet-4-5";
-const SUPERVISOR_URL = `http://127.0.0.1:${process.env.PI_SUPERVISOR_PORT || 4097}`;
 const MAX_TOOL_STUBS = 40;
 const ABORT_GRACE_MS = Number(process.env.PI_GATEWAY_ABORT_GRACE_MS) || 3000;
 const TURN_MAX_MS =
@@ -70,14 +65,6 @@ const TURN_IDLE_MS =
     120) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
-// Set once Pi turns MODEL into a service variant (see pi-model-pin.mjs):
-// `model` is the exact id Pi is relaunched with.
-let modelPin = null;
-let modelPinCheckedSpawn = 0;
-// Failed checks and relaunches per MODEL, so a fix that can't stick won't loop.
-const MAX_MODEL_PIN_ATTEMPTS = 3;
-let modelPinAttempts = { for: null, count: 0 };
-const killedByGateway = new WeakSet();
 
 mkdirSync(SESSION_DIR, { recursive: true });
 mkdirSync(join(WORK, ".pi"), { recursive: true });
@@ -94,27 +81,14 @@ function parseModel(m) {
   return { provider: s.slice(0, i), modelId: s.slice(i + 1) };
 }
 
-function pinnedModel() {
-  return modelPin?.for === MODEL ? modelPin.model : null;
-}
-
-function launchModel() {
-  return pinnedModel() || MODEL;
-}
-
 /**
- * set_model plus the user's reasoning level for a turn, using the pinned id
- * when the bot asks for MODEL. Logs failures instead of throwing.
+ * set_model plus the user's reasoning level for a turn.
+ * Logs failures instead of throwing.
  */
 async function selectTurnModel(providerID, modelID, thinkingLevel) {
-  const pinned = pinnedModel();
-  const target =
-    pinned && `${providerID}/${modelID}` === MODEL
-      ? parseModel(pinned)
-      : { provider: providerID, modelId: modelID };
   let model = null;
   try {
-    model = (await rpc("set_model", target)).data;
+    model = (await rpc("set_model", { provider: providerID, modelId: modelID })).data;
   } catch (e) {
     log("set_model:", e.message);
   }
@@ -153,74 +127,6 @@ async function applyThinkingLevel(requested, model) {
   const fallback = piDefaultThinkingLevel(settings, model?.provider, model?.id);
   const level = turnThinkingLevel(requested, supported, fallback);
   await rpc("set_thinking_level", { level });
-}
-
-/** Ask the supervisor (sole models.json writer) to add `entry`; true once it's there. */
-async function registerModel(provider, entry) {
-  try {
-    const res = await fetch(`${SUPERVISOR_URL}/model/register`, {
-      method: "POST",
-      headers: {
-        authorization: "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64"),
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ provider, entry }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      log(`model pin: supervisor refused ${provider}/${entry.id} (${res.status}):`, body.error || "");
-      return false;
-    }
-    log(
-      body.registered
-        ? `model pin: registered ${provider}/${entry.id} in models.json`
-        : `model pin: ${provider}/${entry.id} already in models.json`,
-    );
-    return true;
-  } catch (e) {
-    log("model pin: register failed:", e.message);
-    return false;
-  }
-}
-
-/**
- * Once per Pi process: if Pi resolved MODEL to a service variant the user did
- * not ask for (`:free`, `:batch`, ...), relaunch it on the unsuffixed id.
- * Pi re-resolves --model on every new/switched session, so set_model alone
- * would not stick. A failed check or registration retries on the next turn.
- */
-async function pinRequestedModel() {
-  if (modelPinCheckedSpawn === piSpawnedAt) return;
-  if (modelPinAttempts.for !== MODEL) modelPinAttempts = { for: MODEL, count: 0 };
-  if (modelPinAttempts.count >= MAX_MODEL_PIN_ATTEMPTS) return;
-  const { provider, modelId } = parseModel(MODEL);
-  let current;
-  let plan;
-  try {
-    current = (await rpc("get_state")).data?.model;
-    if (addedServiceSuffix(modelId, current?.id)) {
-      const avail = await rpc("get_available_models");
-      plan = planModelPin(provider, modelId, current, avail.data?.models);
-    }
-  } catch (e) {
-    modelPinAttempts.count++;
-    log("model pin check:", e.message);
-    return;
-  }
-  if (!plan) {
-    modelPinCheckedSpawn = piSpawnedAt;
-    return;
-  }
-  modelPinAttempts.count++;
-  if (plan.action === "register" && !(await registerModel(provider, plan.entry))) return;
-  modelPin = { for: MODEL, model: `${provider}/${plan.id}` };
-  log(
-    `pi resolved ${MODEL} to ${current.provider}/${current.id}; relaunching with ${launchModel()}`,
-  );
-  activeLogicalId = null;
-  forceKillPi("model pin");
-  await waitReady();
 }
 
 function basicOk(req) {
@@ -404,7 +310,6 @@ function forceKillPi(reason = "forced") {
   ready = false;
   stdoutBuf = "";
   if (proc) {
-    killedByGateway.add(proc);
     try {
       proc.kill("SIGTERM");
     } catch {}
@@ -437,7 +342,7 @@ function startPi() {
   clearPiWaiters(new Error("pi restarted"));
 
   piSpawnedAt = Date.now();
-  const { provider, modelId } = parseModel(launchModel());
+  const { provider, modelId } = parseModel(MODEL);
   const args = [
     "--mode",
     "rpc",
@@ -462,7 +367,6 @@ function startPi() {
     stdio: ["pipe", "pipe", "inherit"],
   });
 
-  const proc = child;
   child.stdout.on("data", onStdout);
   child.on("exit", (code, signal) => {
     const uptime = Date.now() - piSpawnedAt;
@@ -472,12 +376,10 @@ function startPi() {
     clearPiWaiters(new Error("pi exited"));
     if (activeLogicalId) finishTurnProgress(activeLogicalId, "error");
     // Unknown / bad provider exits immediately — fall back so health/session work.
-    // Pi exits 143 on our own SIGTERM, which says nothing about the model.
     if (
       code &&
       code !== 0 &&
       uptime < 5000 &&
-      !killedByGateway.has(proc) &&
       !usedModelFallback &&
       MODEL !== MODEL_FALLBACK
     ) {
@@ -589,7 +491,6 @@ async function ensureSession(logicalId) {
     sessions.set(logicalId, s);
   }
   await waitReady();
-  await pinRequestedModel();
   if (activeLogicalId !== logicalId) {
     if (s.sessionFile && existsSync(s.sessionFile)) {
       await rpc("switch_session", { sessionPath: s.sessionFile });
