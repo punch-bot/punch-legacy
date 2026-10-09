@@ -21,6 +21,12 @@ import {
   planModelPin,
 } from "/usr/local/lib/pi-model-pin.mjs";
 import {
+  mergePiSettings,
+  normalizeThinkingLevel,
+  piDefaultThinkingLevel,
+  turnThinkingLevel,
+} from "/usr/local/lib/pi-thinking-level.mjs";
+import {
   activityFromProgress,
   closeProgress,
   createProgressState,
@@ -40,6 +46,10 @@ const EXT_DIR = process.env.PI_EXTENSIONS_DIR || "/opt/pi/extensions";
 const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
 const SKILL_ROOTS = ["/work/.pi/skills", "/data/pi/skills", "/opt/pi/skills"];
 const SKILL_ENABLED_FILE = "/data/pi/skills-enabled.json";
+const PI_SETTINGS_FILES = [
+  join(process.env.PI_CODING_AGENT_DIR || "/data/pi/agent", "settings.json"),
+  join(WORK, ".pi", "settings.json"),
+];
 const USER = process.env.PI_SERVER_USERNAME || "pi";
 const PASS = process.env.PI_SERVER_PASSWORD || "";
 let MODEL =
@@ -92,14 +102,57 @@ function launchModel() {
   return pinnedModel() || MODEL;
 }
 
-/** set_model for a turn, using the pinned id when the bot asks for MODEL. */
-async function selectTurnModel(providerID, modelID) {
+/**
+ * set_model plus the user's reasoning level for a turn, using the pinned id
+ * when the bot asks for MODEL. Logs failures instead of throwing.
+ */
+async function selectTurnModel(providerID, modelID, thinkingLevel) {
   const pinned = pinnedModel();
-  if (!pinned || `${providerID}/${modelID}` !== MODEL) {
-    await rpc("set_model", { provider: providerID, modelId: modelID });
-    return;
+  const target =
+    pinned && `${providerID}/${modelID}` === MODEL
+      ? parseModel(pinned)
+      : { provider: providerID, modelId: modelID };
+  let model = null;
+  try {
+    model = (await rpc("set_model", target)).data;
+  } catch (e) {
+    log("set_model:", e.message);
   }
-  await rpc("set_model", parseModel(pinned));
+  try {
+    model ??= (await rpc("get_state")).data?.model;
+    await applyThinkingLevel(thinkingLevel, model);
+  } catch (e) {
+    log("thinking level:", e.message);
+  }
+}
+
+function readPiSettings(file) {
+  try {
+    const v = JSON.parse(readFileSync(file, "utf8"));
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set `requested` on the active `model` only if Pi lists it for that model;
+ * otherwise Pi's default (Pi would clamp to a neighbouring level instead).
+ * Runs every turn: set_model and switch_session keep the previous level.
+ */
+async function applyThinkingLevel(requested, model) {
+  let supported = null;
+  if (normalizeThinkingLevel(requested)) {
+    try {
+      supported = (await rpc("get_available_thinking_levels")).data?.levels;
+    } catch (e) {
+      log("get_available_thinking_levels:", e.message);
+    }
+  }
+  const settings = mergePiSettings(...PI_SETTINGS_FILES.map(readPiSettings));
+  const fallback = piDefaultThinkingLevel(settings, model?.provider, model?.id);
+  const level = turnThinkingLevel(requested, supported, fallback);
+  await rpc("set_thinking_level", { level });
 }
 
 /** Ask the supervisor (sole models.json writer) to add `entry`; true once it's there. */
@@ -1071,7 +1124,7 @@ const server = createServer(async (req, res) => {
           const providerID = body?.model?.providerID || body?.providerID;
           const modelID = body?.model?.modelID || body?.modelID;
           if (providerID && modelID) {
-            await selectTurnModel(providerID, modelID).catch(() => {});
+            await selectTurnModel(providerID, modelID, body?.thinkingLevel);
           }
           await rpc("compact", {}, 300000);
         });
@@ -1107,9 +1160,7 @@ const server = createServer(async (req, res) => {
             beginTurnProgress(sid);
             try {
               if (model?.providerID && model?.modelID) {
-                await selectTurnModel(model.providerID, model.modelID).catch(
-                  (e) => log("set_model:", e.message),
-                );
+                await selectTurnModel(model.providerID, model.modelID, body.thinkingLevel);
               }
 
               const promptText = buildUserPrompt(session, userText, system);
