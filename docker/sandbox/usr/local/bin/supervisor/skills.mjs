@@ -1,7 +1,7 @@
 // Instruction-skill routes for the sandbox supervisor.
 import { listProposals, listSkills, inspectSkill, proposeSkill, reviewProposal, setSkillEnabled } from "/usr/local/lib/skills-manager.mjs";
 
-/** Instruction skills: Markdown only, no gateway reload required. Returns true if handled. */
+/** Markdown skills are discovered by Pi on session load or resource reload. Returns true if handled. */
 export function handleSkillsRoutes(req, res, url) {
   if (req.method === "GET" && url.pathname === "/skills") {
     res.writeHead(200, { "content-type": "application/json" });
