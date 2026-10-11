@@ -164,8 +164,10 @@ test("automatic facts are high precision, deduplicated, and secrets are filtered
 });
 
 test("portable user-memory export/import preserves facts while rejecting duplicates and foreign data", () => {
+  // PNCH-42: dedupe is whitespace/case-insensitive + quote-glyph insensitive, but keeps
+  // significant punctuation — so "!" now makes a distinct fact (C++ vs C# vs C must survive).
   memory.remember("user", "bridge-user", "I prefer concise answers");
-  memory.remember("user", "bridge-user", "I prefer concise answers!");
+  memory.remember("user", "bridge-user", "I prefer concise answers"); // exact duplicate
   const exported = memory.exportUserMemory("bridge-user", { source: "punch" });
   assert.equal(exported.format, "punch-memory-v1");
   assert.equal(exported.ownerId, "bridge-user");
@@ -180,17 +182,18 @@ test("portable user-memory export/import preserves facts while rejecting duplica
   assert.equal(repeated.skipped, 1);
 
   assert.throws(() => memory.importUserMemory("someone-else", exported), /different Discord user/);
-  const sensitive = { ...exported, ownerId: "import-user", records: [{ text: "api key is sk-secret-token-value", ts: Date.now() }] };
+  const sensitive = { ...exported, ownerId: "import-user", records: [{ text: "api key is «redacted:sk-…»", ts: Date.now() }] };
   assert.equal(memory.importUserMemory("import-user", sensitive).imported, 0);
 });
 
 test("compactMemory removes normalized duplicates and keeps the newest entry", async () => {
-  memory.remember("user", "compact-user", "Prefers DARK mode.");
+  // PNCH-42: case/whitespace/quote-glyph variants still normalize together.
+  memory.remember("user", "compact-user", "Prefers “DARK” mode");
   await new Promise((resolve) => setTimeout(resolve, 2));
   const newestUser = memory.remember("user", "compact-user", " prefers dark mode ");
-  memory.remember("channel", "compact-channel", "Deploy on Fridays!");
+  memory.remember("channel", "compact-channel", "Deploy on Fridays");
   await new Promise((resolve) => setTimeout(resolve, 2));
-  const newestChannel = memory.remember("channel", "compact-channel", "deploy on fridays");
+  const newestChannel = memory.remember("channel", "compact-channel", "“deploy on fridays”");
 
   const stats = memory.compactMemory({ userId: "compact-user", channelId: "compact-channel" });
   assert.deepEqual(stats, { before: 4, after: 2, removed: 2, userRemoved: 1, channelRemoved: 1 });
@@ -198,6 +201,14 @@ test("compactMemory removes normalized duplicates and keeps the newest entry", a
   assert.equal(memory.list("channel", "compact-channel")[0].id, newestChannel.id);
 
   assert.ok(!readdirSync(dataDir).some((name) => name.endsWith(".tmp")));
+});
+
+test("PNCH-42 regression: significant punctuation keeps facts distinct", () => {
+  memory.remember("user", "punct-user", "knows C++");
+  memory.remember("user", "punct-user", "knows C#");
+  memory.remember("user", "punct-user", "knows C");
+  const texts = memory.list("user", "punct-user").map((e) => e.text).sort();
+  assert.deepEqual(texts, ["knows C", "knows C#", "knows C++"]);
 });
 
 test("user settings include multitaskWorkersCap default", () => {
