@@ -207,6 +207,11 @@ test("PNCH-42 regression: significant punctuation keeps facts distinct", () => {
   memory.remember("user", "punct-user", "knows C++");
   memory.remember("user", "punct-user", "knows C#");
   memory.remember("user", "punct-user", "knows C");
+  // Route through the real dedupe path first (cubic review): with the old
+  // punctuation-stripping normalize these three collapse to one entry and
+  // compactMemory must report the collapse; with the fix it must not.
+  const stats = memory.compactMemory({ userId: "punct-user" });
+  assert.equal(stats.removed, 0, "C++/C#/C must not be deduped into one fact");
   const texts = memory.list("user", "punct-user").map((e) => e.text).sort();
   assert.deepEqual(texts, ["knows C", "knows C#", "knows C++"]);
 });
