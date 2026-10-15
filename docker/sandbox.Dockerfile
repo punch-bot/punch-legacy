@@ -41,7 +41,7 @@ ENV HOME=/root \
 # docker/sandbox/ holds the sandbox filesystem tree (incl. package.json), copied
 # before the Pi deps install; runtime dirs are created by the entrypoint/supervisor.
 COPY docker/sandbox/ /
-RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
+RUN cd /opt/pi && npm ci --omit=dev --no-audit --no-fund \
     && npx playwright install chromium-headless-shell \
     && npm cache clean --force \
     && rm -rf /root/.npm
