@@ -6,19 +6,13 @@ mkdir -p /var/run/tailscale /var/lib/tailscale
 tailscaled --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 2>&1 &
 tailscale set --accept-dns=false 2>/dev/null || true
 
-# Seed Pi extensions into the writable work volume (self-extension reload).
-# routines.ts preserves user edits; the rest refresh from the image each start.
+# The Punch runtime bundles these tools. Archive the old copies, including user
+# edits, before Pi discovers extensions in the persisted work volume.
+node /usr/local/lib/pi-runtime-migration.mjs
+
+# SearXNG remains a sandbox extension; refresh its image copy each start.
 mkdir -p /work/.pi/extensions
-for ext in routines collab browser searxng webfetch report_progress compress_context; do
-  [ -f "/opt/pi/extensions/$ext.ts" ] || continue
-  if [ "$ext" = "routines" ] && [ -f "/work/.pi/extensions/routines.ts" ]; then
-    continue
-  fi
-  cp "/opt/pi/extensions/$ext.ts" "/work/.pi/extensions/$ext.ts"
-done
-if [ -f /opt/pi/context-pruning-state.mjs ]; then
-  cp /opt/pi/context-pruning-state.mjs /work/.pi/context-pruning-state.mjs
-fi
+cp /opt/pi/extensions/searxng.ts /work/.pi/extensions/searxng.ts
 # Seed .punch-memory.md if it doesn't exist
 if [ ! -f /work/.punch-memory.md ]; then
   cat > /work/.punch-memory.md << 'PUNCH_MEMORY_EOF'

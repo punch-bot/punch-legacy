@@ -403,15 +403,6 @@ test("transient model errors remain open for retry and successful settlement", (
   assert.equal(activity.thinkingMs, 40);
 });
 
-test("Docker image and persisted workdir seeding include report_progress extension", () => {
-  const dockerfile = readFileSync(new URL("../docker/sandbox.Dockerfile", import.meta.url), "utf8");
-  const entrypoint = readFileSync(new URL("../docker/sandbox/usr/local/bin/sandbox-entrypoint.sh", import.meta.url), "utf8");
-  const extension = readFileSync(new URL("../docker/sandbox/opt/pi/extensions/report_progress.ts", import.meta.url), "utf8");
-  assert.match(dockerfile, /COPY docker\/sandbox\/ \//);
-  assert.ok(extension.includes("report_progress"));
-  assert.match(entrypoint, /for ext in routines collab browser searxng webfetch report_progress compress_context/);
-});
-
 test("gateway keeps tool output private from SSE but available to final fallback", () => {
   const gateway = readFileSync(new URL("../docker/sandbox/usr/local/bin/pi-gateway.mjs", import.meta.url), "utf8");
   assert.match(

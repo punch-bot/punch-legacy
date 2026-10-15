@@ -1,6 +1,6 @@
 # Punch — agent guide
 
-Punch is a personal assistant that lives in Discord and, optionally, iMessage via Spectrum. The bot is a thin client. Each registered user gets their own Docker sandbox running **Pi** (`@earendil-works/pi-coding-agent`, `pi --mode rpc`).
+Punch is a personal assistant that lives in Discord and, optionally, iMessage via Spectrum. The bot is a thin client. Each registered user gets their own Docker sandbox running **Pi** from [`punch-bot/core`](https://github.com/punch-bot/core) (`@punch-bot/cli`, `pi --mode rpc`).
 
 ## Branches and stacks
 
@@ -55,10 +55,12 @@ Discord / Spectrum → bot :4098 → http://sandbox-<name>:4096 (pi-gateway) →
 - `/work` is the workspace. User extensions go in `/work/.pi/extensions/*.ts`, skills in `/work/.pi/skills/<name>/SKILL.md`, and the prompt addendum in `/work/.pi/SYSTEM.md`.
 - Skill precedence is workspace, then user (`/data/pi/skills`), then bundled (`/opt/pi/skills`).
 - The supervisor writes provider keys to `/data/pi/agent/auth.json`. Sessions live in `/data/pi/sessions`, and logical session ids in `/data/pi/gateway-sessions.json`.
-- Project memory lives in `/work/.punch-memory.md`. Each turn, the bot reads up to 12k chars of it into the prompt (`src/chat/queue.js`, `src/punch-turn.js`). Keep that cap in sync with `MAX_MEMORY_CHARS` in `opt/pi/extensions/compress_context.ts`.
+- Project memory lives in `/work/.punch-memory.md`. Each turn, the bot reads up to 12k chars of it into the prompt (`src/chat/queue.js`, `src/punch-turn.js`). Keep that cap in sync with `MAX_MEMORY_CHARS` in `punch-bot/core`'s context-pruning extension.
 
 ## Gotchas
 
+- Keep the default `PI_VERSION` in `docker/sandbox.Dockerfile` aligned with `@punch-bot/cli` and `@punch-bot/ai` in `docker/sandbox/opt/pi/package.json`. Keep Playwright aligned with the CLI's version so both use the installed Chromium build.
+- The runtime bundles browser, webfetch, progress, context-pruning, collaboration, routines, and MCP tools. Only SearXNG is seeded from this repo. On recreation, old bundled extensions move to `/work/.pi/extensions/.legacy-pi`, preserving user edits without loading duplicate tools.
 - Changes under `docker/` reach users only after the sandbox image is rebuilt and the sandboxes are recreated with `/sandbox restart-all recreate:true`. A plain restart keeps the old image and env.
 - No provider is bundled. Turns fail until a key is set with `/apikey set <provider> <key>` or `/env`.
 - Bot↔sandbox auth is HTTP basic with `PI_SERVER_USERNAME` (default `pi`) and `PI_SERVER_PASSWORD`. On the bot side, use `supervisorAuth()` from `src/core/config.js` rather than building the header inline.

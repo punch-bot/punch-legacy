@@ -13,6 +13,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFile } from "node:child_process";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -289,7 +291,12 @@ async function runBrowserProbe() {
 
 async function browserChecks(deep) {
   const startedAt = Date.now();
-  const extensionPresent = existsSync("/work/.pi/extensions/browser.ts") || existsSync("/opt/pi/extensions/browser.ts");
+  let extensionPresent = false;
+  try {
+    const require = createRequire("/opt/pi/package.json");
+    const runtimeDir = dirname(require.resolve("@punch-bot/cli"));
+    extensionPresent = existsSync(join(runtimeDir, "extensions/browser/index.js"));
+  } catch {}
   const checks = [extensionPresent
     ? result("browser-extension", "pass", "Browser extension", "Built-in browser extension is installed.", startedAt)
     : result("browser-extension", "fail", "Browser extension", "Browser extension is missing.", startedAt, "restart-gateway")];

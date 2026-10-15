@@ -346,6 +346,7 @@ function startPi() {
   const args = [
     "--mode",
     "rpc",
+    "--no-extensions",
     "--provider",
     provider,
     "--model",
