@@ -168,7 +168,7 @@ if [ -f .env ] && [ "$RECONFIGURE" = 0 ]; then
   ok ".env exists — keeping it (--reconfigure to rewrite)"
   # shellcheck disable=SC1091
   TOKEN="${TOKEN:-$(grep -E '^DISCORD_TOKEN=' .env | head -1 | cut -d= -f2-)}"
-  PASSWORD="${PASSWORD:-$(grep -E '^OPENCODE_SERVER_PASSWORD=' .env | head -1 | cut -d= -f2-)}"
+  PASSWORD="${PASSWORD:-$(grep -E '^PI_SERVER_PASSWORD=' .env | head -1 | cut -d= -f2-)}"
 else
   [ -f .env ] && { cp .env ".env.bak.$(date +%s)"; warn "existing .env backed up"; }
 
@@ -195,8 +195,8 @@ else
   }
 
   env_set DISCORD_TOKEN "$TOKEN"
-  env_set OPENCODE_SERVER_PASSWORD "$PASSWORD"
-  env_set OPENCODE_MODEL "$MODEL"
+  env_set PI_SERVER_PASSWORD "$PASSWORD"
+  env_set PI_MODEL "$MODEL"
   [ -n "$VNC_PW" ] && env_set VNC_PASSWORD "$VNC_PW"
   # The bot container mounts the repo read-only at /punch to build sandbox images.
   env_set PUNCH_HOST_SOURCE "$ROOT"
@@ -256,6 +256,6 @@ cat <<EOF
   2. /apikey set anthropic <key>                     # or another provider (/env works too)
   3. mention the bot, or text it after /pair
 
-  bot API:   http://localhost:${BOT_PORT}  (basic auth opencode:\$OPENCODE_SERVER_PASSWORD)
+  bot API:   http://localhost:${BOT_PORT}  (basic auth pi:\$PI_SERVER_PASSWORD)
   teardown:  ./install.sh --down     logs: ./install.sh --logs     update: ./install.sh --update
 EOF

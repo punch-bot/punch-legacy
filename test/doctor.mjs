@@ -28,7 +28,7 @@ function dependencies(fetchImpl) {
     gatewayUrl: "http://sandbox-ember:4096",
     routines: { listAll: () => [validRoutine] },
     env: {
-      OPENCODE_SERVER_PASSWORD: "secret",
+      PI_SERVER_PASSWORD: "secret",
       fetch: fetchImpl,
     },
   };
@@ -67,7 +67,7 @@ test("runDoctor reports unavailable routing without throwing", async () => {
     apiUrl: null,
     gatewayUrl: null,
     routines: { listAll: () => [] },
-    env: { OPENCODE_SERVER_PASSWORD: "" },
+    env: { PI_SERVER_PASSWORD: "" },
   });
 
   const routing = result.checks.find((item) => item.id === "routing");

@@ -12,13 +12,14 @@ An AI agent living in Discord, designed to be a personal assistant
 
 Mention/DM/trigger chat, selective cited memory, durable routines, isolated Pi workers, reviewed Markdown instruction skills, pigeons, browser screenshots, per-sandbox Tailscale, layered health diagnostics, Discord voice-memo speech-to-text, and custom MCP servers via Discord `/mcp` (loaded into Pi through `pi-mcp-adapter`).
 
-**Not included:** Composio (`/link`). MCP OAuth is deferred — use `/mcp auth` for API keys, or pass custom bearer tokens via `/mcp add` headers or environment. Punch uses Pi, not OpenCode.
+**Not included:** Composio (`/link`). MCP OAuth is deferred — use `/mcp auth` for API keys, or pass custom bearer tokens via `/mcp add` headers or environment.
 
 ## Automations and skills
 
 - `/routine history [id]` shows execution history and delivery errors. Failed delivery uses capped exponential retry backoff. One-shots remove after success but retain history.
 - `/routine add` supports IANA timezone, active-hour window, and isolated-session option for LLM automations.
 - `/workers start` runs research, coding, or browser work in separate Pi process/session with tool allowlist, 1–30 minute cap, optional model, and DM completion. `/workers list|stop|logs` manages it. `/multitask settings` configures the concurrent worker cap (default 3, max 10).
+- `/settings threads enable` (or `!settings threads on`) opens a Punch-owned thread per summon; the summoner's later messages inside it summon automatically without a mention. `/settings steering enable` makes a message sent while Punch is working steer the running turn (Pi `steer`) instead of queueing or spawning a multitask worker.
 - Instruction skills live at `/work/.pi/skills/<name>/SKILL.md`. `/skills list|inspect|enable|disable` manages them. Generated skills require proposal then `/skills approve`; Markdown changes apply next turn without Pi restart. Executable tools remain Pi extensions.
 - Say “start multiplayer coding with `<sandbox>` in `<workspace>`” to an agent and it uses `collab start`: Git initializes if needed, peer clone is created, and peer agent receives the task. Discord also provides `/collab start <reviewer> <workspace> <task>`. Each proposal is tied to an exact SHA; peer review must inspect and test it. Any new proposal requires a new review. Matching approvals auto-advance canonical `main`.
 
@@ -42,13 +43,13 @@ Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-g
 
 `./install.sh` does all of the below: preflight, `.env`, `docker compose up --build -d`, and prints the bot invite URL. `--down`, `--logs`, and `--update` manage the stack afterward.
 
-1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`OPENCODE_SERVER_PASSWORD` — legacy env name), optional model (`OPENCODE_MODEL`)
+1. `cp .env.example .env` → set `DISCORD_TOKEN`, shared password (`PI_SERVER_PASSWORD`), optional model (`PI_MODEL`)
 2. Optional iMessage/Spectrum: set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` in `.env` — Spectrum starts with the bot; unknown numbers pair via `/pair` (see [docs/spectrum.md](docs/spectrum.md))
 3. `docker compose up --build -d`
 4. Discord: `/sandbox create <name>`
 5. `/apikey set anthropic <key>` (or another provider) then mention the bot (or text Punch after `/pair`)
 
-Host **4098** = bot HTTP API. Dynamic sandboxes publish **noVNC** from port **16080+** when `VNC_PASSWORD` is set.
+Host **4098** = bot HTTP API. Sandboxes run a headless Chromium (Playwright) for the built-in browser tools; screenshots attach to Discord automatically.
 
 ## Local dev (optional)
 

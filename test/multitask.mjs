@@ -31,7 +31,7 @@ describe("multitask settings", () => {
 
 describe("worker channelId regression", () => {
   it("startWorker accepts channelId/messageId/source without ReferenceError", () => {
-    const source = readFileSync(new URL("../docker/worker-manager.mjs", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../docker/sandbox/usr/local/lib/worker-manager.mjs", import.meta.url), "utf8");
     assert.match(
       source,
       /startWorker\(\{\s*prompt,\s*kind = "research",\s*model,\s*timeoutMs = 600_000,\s*maxTokens = 2_000,\s*channelId = null,\s*messageId = null,\s*source = null/,
