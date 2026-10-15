@@ -40,12 +40,12 @@ services:
       PUNCH_SUPERVISOR_TOKEN: ${PUNCH_SUPERVISOR_TOKEN:?PUNCH_SUPERVISOR_TOKEN must be set to a non-empty value}
       PUNCH_HOST_NAME: ${PUNCH_HOST_NAME:-discord-bot}
       PUNCH_HOST_URL: ${PUNCH_HOST_URL:-http://bot:4098}
-      OPENCODE_SERVER_URL: ""
+      PI_SERVER_URL: ""
       SANDBOX_MAP: "{}"
-      OPENCODE_REMOTE_DIR: /work
-      OPENCODE_TIMEOUT: "60"
-      OPENCODE_IDLE_TIMEOUT: "90"
-      OPENCODE_MAX: "1800"
+      PI_REMOTE_DIR: /work
+      PI_TIMEOUT: "60"
+      PI_IDLE_TIMEOUT: "90"
+      PI_MAX: "1800"
     tmpfs:
       - /tmp
     pids_limit: 256
@@ -53,14 +53,38 @@ services:
     cpus: 1
     networks:
       - edge
-    ports:
-      - "${PUNCH_BOT_PORT:-4098}:4098"
     volumes:
       - bot_state:/state
       - octl_bot:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - "${PUNCH_HOST_SOURCE:-/punch}:/punch:ro"
     restart: unless-stopped
+
+  # Base sandbox image/container. Builds from THIS source (not host /punch).
+  # Not started with the bot by default — run it explicitly to (re)build the
+  # image or bring up a base instance:
+  #   docker compose build sandbox
+  #   docker compose up -d sandbox
+  sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox.Dockerfile
+    image: ${PUNCH_SANDBOX_IMAGE:-${PUNCH_STACK_NAME:-punch}-sandbox:latest}
+    profiles: ["sandbox"]
+    environment:
+      PI_SERVER_USERNAME: ${PI_SERVER_USERNAME:-pi}
+      PI_SERVER_PASSWORD: ${PI_SERVER_PASSWORD:?PI_SERVER_PASSWORD is required for sandbox services}
+      PI_MODEL: ${PI_MODEL:-opencode/big-pickle}
+    networks:
+      - edge
+    devices:
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    pids_limit: 512
+    mem_limit: 4g
+    cpus: 3
+    restart: "no"
 
   searxng:
     image: searxng/searxng:latest

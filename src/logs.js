@@ -5,7 +5,7 @@ const REDACT = [
   /\bsk-[A-Za-z0-9]{10,}\b/g,
   /\bBearer\s+[A-Za-z0-9._-]{10,}\b/gi,
   /(api[_-]?key|password|secret|token)\s*[:=]\s*\S+/gi,
-  /OPENCODE_SERVER_PASSWORD=\S+/g,
+  /\w*SERVER_PASSWORD=\S+/g,
 ];
 
 export function redactLogText(text) {
@@ -94,7 +94,7 @@ export function fetchLogStatus(userId) {
   let lastQuarantine = null;
 
   for (const line of lines) {
-    if (line.includes("[supervisor] starting: pi") || line.includes("[supervisor] starting: opencode")) lastStart = line;
+    if (line.includes("[supervisor] starting: pi")) lastStart = line;
     if (line.includes("serve exited")) lastExit = line;
     if (line.includes("health probe")) lastHealth = line;
     if (line.includes("quarantined bad tool")) lastQuarantine = line;
