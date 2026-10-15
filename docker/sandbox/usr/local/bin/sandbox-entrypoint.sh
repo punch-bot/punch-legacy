@@ -6,21 +6,13 @@ mkdir -p /var/run/tailscale /var/lib/tailscale
 tailscaled --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 2>&1 &
 tailscale set --accept-dns=false 2>/dev/null || true
 
-# Seed Pi extensions into the writable work volume (self-extension reload).
-# Pi core ships browser, webfetch, report_progress, context-pruning, routines,
-# collab and todos as built-ins, so only the SearXNG websearch shim is seeded.
-# Drop stale copies of the now built-in extensions left in the work volume.
+# The Punch runtime bundles these tools. Archive the old copies, including user
+# edits, before Pi discovers extensions in the persisted work volume.
+node /usr/local/lib/pi-runtime-migration.mjs
+
+# SearXNG remains a sandbox extension; refresh its image copy each start.
 mkdir -p /work/.pi/extensions
-for stale in browser webfetch report_progress compress_context routines collab; do
-  rm -f "/work/.pi/extensions/$stale.ts"
-done
-for ext in searxng; do
-  [ -f "/opt/pi/extensions/$ext.ts" ] || continue
-  cp "/opt/pi/extensions/$ext.ts" "/work/.pi/extensions/$ext.ts"
-done
-if [ -f /opt/pi/context-pruning-state.mjs ]; then
-  cp /opt/pi/context-pruning-state.mjs /work/.pi/context-pruning-state.mjs
-fi
+cp /opt/pi/extensions/searxng.ts /work/.pi/extensions/searxng.ts
 # Seed .punch-memory.md if it doesn't exist
 if [ ! -f /work/.punch-memory.md ]; then
   cat > /work/.punch-memory.md << 'PUNCH_MEMORY_EOF'
@@ -39,7 +31,7 @@ Update sections with the `update_memory` tool.
 - next steps
 PUNCH_MEMORY_EOF
 fi
-# Seed Pi identity addendum (punch system prompt; runAgent reads it from /work/.pi/SYSTEM.md)
+# Seed Pi identity addendum (always refresh so persona stays Pi-only)
 if [ -f /opt/pi/SYSTEM.md ]; then
   cp /opt/pi/SYSTEM.md /work/.pi/SYSTEM.md
 fi
@@ -50,4 +42,4 @@ ssh-keygen -A 2>/dev/null || true
 /usr/sbin/sshd
 
 # Start supervisor (API :4097 + pi-gateway :4096)
-exec node /usr/local/bin/serve-supervisor.mjs "${PI_MODEL:-${OPENCODE_MODEL:-opencode/big-pickle}}"
+exec node /usr/local/bin/serve-supervisor.mjs "${PI_MODEL:-opencode/big-pickle}"

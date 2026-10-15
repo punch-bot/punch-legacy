@@ -141,7 +141,7 @@ export function buildSlashCommands() {
     ],
   }, {
     name: "models",
-    description: "View or change your sandbox's AI model",
+    description: "View or change your sandbox's AI model and reasoning level",
   }, {
     name: "apikey",
     description: "Set or remove an API key for an AI provider in your sandbox",

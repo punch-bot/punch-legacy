@@ -2,12 +2,11 @@
   "name": "punch-pi-deps",
   "private": true,
   "version": "1.0.0",
-  "description": "Runtime deps for Punch Pi extensions (browser)",
+  "description": "Runtime deps for Punch Pi extensions and browser diagnostics",
   "dependencies": {
-    "playwright": "^1.54.0",
-    "@earendil-works/pi-ai": "npm:@punch-bot/ai@0.85.1",
-    "@earendil-works/pi-coding-agent": "npm:@punch-bot/cli@0.85.1",
-    "typebox": "1.3.10",
-    "zod": "3.25.76"
+    "playwright": "1.62.1",
+    "@punch-bot/ai": "0.85.1",
+    "@punch-bot/cli": "0.85.1",
+    "typebox": "1.3.27"
   }
 }

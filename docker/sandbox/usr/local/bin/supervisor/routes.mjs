@@ -372,7 +372,6 @@ export function handleGeneralRoutes(req, res, url) {
         const [_, pid, ppid, stat, start, time, cmd] = m;
         const c = cmd.toLowerCase();
         if (c.includes("serve-supervisor") || c.includes("pi-gateway") ||
-            c.includes("opencode serve") ||
             c.includes("ps -eo") || c.includes("/lib/systemd") ||
             c.includes("chrome") || c.includes("puppeteer") ||
             stat.toUpperCase() === "Z" || c.includes("<defunct>")) continue;

@@ -35,7 +35,7 @@ import {
   syncMultitaskWorkerCap,
 } from "../agent.js";
 
-import { MODEL_LIST, PROVIDER_NAMES, isBotOwner } from "../core/config.js";
+import { PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -63,6 +63,49 @@ import {
 
 import { runApprovedAgentPigeon, handleAgentPigeon, notifyPigeonDM } from "../gateway/pigeon.js";
 import { handlePlanInteraction } from "../gateway/plan.js";
+
+import {
+  CUSTOM_MODEL_MODAL_ID,
+  MODELS_MENU_EXPIRED,
+  MODELS_MENU_TTL_MS,
+  MODEL_SELECT_ID,
+  THINKING_SELECT_ID,
+  modelsMenuCustomId,
+  modelsMenuExpired,
+  parseModelsMenuCustomId,
+  renderModelsMenu,
+  thinkingLevelLabel,
+} from "./models-menu.js";
+
+// Supervisor model API for /models: GET without a body, POST with one.
+async function modelsSupervisor(uid, path, body) {
+  const auth = supervisorAuth();
+  const res = await fetch(`${apiUrlFor(uid)}${path}`, body === undefined
+    ? { headers: { authorization: auth } }
+    : { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || `supervisor API ${res.status}`), { status: res.status });
+  return data;
+}
+
+// The /models menu re-rendered with the sandbox's current model and level.
+async function modelsMenuFor(uid, expiresAt, notice) {
+  try {
+    const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
+    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice });
+  } catch (err) {
+    return { content: [notice, `⚠️ Error fetching model: ${err.message}`].filter(Boolean).join("\n"), components: [] };
+  }
+}
+
+async function setModelNotice(uid, model) {
+  try {
+    const { model: saved } = await modelsSupervisor(uid, "/model", { model });
+    return `✅ Model changed to \`${saved || model}\`. Sandbox LLM process restarting…`;
+  } catch (err) {
+    return `⚠️ Failed to set model: ${err.message}`;
+  }
+}
 
 export function registerInteractions(client) {
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -122,7 +165,7 @@ export function registerInteractions(client) {
         } else {
           const apiUrl = apiUrlFor(mapping.userId);
           if (!apiUrl) throw new Error("Sandbox supervisor URL is unavailable");
-          const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+          const auth = supervisorAuth();
           const response = await fetch(`${apiUrl}/doctor/fix`, {
             method: "POST",
             headers: {
@@ -507,7 +550,7 @@ export function registerInteractions(client) {
       const sub = interaction.options.getSubcommand();
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = supervisorAuth();
       if (!url) {
         await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
         return;
@@ -520,7 +563,7 @@ export function registerInteractions(client) {
           const data = await res.json();
           const entries = sub === "list" ? data.skills : data.proposals;
           const body = !entries?.length ? (sub === "list" ? "No instruction skills installed." : "No skill proposals pending review.") : sub === "list"
-            ? `**Instruction skills** (enabled skills auto-apply every Discord turn — no \`/skill-name\` or \`pi --skill\` needed):\n${entries.map((skill) => `${skill.enabled ? "✅" : "⏸️"} **${skill.name}** (${skill.source})${skill.description ? ` — ${skill.description}` : ""}${skill.requirements?.missingEnv?.length || skill.requirements?.missingBinaries?.length ? ` [missing: ${[...(skill.requirements?.missingEnv || []), ...(skill.requirements?.missingBinaries || [])].join(", ")}]` : ""}`).join("\n")}`
+            ? `**Skills** (Pi lists enabled skills; the agent reads relevant skills on demand):\n${entries.map((skill) => `${skill.enabled ? "✅" : "⏸️"} **${skill.name}** (${skill.source})${skill.description ? ` — ${skill.description}` : ""}${skill.requirements?.missingEnv?.length || skill.requirements?.missingBinaries?.length ? ` [missing: ${[...(skill.requirements?.missingEnv || []), ...(skill.requirements?.missingBinaries || [])].join(", ")}]` : ""}`).join("\n")}`
             : `**Pending skill proposals:**\n${entries.map((proposal) => `\`${proposal.id}\` **${proposal.name}** (${proposal.size}B)`).join("\n")}`;
           await interaction.reply({ content: body.slice(0, 1_900), flags: MessageFlags.Ephemeral });
           return;
@@ -530,7 +573,7 @@ export function registerInteractions(client) {
           const res = await fetch(`${url}/skills/proposals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify({ approve: sub === "approve" }) });
           if (!res.ok) throw new Error(`supervisor API ${res.status}`);
           const { result } = await res.json();
-          await interaction.reply({ content: result.approved ? `Installed instruction skill \`${result.name}\`. It is enabled and applies on the next Discord turn — no Pi restart or slash invoke needed.` : `Rejected skill proposal \`${result.name}\`.`, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: result.approved ? `Installed skill \`${result.name}\`. Pi discovers it when loading a session or reloading resources; the agent decides when to read it.` : `Rejected skill proposal \`${result.name}\`.`, flags: MessageFlags.Ephemeral });
           return;
         }
         const name = interaction.options.getString("name", true);
@@ -538,15 +581,15 @@ export function registerInteractions(client) {
           const res = await fetch(`${url}/skills/${encodeURIComponent(name)}`, { headers: { authorization: auth } });
           if (!res.ok) throw new Error(`supervisor API ${res.status}`);
           const { skill } = await res.json();
-          await interaction.reply({ content: `**${skill.name}** (${skill.source}, ${skill.enabled ? "enabled" : "disabled"})\nIn Discord, enabled skills are injected every turn — ignore any \`/${skill.name}\` or \`pi --${skill.name}\` notes inside the skill.\n\`\`\`\n${skill.content.slice(0, 1_500)}\n\`\`\``, flags: MessageFlags.Ephemeral });
+          await interaction.reply({ content: `**${skill.name}** (${skill.source}, ${skill.enabled ? "enabled" : "disabled"})\nPi lists enabled skills by description; the agent reads the full instructions when relevant.\n\`\`\`\n${skill.content.slice(0, 1_500)}\n\`\`\``, flags: MessageFlags.Ephemeral });
           return;
         }
         const res = await fetch(`${url}/skills/${encodeURIComponent(name)}`, { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify({ enabled: sub === "enable" }) });
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         await interaction.reply({
           content: sub === "enable"
-            ? `Enabled skill \`${name}\`. It now applies automatically on every Discord turn — you do **not** need \`/${name}\`, \`pi --${name}\`, or a Pi restart.`
-            : `Disabled skill \`${name}\`. It will stop applying on the next turn.`,
+            ? `Enabled skill \`${name}\`. Pi makes it available when loading a session or reloading resources; the agent decides when to read it.`
+            : `Disabled skill \`${name}\`. Pi removes it from discovery when loading a session or reloading resources.`,
           flags: MessageFlags.Ephemeral,
         });
       } catch (error) {
@@ -559,7 +602,7 @@ export function registerInteractions(client) {
       const sub = interaction.options.getSubcommand();
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = supervisorAuth();
       if (!url) {
         await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
         return;
@@ -659,7 +702,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "workers") {
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = supervisorAuth();
       if (!url) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       const sub = interaction.options.getSubcommand();
       try {
@@ -732,28 +775,14 @@ export function registerInteractions(client) {
 
     if (interaction.commandName === "models") {
       const uid = interaction.user.id;
-      const apiUrl = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       try {
-        const res = await fetch(`${apiUrl}/model`, { headers: { authorization: auth } });
-        if (!res.ok) throw new Error(`supervisor API ${res.status}`);
-        const { model: current } = await res.json();
-        const options = MODEL_LIST.map(m => ({
-          label: m.label,
-          value: m.value,
-          description: m.value === current ? "Currently selected" : undefined,
-        }));
-        const row = new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder()
-            .setCustomId("model_select")
-            .setPlaceholder(`Current: ${current}`)
-            .addOptions(options)
-        );
-        await interaction.reply({
-          content: `**Select a model** (current: \`${current}\`)\nChoose a model from the list or pick "Custom model..." to type one.`,
-          components: [row],
-          flags: MessageFlags.Ephemeral,
-        });
+        const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
+        const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
+        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt }), flags: MessageFlags.Ephemeral });
+        setTimeout(() => {
+          interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
+        }, MODELS_MENU_TTL_MS).unref();
       } catch (err) {
         await interaction.reply({ content: `⚠️ Error fetching model: ${err.message}`, flags: MessageFlags.Ephemeral });
       }
@@ -763,7 +792,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "apikey") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = supervisorAuth();
       const provider = interaction.options.getString("provider", true).toLowerCase();
       const key = interaction.options.getString("key");
       if (!PROVIDER_NAMES.includes(provider)) {
@@ -802,7 +831,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "provider") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = supervisorAuth();
       const sub = interaction.options.getSubcommand();
 
       if (sub === "add") {
@@ -1263,7 +1292,7 @@ export function registerInteractions(client) {
 
       // Summarizing a long session can take well over the default per-turn HTTP
       // timeout (PI_TIMEOUT), so give it a dedicated, generous budget.
-      const COMPRESS_TIMEOUT_MS = (Number(process.env.PI_COMPRESS_TIMEOUT || process.env.OPENCODE_COMPRESS_TIMEOUT) || 300) * 1000;
+      const COMPRESS_TIMEOUT_MS = (Number(process.env.PI_COMPRESS_TIMEOUT) || 300) * 1000;
       const ac = new AbortController();
       const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
 
@@ -1371,8 +1400,7 @@ export function registerInteractions(client) {
         await interaction.reply({ content: "No sandbox assigned. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
         return;
       }
-      const supervisorUsername = process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode";
-      const auth = "Basic " + Buffer.from(`${supervisorUsername}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+      const auth = supervisorAuth();
       const sub = interaction.options.getSubcommand();
       await interaction.deferReply({ ephemeral: true });
       try {
@@ -1527,7 +1555,7 @@ export function registerInteractions(client) {
 
     if (interaction.commandName === "tailscale") {
       const uid = interaction.user.id;
-      const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+      const auth = supervisorAuth();
       const url = apiUrlFor(uid);
       if (!url) {
         await interaction.reply({ content: "No sandbox found. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
@@ -1771,7 +1799,7 @@ export function registerInteractions(client) {
     if (!interaction.isStringSelectMenu() || interaction.customId !== "skill_remove") return;
     const name = interaction.values[0];
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const auth = supervisorAuth();
     try {
       const res = await fetch(`${apiUrlFor(uid)}/tools/remove`, {
         method: "POST",
@@ -1788,14 +1816,20 @@ export function registerInteractions(client) {
     }
   });
 
-  // Handle model selection dropdown
+  // /models dropdowns (model + reasoning level). Each pick updates the menu in
+  // place so it can be used again until it expires.
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isStringSelectMenu() || interaction.customId !== "model_select") return;
+    if (!interaction.isStringSelectMenu()) return;
+    const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== MODEL_SELECT_ID && base !== THINKING_SELECT_ID) return;
+    if (modelsMenuExpired(expiresAt)) {
+      await interaction.update({ content: MODELS_MENU_EXPIRED, components: [] });
+      return;
+    }
     const value = interaction.values[0];
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
 
-    if (value === "__custom__") {
+    if (base === MODEL_SELECT_ID && value === "__custom__") {
       try {
         const row = new ActionRowBuilder({
           components: [
@@ -1808,7 +1842,7 @@ export function registerInteractions(client) {
           ],
         });
         const modal = new ModalBuilder()
-          .setCustomId("custom_model")
+          .setCustomId(modelsMenuCustomId(CUSTOM_MODEL_MODAL_ID, expiresAt))
           .setTitle("Set custom model")
           .addComponents(row);
         console.error("[model_select] showing modal...");
@@ -1822,52 +1856,37 @@ export function registerInteractions(client) {
       return;
     }
 
-    try {
-      const res = await fetch(`${apiUrlFor(uid)}/model`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: auth },
-        body: JSON.stringify({ model: value }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `supervisor API ${res.status}`);
+    await interaction.deferUpdate();
+    let notice;
+    if (base === MODEL_SELECT_ID) {
+      notice = await setModelNotice(uid, value);
+    } else {
+      try {
+        const { thinkingLevel } = await modelsSupervisor(uid, "/model/thinking", { level: value });
+        notice = `✅ Reasoning level set to **${thinkingLevelLabel(thinkingLevel)}**. Applies from your next message.`;
+      } catch (err) {
+        notice = err.status === 404
+          ? "⚠️ This sandbox predates reasoning levels. Ask an admin to recreate it with `/sandbox restart-all recreate:true`."
+          : `⚠️ Failed to set reasoning level: ${err.message}`;
       }
-      await interaction.update({
-        content: `✅ Model changed to \`${value}\`. Sandbox LLM process restarting…`,
-        components: [],
-      });
-    } catch (err) {
-      await interaction.update({ content: `⚠️ Failed to set model: ${err.message}`, components: [] });
     }
+    await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
-  // Handle custom model modal submission
+  // Custom model modal (opened from the /models menu, which it then updates)
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isModalSubmit() || interaction.customId !== "custom_model") return;
+    if (!interaction.isModalSubmit()) return;
+    const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== CUSTOM_MODEL_MODAL_ID) return;
     const model = interaction.fields.getTextInputValue("model_name").trim();
     if (!model) {
       await interaction.reply({ content: "⚠️ Model name cannot be empty.", flags: MessageFlags.Ephemeral });
       return;
     }
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
-    try {
-      const res = await fetch(`${apiUrlFor(uid)}/model`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: auth },
-        body: JSON.stringify({ model }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `supervisor API ${res.status}`);
-      }
-      await interaction.reply({
-        content: `✅ Model changed to \`${model}\`. Sandbox LLM process restarting…`,
-        flags: MessageFlags.Ephemeral,
-      });
-    } catch (err) {
-      await interaction.reply({ content: `⚠️ Failed to set model: ${err.message}`, flags: MessageFlags.Ephemeral });
-    }
+    await interaction.deferUpdate();
+    const notice = await setModelNotice(uid, model);
+    await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
   // Handle model edit modal submission
@@ -1880,7 +1899,7 @@ export function registerInteractions(client) {
     const model = parts.slice(2).join(":");
 
     const uid = interaction.user.id;
-    const auth = "Basic " + Buffer.from("opencode:" + (process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "")).toString("base64");
+    const auth = supervisorAuth();
     const apiUrl = apiUrlFor(uid);
 
     const name = interaction.fields.getTextInputValue("edit_name").trim() || undefined;

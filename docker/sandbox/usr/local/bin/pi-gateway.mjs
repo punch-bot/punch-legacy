@@ -16,6 +16,13 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import { syncPiSkillSettings } from "/usr/local/lib/skills-manager.mjs";
+import {
+  mergePiSettings,
+  normalizeThinkingLevel,
+  piDefaultThinkingLevel,
+  turnThinkingLevel,
+} from "/usr/local/lib/pi-thinking-level.mjs";
 import {
   activityFromProgress,
   closeProgress,
@@ -28,32 +35,32 @@ import {
 
 const HOST = process.env.PI_GATEWAY_HOST || "0.0.0.0";
 const PORT = Number(process.env.PI_GATEWAY_PORT || 4096);
-const WORK = process.env.PI_REMOTE_DIR || process.env.OPENCODE_REMOTE_DIR || "/work";
+const WORK = process.env.PI_REMOTE_DIR || "/work";
 const SESSION_DIR = process.env.PI_SESSION_DIR || "/data/pi/sessions";
 const SESSION_MAP_FILE =
   process.env.PI_SESSION_MAP || "/data/pi/gateway-sessions.json";
 const EXT_DIR = process.env.PI_EXTENSIONS_DIR || "/opt/pi/extensions";
 const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
-const SKILL_ROOTS = ["/work/.pi/skills", "/data/pi/skills", "/opt/pi/skills"];
-const SKILL_ENABLED_FILE = "/data/pi/skills-enabled.json";
-const USER = process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode";
-const PASS = process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || "";
+const PI_SETTINGS_FILES = [
+  join(process.env.PI_CODING_AGENT_DIR || "/data/pi/agent", "settings.json"),
+  join(WORK, ".pi", "settings.json"),
+];
+const USER = process.env.PI_SERVER_USERNAME || "pi";
+const PASS = process.env.PI_SERVER_PASSWORD || "";
 let MODEL =
   process.env.PI_DEFAULT_MODEL ||
   process.env.PI_MODEL ||
-  process.env.OPENCODE_DEFAULT_MODEL ||
-  process.env.OPENCODE_MODEL ||
   "anthropic/claude-sonnet-4-5";
 const MODEL_FALLBACK = "anthropic/claude-sonnet-4-5";
 const MAX_TOOL_STUBS = 40;
 const ABORT_GRACE_MS = Number(process.env.PI_GATEWAY_ABORT_GRACE_MS) || 3000;
 const TURN_MAX_MS =
   (Number(process.env.PI_GATEWAY_TURN_MAX_MS) ||
-    Number(process.env.PI_HARD_TIMEOUT || process.env.OPENCODE_HARD_TIMEOUT) ||
-    300) * 1000;
+    Number(process.env.PI_HARD_TIMEOUT) ||
+    1800) * 1000;
 const TURN_IDLE_MS =
   (Number(process.env.PI_GATEWAY_TURN_IDLE_MS) ||
-    Number(process.env.PI_IDLE_TIMEOUT || process.env.OPENCODE_IDLE_TIMEOUT) ||
+    Number(process.env.PI_IDLE_TIMEOUT) ||
     120) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
@@ -71,6 +78,54 @@ function parseModel(m) {
   const i = s.indexOf("/");
   if (i < 0) return { provider: s, modelId: s };
   return { provider: s.slice(0, i), modelId: s.slice(i + 1) };
+}
+
+/**
+ * set_model plus the user's reasoning level for a turn.
+ * Logs failures instead of throwing.
+ */
+async function selectTurnModel(providerID, modelID, thinkingLevel) {
+  let model = null;
+  try {
+    model = (await rpc("set_model", { provider: providerID, modelId: modelID })).data;
+  } catch (e) {
+    log("set_model:", e.message);
+  }
+  try {
+    model ??= (await rpc("get_state")).data?.model;
+    await applyThinkingLevel(thinkingLevel, model);
+  } catch (e) {
+    log("thinking level:", e.message);
+  }
+}
+
+function readPiSettings(file) {
+  try {
+    const v = JSON.parse(readFileSync(file, "utf8"));
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set `requested` on the active `model` only if Pi lists it for that model;
+ * otherwise Pi's default (Pi would clamp to a neighbouring level instead).
+ * Runs every turn, so no earlier turn's or session's level lingers.
+ */
+async function applyThinkingLevel(requested, model) {
+  let supported = null;
+  if (normalizeThinkingLevel(requested)) {
+    try {
+      supported = (await rpc("get_available_thinking_levels")).data?.levels;
+    } catch (e) {
+      log("get_available_thinking_levels:", e.message);
+    }
+  }
+  const settings = mergePiSettings(...PI_SETTINGS_FILES.map(readPiSettings));
+  const fallback = piDefaultThinkingLevel(settings, model?.provider, model?.id);
+  const level = turnThinkingLevel(requested, supported, fallback);
+  await rpc("set_thinking_level", { level });
 }
 
 function basicOk(req) {
@@ -286,10 +341,12 @@ function startPi() {
   clearPiWaiters(new Error("pi restarted"));
 
   piSpawnedAt = Date.now();
+  syncPiSkillSettings();
   const { provider, modelId } = parseModel(MODEL);
   const args = [
     "--mode",
     "rpc",
+    "--no-extensions",
     "--provider",
     provider,
     "--model",
@@ -372,7 +429,7 @@ function dispatchPi(msg) {
     }
   } else {
     if (activeLogicalId) trackTurnProgress(activeLogicalId, msg);
-    broadcastSse(piEventToOpenCode(msg));
+    broadcastSse(piEventToSse(msg));
     if (activeLogicalId && sessions.has(activeLogicalId)) {
       trackMessageCache(activeLogicalId, msg);
     }
@@ -451,35 +508,11 @@ async function ensureSession(logicalId) {
   return s;
 }
 
-function enabledSkillInstructions() {
-  let enabled = {};
-  try { enabled = JSON.parse(readFileSync(SKILL_ENABLED_FILE, "utf8")); } catch {}
-  const seen = new Set();
-  const sections = [];
-  for (const root of SKILL_ROOTS) {
-    let names = [];
-    try { names = readdirSync(root); } catch { continue; }
-    for (const name of names) {
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(name) || seen.has(name) || enabled[name] === false) continue;
-      try {
-        const text = readFileSync(join(root, name, "SKILL.md"), "utf8");
-        seen.add(name);
-        const body = text.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "").trim();
-        if (body) sections.push(`<skill name="${name}">\n${body.slice(0, 12000)}\n</skill>`);
-      } catch {}
-    }
-  }
-  return sections.length
-    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
-    : "";
-}
-
 function buildUserPrompt(session, text, system) {
-  const enrichedSystem = `${system || ""}${enabledSkillInstructions()}`;
-  const h = enrichedSystem ? hashStr(enrichedSystem) : null;
-  if (enrichedSystem && h !== session.systemHash) {
+  const h = system ? hashStr(system) : null;
+  if (system && h !== session.systemHash) {
     session.systemHash = h;
-    return `<punch-system>\n${enrichedSystem}\n</punch-system>\n\n${String(text || "")}`;
+    return `<punch-system>\n${system}\n</punch-system>\n\n${String(text || "")}`;
   }
   return String(text || "");
 }
@@ -492,7 +525,7 @@ function extractTextFromParts(parts) {
     .join("");
 }
 
-/** OpenCode-shaped attachments (data URLs) for bot collectTurnMedia. */
+/** Attachments (data URLs) for bot collectTurnMedia. */
 function attachmentsFromToolResult(result) {
   const out = [];
   const content = result?.content;
@@ -605,7 +638,7 @@ function trackMessageCache(logicalId, ev) {
   }
 }
 
-function piEventToOpenCode(ev) {
+function piEventToSse(ev) {
   const sid = activeLogicalId || "unknown";
   if (!ev || !ev.type) return null;
 
@@ -870,7 +903,7 @@ const server = createServer(async (req, res) => {
     }
 
     const sessMatch = url.pathname.match(
-      /^\/session\/([^/]+)(?:\/(message|summarize|abort|prompt_async))?$/,
+      /^\/session\/([^/]+)(?:\/(message|summarize|abort|prompt_async|steer))?$/,
     );
     if (sessMatch) {
       const sid = decodeURIComponent(sessMatch[1]);
@@ -919,6 +952,40 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Inject a steering message into the in-flight turn. Deliberately
+      // bypasses enqueueTurn — steering only works mid-turn, so a finished
+      // or foreign session is a conflict and the caller queues instead.
+      if (req.method === "POST" && action === "steer") {
+        const body = await readBody(req).catch(() => ({}));
+        const textPart = (body.parts || []).find((p) => p.type === "text");
+        const text = String(body.message ?? textPart?.text ?? "");
+        const target = sid === "active" ? activeLogicalId : sid;
+        if (!target || !sessions.has(target)) {
+          json(res, 404, { error: "session not found" });
+          return;
+        }
+        if (activeLogicalId !== target || !turnProgress.has(target)) {
+          json(res, 409, { error: "no in-flight turn for this session" });
+          return;
+        }
+        if (!text.trim()) {
+          json(res, 400, { error: "empty steer text" });
+          return;
+        }
+        try {
+          const session = sessions.get(target);
+          session.messages.push({
+            info: { role: "user" },
+            parts: [{ type: "text", text }],
+          });
+          const r = await rpc("steer", { message: text }, 30000);
+          json(res, 200, { ok: true, disposition: r.data?.disposition || null });
+        } catch (e) {
+          json(res, 502, { error: e.message });
+        }
+        return;
+      }
+
       if (req.method === "POST" && action === "summarize") {
         const body = await readBody(req).catch(() => ({}));
         await enqueueTurn(async () => {
@@ -935,10 +1002,7 @@ const server = createServer(async (req, res) => {
           const providerID = body?.model?.providerID || body?.providerID;
           const modelID = body?.model?.modelID || body?.modelID;
           if (providerID && modelID) {
-            await rpc("set_model", {
-              provider: providerID,
-              modelId: modelID,
-            }).catch(() => {});
+            await selectTurnModel(providerID, modelID, body?.thinkingLevel);
           }
           await rpc("compact", {}, 300000);
         });
@@ -974,10 +1038,7 @@ const server = createServer(async (req, res) => {
             beginTurnProgress(sid);
             try {
               if (model?.providerID && model?.modelID) {
-                await rpc("set_model", {
-                  provider: model.providerID,
-                  modelId: model.modelID,
-                }).catch((e) => log("set_model:", e.message));
+                await selectTurnModel(model.providerID, model.modelID, body.thinkingLevel);
               }
 
               const promptText = buildUserPrompt(session, userText, system);

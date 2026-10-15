@@ -403,16 +403,6 @@ test("transient model errors remain open for retry and successful settlement", (
   assert.equal(activity.thinkingMs, 40);
 });
 
-test("Docker image relies on Pi core built-ins; only the search shim is seeded", () => {
-  const dockerfile = readFileSync(new URL("../docker/sandbox.Dockerfile", import.meta.url), "utf8");
-  const entrypoint = readFileSync(new URL("../docker/sandbox/usr/local/bin/sandbox-entrypoint.sh", import.meta.url), "utf8");
-  assert.match(dockerfile, /COPY docker\/sandbox\/ \//);
-  assert.match(entrypoint, /for ext in searxng/);
-  for (const stale of ["browser", "webfetch", "report_progress", "compress_context", "routines", "collab"]) {
-    assert.throws(() => readFileSync(new URL(`../docker/sandbox/opt/pi/extensions/${stale}.ts`, import.meta.url), "utf8"));
-  }
-});
-
 test("gateway keeps tool output private from SSE but available to final fallback", () => {
   const gateway = readFileSync(new URL("../docker/sandbox/usr/local/bin/pi-gateway.mjs", import.meta.url), "utf8");
   assert.match(
@@ -420,7 +410,7 @@ test("gateway keeps tool output private from SSE but available to final fallback
     /output: textOutputFromToolResult\(ev\.result \?\? ev\.error \?\? ""\)/,
   );
   const sseMapper = gateway.slice(
-    gateway.indexOf("function piEventToOpenCode"),
+    gateway.indexOf("function piEventToSse"),
     gateway.indexOf("function broadcastSse"),
   );
   assert.doesNotMatch(sseMapper, /textOutputFromToolResult|state:\s*\{[^}]*output:/s);

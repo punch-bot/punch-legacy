@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, s
 import { join, resolve } from "node:path";
 
 const ROOTS = [
-  { source: "workspace", directory: "/work/.pi/skills", writable: true },
+  { source: "workspace", directory: join(process.env.PI_REMOTE_DIR || "/work", ".pi", "skills"), writable: true },
   { source: "user", directory: "/data/pi/skills", writable: true },
   { source: "bundled", directory: "/opt/pi/skills", writable: false },
 ];
@@ -33,6 +33,44 @@ function binaryExists(binary) {
 }
 function pathFor(root, name) { if (!NAME.test(name)) throw new Error("Invalid skill name"); return join(root.directory, name, "SKILL.md"); }
 function enabledState() { return readJson(ENABLED_FILE, {}); }
+
+/** Register extra roots and translate Punch toggles to Pi's native skill exclusions. */
+export function syncPiSkillSettings({
+  work = process.env.PI_REMOTE_DIR || "/work",
+  agentDir = process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
+  enabledFile = ENABLED_FILE,
+  roots = ROOTS,
+} = {}) {
+  const enabled = readJson(enabledFile, {});
+  const names = Object.keys(enabled).filter((name) => NAME.test(name));
+  const exclusions = (root, name) => [
+    `-${join(root.directory, name)}`,
+    `-${join(root.directory, name, "SKILL.md")}`,
+  ];
+  const managed = new Set(roots.flatMap((root) => names.flatMap((name) => exclusions(root, name))));
+  for (const [file, scopedRoots] of [
+    [join(agentDir, "settings.json"), roots],
+    [join(work, ".pi", "settings.json"), roots.filter((root) => root.source === "workspace")],
+  ]) {
+    // Read strictly so a malformed settings file cannot be overwritten.
+    const settings = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+    const existing = settings.skills || [];
+    const skills = existing.filter((entry) => !managed.has(entry));
+    if (file === join(agentDir, "settings.json")) {
+      for (const root of roots.filter((root) => root.source !== "workspace")) {
+        if (!skills.includes(root.directory)) skills.push(root.directory);
+      }
+    }
+    for (const root of scopedRoots) {
+      for (const name of names) {
+        if (enabled[name] === false) skills.push(...exclusions(root, name));
+      }
+    }
+    if (JSON.stringify(skills) !== JSON.stringify(existing)) {
+      atomicJson(file, { ...settings, skills });
+    }
+  }
+}
 
 export function listSkills() {
   const enabled = enabledState();
@@ -69,6 +107,7 @@ export function setSkillEnabled(name, enabled) {
   const state = enabledState();
   state[name] = Boolean(enabled);
   atomicJson(ENABLED_FILE, state);
+  syncPiSkillSettings();
   return inspectSkill(name);
 }
 
@@ -98,6 +137,7 @@ export function reviewProposal(id, approve) {
     const temporary = `${destination}.${process.pid}.tmp`;
     writeFileSync(temporary, proposal.content, { mode: 0o600 });
     renameSync(temporary, destination);
+    syncPiSkillSettings();
   }
   rmSync(file, { force: true });
   return { id, name: proposal.name, approved: Boolean(approve) };

@@ -217,7 +217,12 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         .join("; ")}`,
     );
   }
-  if (contextMessages.length > 0) preambleParts.push(channelContextBlock(contextMessages));
+  // The focused reply block already carries the full referenced message.
+  // Omit that same message from ambient context so it is not repeated.
+  const ambientContext = opts.repliedTo && message.reference?.messageId
+    ? contextMessages.filter((ctx) => ctx.id !== message.reference.messageId)
+    : contextMessages;
+  if (ambientContext.length > 0) preambleParts.push(channelContextBlock(ambientContext));
 
   let thinking = existingThinking;
   const allowThinking = useThinking && !store.getUserSettings(uid).noThinking;

@@ -28,6 +28,8 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
   lines.push("**Personal:**");
   lines.push(trigger ? `- Trigger word: \`${trigger}\`` : "- Trigger word: none");
   lines.push(`- Multitask: ${us.multitaskEnabled ? "on" : "off"}`);
+  lines.push(`- Thread mode: ${us.threadModeEnabled ? "on" : "off"}`);
+  lines.push(`- Steering: ${us.steeringEnabled ? "on" : "off"}`);
   lines.push(`- Timezone: \`${us.timeZone}\``);
   lines.push(`- Working pigeons: ${us.workingPigeonsEnabled ? "on" : "off"}`);
   const doneParts = [];
@@ -127,6 +129,20 @@ export function setMultitaskEnabled(userId, enabled) {
   return enabled
     ? "Multitask **enabled** — new messages while I'm busy spawn parallel subtasks instead of queuing."
     : "Multitask **disabled** — messages queue until the current turn finishes.";
+}
+
+export function setThreadModeEnabled(userId, enabled) {
+  store.patchUserSettings(userId, { threadModeEnabled: enabled });
+  return enabled
+    ? "Thread mode **enabled** — each summon in a server opens a Punch thread; new messages inside summon me automatically."
+    : "Thread mode **disabled** — I reply inline in the channel again.";
+}
+
+export function setSteeringEnabled(userId, enabled) {
+  store.patchUserSettings(userId, { steeringEnabled: enabled });
+  return enabled
+    ? "Steering **enabled** — messages you send while I'm working steer the active turn instead of queuing or spawning subtasks."
+    : "Steering **disabled** — new messages queue (or multitask) as before.";
 }
 
 export function setWorkingPigeonsEnabled(userId, enabled) {
@@ -396,6 +412,18 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
     throw new Error(`Usage: \`${prefix}settings multitask on|off|enable|disable\``);
   }
 
+  if (sub === "threads" || sub === "thread") {
+    if (sub2 === "on" || sub2 === "enable") return setThreadModeEnabled(uid, true);
+    if (sub2 === "off" || sub2 === "disable") return setThreadModeEnabled(uid, false);
+    throw new Error(`Usage: \`${prefix}settings threads on|off\``);
+  }
+
+  if (sub === "steering" || sub === "steer") {
+    if (sub2 === "on" || sub2 === "enable") return setSteeringEnabled(uid, true);
+    if (sub2 === "off" || sub2 === "disable") return setSteeringEnabled(uid, false);
+    throw new Error(`Usage: \`${prefix}settings steering on|off\``);
+  }
+
   if (sub === "timezone") {
     if (sub2 === "set") {
       const timeZone = tokens.slice(2).join(" ").trim();
@@ -571,6 +599,24 @@ export async function handleSettingsSlash(interaction, { prefix, botUsername, se
       await interaction.reply({ content: setPlanGate(uid, mode) });
     } else {
       await interaction.reply({ content: formatPlanGateStatus(uid) });
+    }
+    return;
+  }
+
+  if (sub === "threads") {
+    if (cmd === "enable") {
+      await interaction.reply({ content: setThreadModeEnabled(uid, true) });
+    } else if (cmd === "disable") {
+      await interaction.reply({ content: setThreadModeEnabled(uid, false) });
+    }
+    return;
+  }
+
+  if (sub === "steering") {
+    if (cmd === "enable") {
+      await interaction.reply({ content: setSteeringEnabled(uid, true) });
+    } else if (cmd === "disable") {
+      await interaction.reply({ content: setSteeringEnabled(uid, false) });
     }
     return;
   }
@@ -812,6 +858,24 @@ export function getSlashCommandDefinition() {
         options: [
           { type: 1, name: "enable", description: "Spawn workers instead of queuing when busy" },
           { type: 1, name: "disable", description: "Queue messages until the current turn finishes" },
+        ],
+      },
+      {
+        type: 2,
+        name: "threads",
+        description: "Open a Punch thread per summon; messages inside auto-summon (personal)",
+        options: [
+          { type: 1, name: "enable", description: "Each summon opens a Punch thread that auto-summons" },
+          { type: 1, name: "disable", description: "Reply inline in the channel" },
+        ],
+      },
+      {
+        type: 2,
+        name: "steering",
+        description: "Steer the running turn with new messages instead of queuing (personal)",
+        options: [
+          { type: 1, name: "enable", description: "New messages steer the active turn" },
+          { type: 1, name: "disable", description: "New messages queue or multitask" },
         ],
       },
       {

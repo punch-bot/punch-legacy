@@ -1,18 +1,29 @@
-// Punch MCP registry + API key management. Pi core loads /data/mcp.json natively.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+// Punch MCP registry sync and normalized config generation for diagnostics.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   assertPunchEntry,
   isMcpApiKeyConfigured,
   mcpApiKeyEnvVar,
   mcpApiKeyEnvVarsToClear,
+  punchRegistryToAdapterConfig,
   sanitizeMcpEntryForDisplay,
   usesMcpApiKeyAuth,
 } from "/usr/local/lib/mcp-config.mjs";
 import { forceRestart } from "./gateway.mjs";
-import { ENV_FILE, MCP_FILE, log, loadJSON, saveJSON } from "./state.mjs";
+import { ENV_FILE, MCP_FILE, PI_MCP_FILE, log, loadJSON, saveJSON } from "./state.mjs";
 
 /** Object-property names that would poison the registry/prototype if used as MCP names. */
 const RESERVED_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Write normalized mcp.json for ops/debug; the runtime reads /data/mcp.json directly. */
+export function syncMcpConfig() {
+  mkdirSync("/data/pi/agent", { recursive: true });
+  const customMcp = loadJSON(MCP_FILE);
+  const adapterConfig = punchRegistryToAdapterConfig(customMcp);
+  writeFileSync(PI_MCP_FILE, JSON.stringify(adapterConfig, null, 2));
+  const names = Object.keys(adapterConfig.mcpServers || {});
+  log(`mcp config synced (${names.length} server${names.length === 1 ? "" : "s"}): ${names.join(", ") || "(none)"}`);
+}
 
 /** Save MCP registry and env together; restore prior file contents on failure. */
 export function persistMcpRegistryAndEnv(mcp, env) {
@@ -108,6 +119,7 @@ export function handleMcpRoutes(req, res, url) {
         if (envChanged) persistMcpRegistryAndEnv(mcp, env);
         else saveJSON(MCP_FILE, mcp);
         if (envVar) process.env[envVar] = apiKeyValue;
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, name }));
         log(`mcp added: ${name} (${entry.type})`);
@@ -133,6 +145,7 @@ export function handleMcpRoutes(req, res, url) {
         clearMcpEnvVars(varsToClear, env);
         delete mcp[name];
         persistMcpRegistryAndEnv(mcp, env);
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true }));
       } catch {
@@ -163,6 +176,7 @@ export function handleMcpRoutes(req, res, url) {
         env[envVar] = key.trim();
         persistMcpRegistryAndEnv(mcp, env);
         process.env[envVar] = key.trim();
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true, apiKeyEnv: envVar }));
         log(`mcp api key set for: ${name}`);
@@ -186,6 +200,7 @@ export function handleMcpRoutes(req, res, url) {
         const env = loadJSON(ENV_FILE);
         clearMcpEnvVars(mcpApiKeyEnvVarsToClear(name, mcp), env);
         saveJSON(ENV_FILE, env);
+        syncMcpConfig();
         forceRestart();
         res.writeHead(200).end(JSON.stringify({ success: true }));
         log(`mcp api key removed for: ${name}`);

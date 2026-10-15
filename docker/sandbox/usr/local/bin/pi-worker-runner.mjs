@@ -4,7 +4,7 @@ import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
 
 const [provider, model, sessionDir, tools, prompt] = process.argv.slice(2);
 if (!provider || !model || !sessionDir || !prompt) process.exit(2);
-const child = spawn("pi", ["--mode", "rpc", "--provider", provider, "--model", model, "--session-dir", sessionDir, "--tools", tools], {
+const child = spawn("pi", ["--mode", "rpc", "--no-extensions", "--provider", provider, "--model", model, "--session-dir", sessionDir, "--tools", tools], {
   cwd: "/work",
   env: { ...process.env, PI_CODING_AGENT_SESSION_DIR: sessionDir, PI_OFFLINE: process.env.PI_OFFLINE || "1", PI_SKIP_VERSION_CHECK: "1", PI_TELEMETRY: "0", PUNCH_WORKER: "1" },
   stdio: ["pipe", "pipe", "pipe"],

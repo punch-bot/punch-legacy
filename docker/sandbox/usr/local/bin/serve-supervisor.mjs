@@ -3,7 +3,7 @@
 //
 // Self-extension: when the LLM writes a Pi extension into /work/.pi/extensions/,
 // this supervisor restarts the gateway so new tools register. Pi loads -e
-// extensions at process start. Legacy /work/.opencode/tools are NOT loaded into Pi.
+// extensions at process start.
 //
 // Sessions persist under /data/pi/sessions. Quarantine: after restart we health-
 // probe the gateway; on persistent failure we move the newest extension into
@@ -30,6 +30,7 @@ import { setupSignalHandlers, setupWatchers, start } from "./supervisor/gateway.
 import {
   ensurePiModelsJson,
   loadModel,
+  loadThinkingLevel,
   normalizeModel,
   saveModel,
   syncEnvApiKeysToAuth,
@@ -45,15 +46,9 @@ import { handleBotProxy, handleGeneralRoutes, handlePigeonRelay } from "./superv
 const savedModel = loadModel();
 state.CURRENT_MODEL = normalizeModel(savedModel || process.argv[2] || MODEL_DEFAULT);
 saveModel(state.CURRENT_MODEL);
+state.THINKING_LEVEL = loadThinkingLevel();
 process.env.PI_DEFAULT_MODEL = state.CURRENT_MODEL;
 process.env.PI_MODEL = state.CURRENT_MODEL;
-
-// -- Ensure the basic-auth username resolves (legacy OPENCODE_* fallback) --
-// Mirror the legacy name only when it is explicitly set; otherwise leave the
-// consumer-side "opencode" default (config.js supervisorAuth*) to apply.
-if (!process.env.PI_SERVER_USERNAME && process.env.OPENCODE_SERVER_USERNAME) {
-  process.env.PI_SERVER_USERNAME = process.env.OPENCODE_SERVER_USERNAME;
-}
 
 // --- Env / secrets injection ---
 (function injectEnv() {
@@ -122,7 +117,7 @@ const apiServer = createServer(async (req, res) => {
   if (handlePigeonRelay(req, res, url)) return;
 
   const authHeader = req.headers.authorization || "";
-  const expectedAuth = "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || process.env.OPENCODE_SERVER_USERNAME || "opencode"}:${process.env.PI_SERVER_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ""}`).toString("base64");
+  const expectedAuth = "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
   if (authHeader !== expectedAuth) {
     res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Sandbox API"' });
     res.end("Unauthorized");

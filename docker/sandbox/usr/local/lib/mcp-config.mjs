@@ -1,6 +1,6 @@
 /**
- * Punch MCP registry (/data/mcp.json) ↔ Pi core MCP server config conversion.
- * Registry keeps OpenCode-shaped local/remote entries; adapter wants mcpServers.
+ * Punch MCP registry (/data/mcp.json) and normalized mcpServers conversion.
+ * Registry keeps `local`/`remote` entries; adapter wants mcpServers.
  */
 
 import { Buffer } from "node:buffer";
@@ -297,7 +297,7 @@ function stripCredentialHeaders(headers) {
 }
 
 /**
- * Convert one Punch registry entry to a Pi core MCP ServerEntry.
+ * Convert one Punch registry entry to a normalized MCP server entry.
  * @param {object} entry
  * @param {string} [serverName] registry key (required for api_key auth wiring)
  * @returns {object|null} null if entry is invalid
@@ -358,7 +358,7 @@ export function punchRegistryToMcpServers(registry) {
   return mcpServers;
 }
 
-/** Nested root config shape (kept for tests/compatibility; Pi core reads /data/mcp.json directly). */
+/** Adapter-shaped root config written to /data/pi/agent/mcp.json for ops/debug. */
 export function punchRegistryToAdapterConfig(registry) {
   return {
     mcpServers: punchRegistryToMcpServers(registry),

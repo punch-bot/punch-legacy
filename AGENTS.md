@@ -1,169 +1,67 @@
-# Punch Nightly — agent guide
+# Punch — agent guide
 
-> **Warning:** The **"Cursor Cloud specific instructions"** section below is **irrelevant** here. It describes a Firecracker VM with no auto-started Docker daemon, a `fuse-overlayfs` `daemon.json`, and cgroup threaded-mode quirks. This repo runs on a **normal computer with a standard Docker daemon** — do not assume the VM environment or apply that setup guidance.
+Punch is a personal assistant that lives in Discord and, optionally, iMessage via Spectrum. The bot is a thin client. Each registered user gets their own Docker sandbox running **Pi** from [`punch-bot/core`](https://github.com/punch-bot/core) (`@punch-bot/cli`, `pi --mode rpc`).
 
-**Workspace path:** `/Punch Nightly`  
-**Production Punch (do not edit unless asked):** `/punch`
+## Branches and stacks
 
-This tree is an **experimental fork** of Punch: same Discord + per-user sandbox model, powered by **Pi** (`@earendil-works/pi-coding-agent`), with an **isolated Docker stack**, **separate Discord app**, **per-sandbox Tailscale**, and **no Composio or compose bootstrap sandbox** (no `sandbox-juniper`).
+- `main` is production and `nightly` is experimental. Open a PR against whichever branch the change is for.
+- `.env` sets the stack identity. `PUNCH_STACK_NAME` (`punch` or `punch-nightly`) determines the compose project, network, volume prefix, and sandbox image name. No host ports are published: the bot and sandboxes talk over the compose network. Before you run `docker compose`, check which stack the current checkout drives.
 
-| | Prod `/punch` | **Nightly** (`/Punch Nightly`) |
-|--|---------------|--------------------------------|
-| Compose project | `punch` | `punch-nightly` |
-| Docker network | `punch_edge` | `punch-nightly_edge` |
-| Volume prefix | `punch_` | `punch-nightly_` |
-| Bot HTTP on host | `4098` | **`4099`** → container `4098` |
-| Default sandbox in compose | often yes (juniper) | **no** — only `bot` service |
-| Coding agent | OpenCode | **Pi** (`pi --mode rpc`) via Punch `pi-gateway` on `:4096` |
-| Default sandbox URL | set in compose | **empty** — routing via registry only |
-| Composio `/link`, bot MCP proxy | yes | **removed** |
-| Tailscale `/tailscale` | yes | **included** (persistent per-sandbox state) |
-| Host agent install | only for `make-min-auth` | **not** required for `docker compose` |
-
-**First-time use:** every Discord user needs **`/sandbox create <name> <discord_user_id>`** once. Unregistered users cannot get LLM turns (`serverFor` → null).
+## Commands
 
 ```sh
-cd "/Punch Nightly"
-docker compose up --build -d
-docker compose logs -f bot
-# Then: /sandbox create <name> <discord_user_id>
-# Set a provider key: /apikey set anthropic <key>  (or /env set ANTHROPIC_API_KEY ...)
-# OpenCode Go models (e.g. opencode-go/kimi-k2.6) use /apikey set opencode-go <key> —
-# same OPENCODE_API_KEY credential as OpenCode Zen.
+npm install
+npm test             # node --test test/*.mjs, no Docker needed
+npm run typecheck
+npm run lint         # Spectrum files only
+docker compose up --build -d && docker compose logs -f bot
+docker compose build sandbox   # rebuild the sandbox image (profile: sandbox)
 ```
 
-More ops detail: `NIGHTLY.md`. Human overview: `README.md`.
-
----
-
-## Pi (Nightly v1)
-
-Nightly sandboxes run **Pi** (`pi --mode rpc`). Punch’s `docker/sandbox/usr/local/bin/pi-gateway.mjs` is an **internal HTTP adapter** on `:4096` so the Discord bot can keep a simple session/message/SSE client (`POST /session`, `POST /session/{id}/message`, `GET /event`, summarize/abort/file). Users and Discord copy should say **Pi**, not the gateway protocol. Bot routing (`http://sandbox-<name>:4096`) and supervisor (`:4097`) stay the same.
-
-| Works in v1 | Deferred / gaps |
-|-------------|-----------------|
-| Discord chat turns via Pi gateway | Migrating old non-Pi session DBs (use Pi session files under `/data/pi/sessions`) |
-| Abort / `!stop` (client disconnect → Pi `abort`) | |
-| `/reset` (new session), `/compress` (Pi `compact`) | MCP OAuth — use `/mcp auth` for API keys or headers/env for custom tokens |
-| `/models`, `/env`, `/apikey`, `/secrets`, `/tailscale`, `/doctor`, `/memory`, `/skills`, `/workers`, `/multitask` | Legacy `/work/.opencode/tools` (not loaded; only `/work/.pi/extensions` reload) |
-| Built-in Pi tools: bash, read, write, edit; isolated worker Pi processes | Full multi-session concurrency for main chat gateway (it switches logical sessions) |
-| **Browser** via Pi core built-in `browser` (`puppeteer_*` tools; screenshots auto-attach to Discord) | Third-party serve shims not used |
-| Progress SSE → Discord thinking UI | |
-| Routines via Pi core built-in `routines` tool | |
-| **MCP** via Pi core's native MCP + Discord `/mcp` list/add/remove (`mcp` proxy tool) | |
-
-Self-addendum: `/work/.pi/SYSTEM.md` (Pi identity; legacy `.opencode/SYSTEM.md` is not loaded).  
-Self-extensions: `/work/.pi/extensions/*.ts` (`pi.registerTool`).
-Instruction skills: `/work/.pi/skills/<name>/SKILL.md`; enabled Markdown is injected by precedence workspace, user (`/data/pi/skills`), bundled (`/opt/pi/skills`). Markdown edits apply next turn without gateway reload. Generated skills land only after proposal review.
-
-Provider keys: supervisor writes Pi auth to `/data/pi/agent/auth.json` (`{ type: "api_key", key }`); Google also sets `GEMINI_API_KEY`. Logical session ids persist in `/data/pi/gateway-sessions.json` across gateway restarts.
-
----
+Compose needs a `.env` file. It's gitignored, so copy it from `.env.example`. Without `DISCORD_TOKEN` the bot exits immediately.
 
 ## Architecture
 
-**Compose (`docker-compose.yml`)** defines only the **bot** on network `punch-nightly_edge` (compose key `edge`).
+```
+Discord / Spectrum → bot :4098 → http://sandbox-<name>:4096 (pi-gateway) → pi --mode rpc
+                                 http://sandbox-<name>:4097 (supervisor)
+```
 
-- **bot** (`docker/bot.Dockerfile`) — Discord client (`DISCORD_TOKEN`). Forwards chat to each user's **Pi gateway** over HTTP. Runs durable routine scheduler and bot HTTP **`:4098`**. **Docker socket** mounted read-only; **`/Punch Nightly:/punch:ro`** so `sandbox-manager` can build the sandbox image.
-- **sandbox** (`docker/sandbox.Dockerfile`) — **not** in compose. Created via `/sandbox create` → builds **`punch-nightly-sandbox:latest`**, runs `punch-nightly_sandbox-<name>_1` with alias **`sandbox-<name>`**. Image installs `@earendil-works/pi-coding-agent` and Tailscale; supervisor runs `pi-gateway` on `:4096` and API on `:4097`.
+- By default, compose runs only `bot` and `searxng`. Sandboxes are created at runtime by `/sandbox create <name> <userid>` through the Docker socket (`src/sandbox-manager.js`).
+- `serverFor(userId)` in `src/agent.js` routes through `/data/sandbox_users.json` (plus `SANDBOX_MAP`). There is no default sandbox, so unregistered users get no LLM turns.
+- `pi-gateway.mjs` is an internal HTTP adapter over Pi RPC that handles sessions, messages, SSE events, abort, steer, compact, and files. User-facing copy says Pi, never "gateway".
+- `serve-supervisor.mjs` owns the gateway child process and the sandbox API. For the current routes, see `supervisor/routes.mjs`.
+- When `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` are set, Spectrum boots inside the bot process. See `docs/spectrum.md`.
 
-**Request flow:** Discord → `src/index.js` → `src/agent.js` → `http://sandbox-<name>:4096` (pi-gateway) → `pi --mode rpc`.
-
-**Routing:** `SANDBOX_MAP` + `/data/sandbox_users.json` → `serverFor(userId)`. Empty default sandbox URL env is intentional (dynamic registry only).
-
-## Codebase layout
+## Layout
 
 | Path | Role |
 |------|------|
-| `src/index.js` | Thin bootstrap: wires client, listeners, slash commands, routine scheduler, bot HTTP `:4098` |
-| `src/core/config.js` | Constants: token, prefix, ports, limits, `MODEL_LIST`, `PROVIDER_NAMES`, auth helpers |
-| `src/core/registry.js` | Shared mutable state: client, queues, dedup keys, question state, run chains |
-| `src/core/discord.js` | Client factory + shared helpers (reactions, progress bar, doctor tokens, reply/chunk) |
-| `src/core/supervisor.js` | `ensureUserSandbox` (per-user sandbox routing/creation) |
-| `src/agent.js` | Pi HTTP client (via pi-gateway), `BASE_SYSTEM`, compress |
-| `src/chat/*` | Chat pipeline: `context.js` (thread fetch/filter, `settingsDeps`), `queue.js` (`enqueueChat`, `withUserRunLock`), `chat.js` (`handleChat`), `attachments.js`, `memory-tags.js`, `embeds-questions.js`, `multitask.js`, `routines-fire.js`, `message-create.js`, `reaction-add.js` |
-| `src/commands/*` | Discord interaction/prefix commands: `interactions.js` (component+slash handlers), `prefix.js` (`handleCommand` + `!`-commands), `questions.js`, `slash.js` (`buildSlashCommands`) |
-| `src/gateway/pigeon.js` | Pigeon DM plumbing: notify, permission prompts, `handleAgentPigeon`, `runApprovedAgentPigeon` |
-| `src/gateway/bot-server.js` | Bot HTTP `:4098`: worker progress/complete, routines/collabs/state APIs, pigeon notify |
-| `src/memory.js` | Selective cited memory retrieval, durable facts, DM-only daily notes, compaction |
-| `src/doctor/index.js` | Bot-side routing, Docker, scheduler, and report diagnostics |
-| `docker/sandbox/usr/local/lib/doctor.mjs` | Sandbox-local Pi, provider, browser, Tailscale, storage, and security probes |
-| `docker/sandbox/usr/local/bin/pi-gateway.mjs` | Internal HTTP `:4096` adapter over Pi RPC |
-| `docker/sandbox/usr/local/bin/serve-supervisor.mjs` | Thin sandbox entrypoint: pi-gateway child + `:4097` supervisor API dispatch |
-| `docker/sandbox/usr/local/bin/supervisor/*` | Sandbox supervisor modules: `state.mjs` (consts/state), `gateway.mjs` (pi-gateway lifecycle), `models.mjs` (model/provider/env/auth), `mcp.mjs` (registry sync + routes), `routes.mjs` (doctor/pigeon/tasks/env/secrets/tools/extensions), `providers.mjs`, `skills.mjs`, `workers.mjs`, `tailscale.mjs` |
-| `docker/sandbox/opt/pi/extensions/searxng.ts` | SearXNG `websearch` shim. Pi core ships browser, webfetch, report_progress, context-pruning, routines, collab and todos natively |
-| `docker/sandbox/usr/local/lib/skills-manager.mjs` | Instruction-skill metadata, precedence, proposals, enable state |
-| `docker/sandbox/usr/local/lib/worker-manager.mjs` | Isolated Pi worker process records/lifecycle |
-| `docker/sandbox/usr/local/bin/pi-worker-runner.mjs` | Single worker Pi RPC runner with tool allowlist |
-| `docker/sandbox.Dockerfile` | Pi sandbox image; `docker/sandbox/` groups files by container destination |
-| `docker-compose.yml` | Bot only; `name: punch-nightly` |
+| `src/index.js` | Bootstrap only |
+| `src/core/` | Shared config, client registry, Discord helpers, supervisor auth |
+| `src/chat/` | Message triggers, per-user turn queue, full chat turn, threads, steer, multitask |
+| `src/commands/` | Slash command definitions, interaction handlers, `!` prefix commands |
+| `src/gateway/` | Bot HTTP API (:4098) and pigeon delivery |
+| `src/agent.js` | Pi gateway client, routing, timeouts, context limits |
+| `src/prompt-blocks.js` | Builders for every `--- name ---` prompt section |
+| `src/memory.js` | Memory retrieval, durable facts, DM-only daily notes |
+| `src/routines.js`, `src/heartbeat.js` | Durable routine store and scheduler tick |
+| `src/punch-turn.js`, `src/spectrum/` | Non-Discord turn path and the iMessage entrypoint |
+| `src/doctor/` | Bot-side diagnostics (the sandbox side is `usr/local/lib/doctor.mjs`) |
+| `docker/sandbox/` | Mirrors the sandbox image filesystem, copied to `/` (`opt/pi/` for extensions, skills, and `SYSTEM.md`; `usr/local/` for the gateway, supervisor, and workers) |
 
-## Supervisor API (sandbox `:4097`)
+## Inside a sandbox
 
-Includes `/skills`, `/workers`, `/workers/settings`, plus `/env`, `/secrets`, `/model`, `/apikey`, `/tools`, `/mcp` (registry + Pi reload via native MCP), `/pigeon`, `/tasks`, `/tailscale/*`, `/doctor`, `/doctor/fix`.
+- `/work` is the workspace. User extensions go in `/work/.pi/extensions/*.ts`, skills in `/work/.pi/skills/<name>/SKILL.md`, and the prompt addendum in `/work/.pi/SYSTEM.md`.
+- Skill precedence is workspace, then user (`/data/pi/skills`), then bundled (`/opt/pi/skills`).
+- The supervisor writes provider keys to `/data/pi/agent/auth.json`. Sessions live in `/data/pi/sessions`, and logical session ids in `/data/pi/gateway-sessions.json`.
+- Project memory lives in `/work/.punch-memory.md`. Each turn, the bot reads up to 12k chars of it into the prompt (`src/chat/queue.js`, `src/punch-turn.js`). Keep that cap in sync with `MAX_MEMORY_CHARS` in `punch-bot/core`'s context-pruning extension.
 
-## Active Context Pruning (PNCH-6)
+## Gotchas
 
-Three-part memory management system:
-
-1. **Selective Pi pruning tools** (Pi core built-in `context-pruning`) — `compress_context` replaces stale complete user-turn ranges with model-written summaries in provider context. Blocks have stable Pi entry IDs, preserve raw session entries, and can be searched (`search_context`), inspected (`context_status`), and restored (`decompress_context`). First user message is protected; uncertain mappings leave raw context intact.
-
-2. **Context-pruning threshold** — `/botmode auto-compress` sets per-user threshold (default 75%, configurable 50-75%, or 0 to disable). Next Pi turn receives a selective-pruning nudge when usage reaches it. It does not destructively compact the whole session.
-
-3. **`/work/.punch-memory.md`** — persistent project memory file inside each sandbox. The bot fetches a bounded copy (12k chars via `getFile`) every turn and injects it into the preamble's unified **`--- Punch memory ---`** block, alongside auto-retrieved related memory (`store.preamble`); the sandbox-side Pi extension no longer reads it (Pi core's `update_memory` tool owns it). Model updates architecture decisions, conventions, gotchas, and preferences before pruning. Survives session resets and compactions.
-
-**Flow:** threshold nudge or model detects context pressure → model saves durable facts to `.punch-memory.md` → model calls `compress_context` with visible user-message boundaries and self-contained summary → Pi context hook replaces only that range. `/compress` remains explicit whole-session emergency fallback.
-
-## Known quirks
-
-- Sandboxes from older agent images must be **recreated** to get the Pi image.
-- Provider keys via `/apikey` or `/env` (e.g. `ANTHROPIC_API_KEY`) — no free bundled provider path.
-- **`/compress`** uses `OPENCODE_COMPRESS_TIMEOUT` (default 300s; legacy env name).
-- **Prod vs nightly:** never `docker compose` in `/punch` when user means nightly, and vice versa.
-
-## Env naming (legacy aliases)
-
-Primary env names are `PI_*` (`PI_SERVER_PASSWORD`, `PI_MODEL`, etc.). The old `OPENCODE_*` names remain as **legacy aliases** (read as fallbacks) so existing `.env` / containers keep working. Product copy and Discord should not say “OpenCode”; treat them as Punch/Pi stack secrets. Basic-auth username remains `opencode` for wire compatibility.
-
-## Security
-
-Unregistered Discord users cannot reach any sandbox. Bot has Docker socket only for dynamic sandboxes.
-
-## Cursor Cloud specific instructions
-
-Startup automation runs `npm install` only (bot deps for local dev + `npm test`). Everything below is manual/non-obvious.
-
-**Node vs Docker paths.** Editing `src/` and running `npm test` (`node --test test/*.mjs`, 28 tests) needs no Docker. Actually *running* the product needs Docker (bot + per-user sandbox images). Standard commands live in `README.md` / `NIGHTLY.md` / the top of this file — don't duplicate them.
-
-**Docker daemon is not auto-started.** Docker Engine is installed in the VM image but `dockerd` does not run on a fresh pod. Start it and open the socket each session:
-
-```sh
-sudo nohup dockerd > /tmp/dockerd.log 2>&1 &   # wait ~8s
-sudo chmod 666 /var/run/docker.sock            # re-run after any dockerd restart
-```
-
-Daemon config (`/etc/docker/daemon.json`) uses `fuse-overlayfs` with `features.containerd-snapshotter: false` (required for fuse-overlayfs on Docker 29 in this Firecracker VM).
-
-**cgroup v2 threaded-mode caveat (important).** The VM's root cgroup is `domain threaded`, so the memory/io domain controllers can't be delegated. Containers launched the way the bot does it — default (private) cgroup namespace **with** `--memory`/`--cpus`/`--pids-limit` (see `src/sandbox-manager.js` `composeUp`) — fail with:
-`cannot enter cgroupv2 "/sys/fs/cgroup/docker" with domain controllers -- it is in threaded mode`.
-Workaround: run sandbox containers with **`--cgroupns=host`** (resource limits then don't apply). This is a VM infra limitation, not a repo bug — do not "fix" it by editing `sandbox-manager.js`. Consequence: the bot's `/sandbox create` will hit this error in this VM as-is; to demo Pi, run the sandbox image directly with `--cgroupns=host`.
-
-Manually run the sandbox (Pi) stack to verify it end-to-end:
-
-```sh
-docker network create punch-nightly_edge 2>/dev/null || true
-docker run -d --cgroupns=host --name punch-nightly_sandbox-hello_1 \
-  --network punch-nightly_edge --network-alias sandbox-hello \
-  -e PI_SERVER_PASSWORD=devpassword -e SANDBOX_NAME=hello \
-  -e SANDBOX_USER_ID=000000000000000000 -e PUNCH_DOCTOR_TOKEN=doctortoken \
-  -p 4096:4096 -p 4097:4097 --device /dev/net/tun --cap-add NET_ADMIN \
-  punch-nightly-sandbox:latest
-# gateway health (basic auth opencode:$PI_SERVER_PASSWORD):
-curl -su opencode:devpassword http://localhost:4096/health   # {"ok":true,"tools":[...]}
-```
-
-**`.env` is gitignored and required** for `docker compose` (`env_file: .env`). Create it from `.env.example` and set `DISCORD_TOKEN`; use Nightly identity (`PUNCH_STACK_NAME=punch-nightly`, `PUNCH_BOT_PORT=4099`, `PUNCH_HOST_SOURCE=/workspace`).
-
-**Secrets needed for full end-to-end (not present in the VM):**
-- `DISCORD_TOKEN` — the bot exits immediately without it (`src/index.js`), so no Discord flow runs.
-- `POOLSIDE_API_KEY` — the provider used for tests here. A Pi turn reaches `pi --mode rpc` and fails with `No API key found for poolside` until set. Poolside is a built-in OpenAI-compatible provider seeded by the supervisor (`docker/sandbox/usr/local/bin/serve-supervisor.mjs`, baseUrl `https://inference.poolside.ai/v1`); Pi resolves its key from the `POOLSIDE_API_KEY` env var. Run the sandbox with `PI_MODEL=poolside/poolside/laguna-m.1` (splits to `--provider poolside --model poolside/laguna-m.1`) and pass `POOLSIDE_API_KEY` into the container env, or set it via supervisor `/apikey`/`/env` (Discord `/apikey set poolside <key>`). Note `anthropic/claude-sonnet-4-5` is only an alias to the default `opencode/big-pickle`. There is no free bundled provider.
+- Keep the default `PI_VERSION` in `docker/sandbox.Dockerfile` aligned with `@punch-bot/cli` and `@punch-bot/ai` in `docker/sandbox/opt/pi/package.json`. Keep Playwright aligned with the CLI's version so both use the installed Chromium build.
+- The runtime bundles browser, webfetch, progress, context-pruning, collaboration, routines, and MCP tools. Only SearXNG is seeded from this repo. On recreation, old bundled extensions move to `/work/.pi/extensions/.legacy-pi`, preserving user edits without loading duplicate tools.
+- Changes under `docker/` reach users only after the sandbox image is rebuilt and the sandboxes are recreated with `/sandbox restart-all recreate:true`. A plain restart keeps the old image and env.
+- No provider is bundled. Turns fail until a key is set with `/apikey set <provider> <key>` or `/env`.
+- Bot↔sandbox auth is HTTP basic with `PI_SERVER_USERNAME` (default `pi`) and `PI_SERVER_PASSWORD`. On the bot side, use `supervisorAuth()` from `src/core/config.js` rather than building the header inline.
+- The only remaining `opencode` references are deliberate. `opencode` and `opencode-go` are model providers, and they share the `OPENCODE_API_KEY` key. `.github/workflows/opencode.yml` runs the issue-comment coding agent. Everything else uses Pi names.

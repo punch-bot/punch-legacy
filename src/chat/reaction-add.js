@@ -9,11 +9,18 @@ import { registry } from "../core/registry.js";
 import { ensureUserSandbox } from "../core/supervisor.js";
 import { reactionDedupKey } from "../core/discord.js";
 import { enqueueChat } from "../chat/queue.js";
-import { fetchChannelContext, fetchThreadContext } from "../chat/context.js";
+import { fetchThreadContext } from "../chat/context.js";
+import { fetchChannelContext, readableDiscordContent } from "../channel-context.js";
 import * as pigeonGate from "../pigeon-gate.js";
 import { notifyPigeonDM } from "../gateway/pigeon.js";
 import { isVoiceMessage } from "../stt.js";
 import { reactedToBlock } from "../prompt-blocks.js";
+import {
+  isPunchThread,
+  shouldUseThreadMode,
+  startPunchThread,
+  threadBoundMessage,
+} from "../chat/threads.js";
 
 function registerReactionAdd(client) {
   client.on(Events.MessageReactionAdd, async (reaction, user) => {
@@ -49,7 +56,11 @@ function registerReactionAdd(client) {
         if (!settings.reactionMatches(reaction, gs.reactionSummonEmoji)) return;
 
         const allowedChannel = store.getAllowedChannel(guildId);
-        if (allowedChannel && targetMessage.channelId !== allowedChannel) return;
+        if (
+          allowedChannel &&
+          targetMessage.channelId !== allowedChannel &&
+          targetMessage.channel?.parentId !== allowedChannel
+        ) return;
       } else {
         if (!settings.reactionMatches(reaction, store.GUILD_SETTINGS_DEFAULTS.reactionSummonEmoji)) return;
       }
@@ -60,7 +71,7 @@ function registerReactionAdd(client) {
       if (!sandboxUrl) return;
 
       const authorName = targetMessage.member?.displayName || targetMessage.author.username;
-      let content = targetMessage.content.replace(/<@!?\d+>/g, "").trim();
+      let content = readableDiscordContent(targetMessage).trim();
       if (!content && isVoiceMessage(targetMessage)) {
         content = "(voice memo — Punch will transcribe it)";
       } else if (!content && targetMessage.attachments.size > 0) {
@@ -73,13 +84,33 @@ function registerReactionAdd(client) {
       const useChannelContext =
         targetMessage.guild && store.getGuildSettings(targetMessage.guild.id).contextMode === "channel";
       const contextMessages = useChannelContext
-        ? await fetchChannelContext(targetMessage.channel, targetMessage.id, sandboxNameForUser(user.id))
+        ? await fetchChannelContext(targetMessage.channel, targetMessage, {
+            currentSandboxName: sandboxNameForUser(user.id),
+            userId: user.id,
+            timeZone: store.getUserSettings(user.id).timeZone,
+          })
         : await fetchThreadContext(targetMessage.channel, targetMessage, { userId: user.id });
 
       console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
 
+      // Thread mode: the reaction summon opens a Punch-owned thread on the
+      // reacted-to message and the turn is redirected into it.
+      let turnMessage = targetMessage;
+      if (
+        !isDM &&
+        !isPunchThread(targetMessage.channel, client) &&
+        shouldUseThreadMode(targetMessage, user.id, content)
+      ) {
+        try {
+          const thread = await startPunchThread(targetMessage, content, user.id);
+          if (thread) turnMessage = threadBoundMessage(targetMessage, thread);
+        } catch (err) {
+          console.error("[threads] failed to start punch thread:", err.message);
+        }
+      }
+
       await enqueueChat(
-        targetMessage,
+        turnMessage,
         "(reacted to the message above — respond to it)",
         contextMessages,
         {

@@ -1,6 +1,7 @@
 // Model / provider / env / auth config for the sandbox supervisor.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { normalizeThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
 import { AUTH_FILE, ENV_FILE, MODEL_ALIASES, MODEL_DEFAULT, MODEL_FILE, MODELS_FILE, log, loadJSON, saveJSON } from "./state.mjs";
 
 export function normalizeModel(model) {
@@ -13,8 +14,18 @@ export function loadModel() {
   try { const v = JSON.parse(readFileSync(MODEL_FILE, "utf8")).model; return v || null; }
   catch { return null; }
 }
+export function loadThinkingLevel() {
+  return normalizeThinkingLevel(loadJSON(MODEL_FILE).thinkingLevel);
+}
+// model.json holds { model, thinkingLevel }; each save keeps the other field.
+function updateModelFile(patch) {
+  writeFileSync(MODEL_FILE, JSON.stringify({ ...loadJSON(MODEL_FILE), ...patch }));
+}
 export function saveModel(model) {
-  writeFileSync(MODEL_FILE, JSON.stringify({ model }));
+  updateModelFile({ model });
+}
+export function saveThinkingLevel(thinkingLevel) {
+  updateModelFile({ thinkingLevel });
 }
 
 /** Seed OpenAI-compatible providers Pi does not ship (e.g. Poolside).
@@ -54,7 +65,7 @@ export const BUILTIN_CUSTOM_PROVIDERS = {
         contextWindow: 262144,
         maxTokens: 32768,
       },
-      // legacy Discord / OpenCode model id
+      // legacy model id
       {
         id: "poolside/laguna-xs.2",
         name: "Laguna XS (legacy id)",
