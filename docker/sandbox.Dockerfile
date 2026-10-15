@@ -1,6 +1,6 @@
 FROM node:22-bookworm
 
-ARG PI_VERSION=0.85.1
+ARG PI_VERSION=1.2.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl wget ca-certificates openssh-client openssh-server \
@@ -41,7 +41,7 @@ ENV HOME=/root \
 # docker/sandbox/ holds the sandbox filesystem tree (incl. package.json), copied
 # before the Pi deps install; runtime dirs are created by the entrypoint/supervisor.
 COPY docker/sandbox/ /
-RUN cd /opt/pi && npm install --omit=dev --no-audit --no-fund \
+RUN cd /opt/pi && npm ci --omit=dev --no-audit --no-fund \
     && npx playwright install chromium-headless-shell \
     && npm cache clean --force \
     && rm -rf /root/.npm

@@ -5,8 +5,8 @@
   "description": "Runtime deps for Punch Pi extensions and browser diagnostics",
   "dependencies": {
     "playwright": "1.62.1",
-    "@punch-bot/ai": "0.85.1",
-    "@punch-bot/cli": "0.85.1",
+    "@punch-bot/ai": "1.2.0",
+    "@punch-bot/cli": "1.2.0",
     "typebox": "1.3.27"
   }
 }
