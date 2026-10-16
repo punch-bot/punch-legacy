@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@punch-bot/cli";
 import { Type } from "typebox";
 
 const SEARXNG_URL = process.env.SEARXNG_URL || "http://searxng:8080";

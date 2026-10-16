@@ -30,6 +30,7 @@ import { setupSignalHandlers, setupWatchers, start } from "./supervisor/gateway.
 import {
   ensurePiModelsJson,
   loadModel,
+  loadThinkingLevel,
   normalizeModel,
   saveModel,
   syncEnvApiKeysToAuth,
@@ -45,6 +46,7 @@ import { handleBotProxy, handleGeneralRoutes, handlePigeonRelay } from "./superv
 const savedModel = loadModel();
 state.CURRENT_MODEL = normalizeModel(savedModel || process.argv[2] || MODEL_DEFAULT);
 saveModel(state.CURRENT_MODEL);
+state.THINKING_LEVEL = loadThinkingLevel();
 process.env.PI_DEFAULT_MODEL = state.CURRENT_MODEL;
 process.env.PI_MODEL = state.CURRENT_MODEL;
 

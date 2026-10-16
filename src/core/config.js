@@ -42,6 +42,19 @@ export const MODEL_LIST = [
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 
+// /models reasoning dropdown. "default" clears the override; the rest must
+// match THINKING_LEVELS in docker/sandbox/usr/local/lib/pi-thinking-level.mjs.
+export const THINKING_LEVEL_LIST = [
+  { label: "Default", value: "default", description: "Whatever the model uses on its own" },
+  { label: "Off", value: "off", description: "No reasoning" },
+  { label: "Minimal", value: "minimal" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" },
+  { label: "Extra high", value: "xhigh", description: "Only some models" },
+  { label: "Max", value: "max", description: "Only some models" },
+];
+
 export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia"];
 
 export function supervisorAuth() {

@@ -16,6 +16,13 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import { syncPiSkillSettings } from "/usr/local/lib/skills-manager.mjs";
+import {
+  mergePiSettings,
+  normalizeThinkingLevel,
+  piDefaultThinkingLevel,
+  turnThinkingLevel,
+} from "/usr/local/lib/pi-thinking-level.mjs";
 import {
   activityFromProgress,
   closeProgress,
@@ -34,8 +41,10 @@ const SESSION_MAP_FILE =
   process.env.PI_SESSION_MAP || "/data/pi/gateway-sessions.json";
 const EXT_DIR = process.env.PI_EXTENSIONS_DIR || "/opt/pi/extensions";
 const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
-const SKILL_ROOTS = ["/work/.pi/skills", "/data/pi/skills", "/opt/pi/skills"];
-const SKILL_ENABLED_FILE = "/data/pi/skills-enabled.json";
+const PI_SETTINGS_FILES = [
+  join(process.env.PI_CODING_AGENT_DIR || "/data/pi/agent", "settings.json"),
+  join(WORK, ".pi", "settings.json"),
+];
 const USER = process.env.PI_SERVER_USERNAME || "pi";
 const PASS = process.env.PI_SERVER_PASSWORD || "";
 let MODEL =
@@ -69,6 +78,54 @@ function parseModel(m) {
   const i = s.indexOf("/");
   if (i < 0) return { provider: s, modelId: s };
   return { provider: s.slice(0, i), modelId: s.slice(i + 1) };
+}
+
+/**
+ * set_model plus the user's reasoning level for a turn.
+ * Logs failures instead of throwing.
+ */
+async function selectTurnModel(providerID, modelID, thinkingLevel) {
+  let model = null;
+  try {
+    model = (await rpc("set_model", { provider: providerID, modelId: modelID })).data;
+  } catch (e) {
+    log("set_model:", e.message);
+  }
+  try {
+    model ??= (await rpc("get_state")).data?.model;
+    await applyThinkingLevel(thinkingLevel, model);
+  } catch (e) {
+    log("thinking level:", e.message);
+  }
+}
+
+function readPiSettings(file) {
+  try {
+    const v = JSON.parse(readFileSync(file, "utf8"));
+    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Set `requested` on the active `model` only if Pi lists it for that model;
+ * otherwise Pi's default (Pi would clamp to a neighbouring level instead).
+ * Runs every turn, so no earlier turn's or session's level lingers.
+ */
+async function applyThinkingLevel(requested, model) {
+  let supported = null;
+  if (normalizeThinkingLevel(requested)) {
+    try {
+      supported = (await rpc("get_available_thinking_levels")).data?.levels;
+    } catch (e) {
+      log("get_available_thinking_levels:", e.message);
+    }
+  }
+  const settings = mergePiSettings(...PI_SETTINGS_FILES.map(readPiSettings));
+  const fallback = piDefaultThinkingLevel(settings, model?.provider, model?.id);
+  const level = turnThinkingLevel(requested, supported, fallback);
+  await rpc("set_thinking_level", { level });
 }
 
 function basicOk(req) {
@@ -284,10 +341,12 @@ function startPi() {
   clearPiWaiters(new Error("pi restarted"));
 
   piSpawnedAt = Date.now();
+  syncPiSkillSettings();
   const { provider, modelId } = parseModel(MODEL);
   const args = [
     "--mode",
     "rpc",
+    "--no-extensions",
     "--provider",
     provider,
     "--model",
@@ -449,35 +508,11 @@ async function ensureSession(logicalId) {
   return s;
 }
 
-function enabledSkillInstructions() {
-  let enabled = {};
-  try { enabled = JSON.parse(readFileSync(SKILL_ENABLED_FILE, "utf8")); } catch {}
-  const seen = new Set();
-  const sections = [];
-  for (const root of SKILL_ROOTS) {
-    let names = [];
-    try { names = readdirSync(root); } catch { continue; }
-    for (const name of names) {
-      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(name) || seen.has(name) || enabled[name] === false) continue;
-      try {
-        const text = readFileSync(join(root, name, "SKILL.md"), "utf8");
-        seen.add(name);
-        const body = text.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "").trim();
-        if (body) sections.push(`<skill name="${name}">\n${body.slice(0, 12000)}\n</skill>`);
-      } catch {}
-    }
-  }
-  return sections.length
-    ? `\n\n--- Enabled instruction skills ---\nThese skills are ALREADY ACTIVE for this Discord turn. Do not ask the user to run /skill-name, pi --skill, or restart Pi — follow the skill bodies now.\n\n${sections.join("\n\n")}\n--- End instruction skills ---`
-    : "";
-}
-
 function buildUserPrompt(session, text, system) {
-  const enrichedSystem = `${system || ""}${enabledSkillInstructions()}`;
-  const h = enrichedSystem ? hashStr(enrichedSystem) : null;
-  if (enrichedSystem && h !== session.systemHash) {
+  const h = system ? hashStr(system) : null;
+  if (system && h !== session.systemHash) {
     session.systemHash = h;
-    return `<punch-system>\n${enrichedSystem}\n</punch-system>\n\n${String(text || "")}`;
+    return `<punch-system>\n${system}\n</punch-system>\n\n${String(text || "")}`;
   }
   return String(text || "");
 }
@@ -967,10 +1002,7 @@ const server = createServer(async (req, res) => {
           const providerID = body?.model?.providerID || body?.providerID;
           const modelID = body?.model?.modelID || body?.modelID;
           if (providerID && modelID) {
-            await rpc("set_model", {
-              provider: providerID,
-              modelId: modelID,
-            }).catch(() => {});
+            await selectTurnModel(providerID, modelID, body?.thinkingLevel);
           }
           await rpc("compact", {}, 300000);
         });
@@ -1006,10 +1038,7 @@ const server = createServer(async (req, res) => {
             beginTurnProgress(sid);
             try {
               if (model?.providerID && model?.modelID) {
-                await rpc("set_model", {
-                  provider: model.providerID,
-                  modelId: model.modelID,
-                }).catch((e) => log("set_model:", e.message));
+                await selectTurnModel(model.providerID, model.modelID, body.thinkingLevel);
               }
 
               const promptText = buildUserPrompt(session, userText, system);

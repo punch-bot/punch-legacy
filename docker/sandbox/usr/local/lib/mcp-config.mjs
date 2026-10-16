@@ -1,5 +1,5 @@
 /**
- * Punch MCP registry (/data/mcp.json) ↔ pi-mcp-adapter mcpServers conversion.
+ * Punch MCP registry (/data/mcp.json) and normalized mcpServers conversion.
  * Registry keeps `local`/`remote` entries; adapter wants mcpServers.
  */
 
@@ -297,7 +297,7 @@ function stripCredentialHeaders(headers) {
 }
 
 /**
- * Convert one Punch registry entry to a pi-mcp-adapter ServerEntry.
+ * Convert one Punch registry entry to a normalized MCP server entry.
  * @param {object} entry
  * @param {string} [serverName] registry key (required for api_key auth wiring)
  * @returns {object|null} null if entry is invalid

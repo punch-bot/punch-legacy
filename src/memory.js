@@ -22,15 +22,54 @@ const NOTE_PART_MAX_CHARS = 1_000;
 const RECALL_SESSION_CACHE_MAX = 500;
 const recalledCitations = new Map();
 
-function load(file, fallback) {
+const readOnlyStores = new Set();
+
+/**
+ * PNCH-41: distinguish "file missing" from "file corrupt"/unreadable.
+ * - missing       -> { ok: true, value: null } (caller uses its fallback; save() may rewrite)
+ * - corrupt JSON  -> { ok: false } (file quarantined; reads get fallback, saves refused)
+ * - read EACCES etc -> { ok: false } (file left in place, NOT renamed; saves still refused)
+ */
+function loadState(file) {
+  if (!existsSync(file)) return { ok: true, value: null };
+  let raw;
   try {
-    return JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
+    // Read outside the parse try: a valid-but-temporarily-unreadable file must NOT be
+    // renamed/quarantined as corrupt (cubic review).
+    raw = readFileSync(file, "utf8");
+  } catch (readError) {
+    console.error(`[memory] ${file} unreadable this process:`, readError.message);
+    return { ok: false };
+  }
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (parseError) {
+    try {
+      renameSync(file, `${file}.corrupt-${Date.now()}`);
+    } catch (renameError) {
+      console.error(`[memory] could not quarantine corrupt ${file}:`, renameError.message);
+    }
+    console.error(`[memory] ${file} failed to parse — quarantined; check it before deleting. Writes to this store are disabled until the file is restored. (${parseError.message})`);
+    return { ok: false };
   }
 }
 
+function load(file, fallback) {
+  const state = loadState(file);
+  if (state.ok) return state.value ?? fallback;
+  // Corrupt or unreadable: serve the fallback for reads but mark the store read-only
+  // this process, so the next save() cannot replace the real file with fallback content.
+  readOnlyStores.add(file);
+  return fallback;
+}
+
 function save(file, obj) {
+  if (readOnlyStores.has(file)) {
+    throw new Error(
+      `[memory] write to ${file} refused: the original file is corrupt/unreadable and was ` +
+      `quarantined this process. Restore or remove the .corrupt- file, then retry (callers must not report this write as persisted).`,
+    );
+  }
   mkdirSync(dirname(file), { recursive: true });
   const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
   try {
@@ -129,7 +168,8 @@ const STOP_WORDS = new Set([
 ]);
 
 function terms(text) {
-  const words = String(text || "").toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_'-]*/gu) || [];
+  // PNCH-42: keep + and # attached to tokens so "C++"/"C#" are their own terms.
+  const words = String(text || "").toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_'+#-]*/gu) || [];
   const useful = words.filter((word) => word.length > 1 && !STOP_WORDS.has(word));
   return [...new Set(useful.length ? useful : words.filter((word) => word.length > 1))];
 }
@@ -139,10 +179,14 @@ function cleanLine(text) {
 }
 
 function normalize(text) {
+  // PNCH-42: keep significant punctuation. Stripping \p{P}\p{S} made
+  // "C++", "C#", and "C" normalize identically and dedupe into one fact.
+  // Drop only casing and whitespace differences, plus quote/bullet glyphs
+  // that vary by formatting, never + # . - (they change meaning).
   return cleanLine(text)
     .toLowerCase()
     .normalize("NFKC")
-    .replace(/[\p{P}\p{S}]+/gu, " ")
+    .replace(/["'`\u201c\u201d\u2018\u2019\u2022\u2013\u2014]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

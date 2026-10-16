@@ -1,4 +1,5 @@
 // Model / API-key / provider routes for the sandbox supervisor.
+import { normalizeThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
 import { AUTH_FILE, ENV_FILE, MODELS_FILE, loadJSON, log, saveJSON, state } from "./state.mjs";
 import { forceRestart } from "./gateway.mjs";
 import {
@@ -6,6 +7,7 @@ import {
   mirrorGoogleGemini,
   normalizeModel,
   saveModel,
+  saveThinkingLevel,
   syncAuthProvider,
   RESERVED_PROVIDER_IDS,
 } from "./models.mjs";
@@ -27,7 +29,36 @@ export function handleProviderRoutes(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/model") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ model: state.CURRENT_MODEL }));
+    res.end(JSON.stringify({ model: state.CURRENT_MODEL, thinkingLevel: state.THINKING_LEVEL }));
+    return true;
+  }
+
+  // Reasoning level applied to every turn's model (see pi-thinking-level.mjs).
+  // null / "default" clears it. No forceRestart: the gateway applies it per turn.
+  if (req.method === "POST" && url.pathname === "/model/thinking") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const reply = (status, payload) => {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+      try {
+        const { level } = JSON.parse(body);
+        const raw = String(level ?? "").trim().toLowerCase();
+        const thinkingLevel = normalizeThinkingLevel(raw);
+        if (raw && raw !== "default" && !thinkingLevel) {
+          reply(400, { error: `Unknown reasoning level: ${level}` });
+          return;
+        }
+        state.THINKING_LEVEL = thinkingLevel;
+        saveThinkingLevel(thinkingLevel);
+        reply(200, { success: true, thinkingLevel });
+        log(`reasoning level: ${thinkingLevel || "default"}`);
+      } catch {
+        reply(400, { error: "Invalid JSON" });
+      }
+    });
     return true;
   }
 

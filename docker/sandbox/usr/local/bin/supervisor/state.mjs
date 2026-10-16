@@ -59,6 +59,8 @@ export const state = {
   loadedHash: "",
   armedForQuarantine: false,
   CURRENT_MODEL: null,
+  // Reasoning level for every turn, or null for Pi's default (pi-thinking-level.mjs).
+  THINKING_LEVEL: null,
 };
 
 export function log(...a) {

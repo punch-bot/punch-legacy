@@ -1,4 +1,4 @@
-// Punch MCP registry sync + pi-mcp-adapter config generation.
+// Punch MCP registry sync and normalized config generation for diagnostics.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   assertPunchEntry,
@@ -15,7 +15,7 @@ import { ENV_FILE, MCP_FILE, PI_MCP_FILE, log, loadJSON, saveJSON } from "./stat
 /** Object-property names that would poison the registry/prototype if used as MCP names. */
 const RESERVED_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 
-/** Write adapter-shaped mcp.json for ops/debug; Punch extension reads /data/mcp.json directly. */
+/** Write normalized mcp.json for ops/debug; the runtime reads /data/mcp.json directly. */
 export function syncMcpConfig() {
   mkdirSync("/data/pi/agent", { recursive: true });
   const customMcp = loadJSON(MCP_FILE);
