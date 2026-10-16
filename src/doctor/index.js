@@ -235,16 +235,15 @@ function invalidRoutineFields(routine) {
 async function routineChecks({ routines, userId }) {
   const startedAt = Date.now();
   try {
-    if (typeof routines?.listAll !== "function") throw new Error("routines.listAll is unavailable");
-    const allRecords = await withTimeout(() => routines.listAll());
-    if (!Array.isArray(allRecords)) throw new Error("routines.listAll did not return an array");
-    const records = allRecords.filter((routine) => String(routine?.userId) === String(userId));
+    if (typeof routines?.listRoutines !== "function") throw new Error("routines.listRoutines is unavailable");
+    const records = await withTimeout(() => routines.listRoutines(userId));
+    if (!Array.isArray(records)) throw new Error("routines.listRoutines did not return an array");
 
     const now = Date.now();
     const overdueGraceMs = 2 * 60_000;
     const overdue = records.filter((routine) => routine?.enabled === true && Number.isFinite(routine.nextRunAt) && routine.nextRunAt < now - overdueGraceMs);
     const idCounts = new Map();
-    for (const routine of allRecords) {
+    for (const routine of records) {
       if (typeof routine?.id === "string" && routine.id) idCounts.set(routine.id, (idCounts.get(routine.id) || 0) + 1);
     }
     const inspectedIds = new Set(records.map((routine) => routine?.id).filter(Boolean));

@@ -3,17 +3,22 @@
 
 import { createServer } from "node:http";
 import * as routines from "../routines.js";
-import * as collabs from "../collabs.js";
+import * as supervisor from "../supervisor.js";
 import * as state from "../state.js";
 import * as statistics from "../statistics.js";
 import * as sandbox from "../sandbox-manager.js";
 import { BOT_HTTP_PORT } from "../core/config.js";
 import { registry } from "../core/registry.js";
-import { verifyRoutineUser } from "../chat/routines-fire.js";
+import { fireRoutine, verifyRoutineUser } from "../chat/routines-fire.js";
 import { userTimeZone } from "../commands/prefix.js";
 import { sandboxNameForUser } from "../agent.js";
 import { notifyPigeonDM, handleAgentPigeon } from "./pigeon.js";
 import { isRegisteredSandboxName } from "../pigeon-peer.js";
+
+function isSupervisorRequest(req) {
+  const token = process.env.PUNCH_SUPERVISOR_TOKEN || "";
+  return Boolean(token) && req.headers.authorization === `Bearer ${token}`;
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -47,6 +52,72 @@ async function deliverWorkerToChannel(worker, content) {
 }
 
 const botHttpServer = createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  let body;
+  try {
+    body = await readBody(req);
+  } catch {
+    body = null;
+  }
+
+  if (url.pathname.startsWith("/internal/")) {
+    if (!isSupervisorRequest(req)) {
+      res.writeHead(401, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: "Unauthorized" }));
+    }
+    try {
+      if (url.pathname === "/internal/routines/fire" && req.method === "POST") {
+        if (!body?.routine) throw new Error("Missing routine");
+        const delivered = await fireRoutine(body.routine);
+        if (delivered === false) {
+          res.writeHead(502, { "content-type": "application/json" });
+          return void res.end(JSON.stringify({ ok: false, error: "Routine delivery failed" }));
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ ok: true }));
+      }
+      if (url.pathname === "/internal/collabs/event" && req.method === "POST") {
+        const collab = body?.collab;
+        if (!collab) throw new Error("Missing collab");
+        const id = collab.id;
+        if (body.type === "proposed") {
+          const reviewerId = sandbox.loadUsers().find((user) => user.name === collab.proposal?.reviewer)?.userId;
+          if (reviewerId) {
+            handleAgentPigeon(
+              reviewerId,
+              collab.owner,
+              `Collaboration ${id} needs review. Fetch branch ${collab.proposal.branch} at ${collab.proposal.head}, inspect diff and tests, then use the collab tool to approve or request changes.`,
+              0,
+            ).catch(() => {});
+          }
+        } else if (body.type === "merged") {
+          for (const participant of collab.participants || []) {
+            const userId = sandbox.loadUsers().find((user) => user.name === participant)?.userId;
+            if (userId) notifyPigeonDM(userId, "collab", `Collaboration **${id}** auto-merged \`${String(collab.base || "").slice(0, 12)}\` into main.`).catch(() => {});
+          }
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ ok: true }));
+      }
+      if (url.pathname === "/internal/exec" && req.method === "POST") {
+        const participant = String(body?.participant || "");
+        const argv = body?.argv;
+        if (!participant) throw new Error("participant is required");
+        if (!Array.isArray(argv) || argv[0] !== "git") throw new Error("Only git commands may be executed.");
+        const result = await sandbox.gitInSandbox(participant, argv.slice(1), { cwd: body?.cwd || undefined });
+        res.writeHead(200, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ code: 0, stdout: result.stdout, stderr: result.stderr }));
+      }
+      res.writeHead(404);
+      return void res.end("Not Found");
+    } catch (err) {
+      const status = url.pathname === "/internal/exec" ? 400 : 500;
+      res.writeHead(status, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
   const authHeader = req.headers.authorization || "";
   const authMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
   const identity = authMatch ? await sandbox.resolveBotToken(authMatch[1]) : null;
@@ -55,15 +126,6 @@ const botHttpServer = createServer(async (req, res) => {
     return void res.end(JSON.stringify({ error: "Unauthorized" }));
   }
   req.sandboxIdentity = identity;
-
-  const url = new URL(req.url, `http://${req.headers.host}`);
-
-  let body;
-  try {
-    body = await readBody(req);
-  } catch {
-    body = null;
-  }
 
   if (url.pathname === "/workers/progress" && req.method === "POST") {
     const userId = req.sandboxIdentity.userId;
@@ -140,7 +202,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const list = routines.listRoutines(verifiedId);
+        const list = await routines.listRoutines(verifiedId);
         res.writeHead(200, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routines: list }));
       }
@@ -168,7 +230,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing schedule or when" }));
         }
-        const routine = routines.addRoutine({
+        const routine = await routines.addRoutine({
           userId: verifiedId,
           channelId: body.channelId,
           guildId: body.guildId || null,
@@ -192,7 +254,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const ok = routines.removeRoutine(deleteMatch[1], verifiedId);
+        const ok = await routines.removeRoutine(deleteMatch[1], verifiedId);
         res.writeHead(ok ? 200 : 404, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ success: ok }));
       }
@@ -208,7 +270,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const r = routines.pauseRoutine(pauseMatch[1], verifiedId);
+        const r = await routines.pauseRoutine(pauseMatch[1], verifiedId);
         res.writeHead(r ? 200 : 404, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routine: r }));
       }
@@ -224,7 +286,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing userId" }));
         }
-        const r = routines.resumeRoutine(resumeMatch[1], verifiedId);
+        const r = await routines.resumeRoutine(resumeMatch[1], verifiedId);
         res.writeHead(r ? 200 : 404, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ routine: r }));
       }
@@ -245,7 +307,7 @@ const botHttpServer = createServer(async (req, res) => {
           res.writeHead(400, { "content-type": "application/json" });
           return void res.end(JSON.stringify({ error: "Missing reviewer or workspace." }));
         }
-        const collab = await collabs.create({ owner: actor, reviewer: String(body.reviewer).toLowerCase(), workspace: body.workspace });
+        const collab = await supervisor.collabs.create({ owner: actor, reviewer: String(body.reviewer).toLowerCase(), workspace: body.workspace, task: body.task });
         const reviewerId = sandbox.loadUsers().find((user) => user.name === collab.participants[1])?.userId;
         if (reviewerId) {
           const task = String(body.task || "Review future collaboration proposals carefully, run relevant tests, and request changes until code is good.").slice(0, 3000);
@@ -256,7 +318,7 @@ const botHttpServer = createServer(async (req, res) => {
       }
       if (req.method === "GET" && url.pathname === "/collabs") {
         res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ collabs: collabs.listFor(actor) }));
+        return void res.end(JSON.stringify({ collabs: await supervisor.collabs.listFor(actor) }));
       }
       const match = url.pathname.match(/^\/collabs\/(col_[a-f0-9]{12})(?:\/(propose|review))?$/);
       if (!match) {
@@ -266,14 +328,14 @@ const botHttpServer = createServer(async (req, res) => {
       const [, id, action] = match;
       if (req.method === "GET" && !action) {
         res.writeHead(200, { "content-type": "application/json" });
-        return void res.end(JSON.stringify({ collab: collabs.getFor(id, actor) }));
+        return void res.end(JSON.stringify({ collab: await supervisor.collabs.getFor(id, actor) }));
       }
       if (!body) {
         res.writeHead(400, { "content-type": "application/json" });
         return void res.end(JSON.stringify({ error: "Invalid JSON" }));
       }
       if (req.method === "POST" && action === "propose") {
-        const collab = await collabs.propose({ id, actor, head: body.head });
+        const collab = await supervisor.collabs.propose({ id, actor, head: body.head });
         const reviewer = collab.proposal.reviewer;
         const reviewerId = sandbox.loadUsers().find((user) => user.name === reviewer)?.userId;
         if (reviewerId) {
@@ -283,7 +345,7 @@ const botHttpServer = createServer(async (req, res) => {
         return void res.end(JSON.stringify({ collab }));
       }
       if (req.method === "POST" && action === "review") {
-        const collab = await collabs.review({ id, actor, approve: body.approve === true, notes: body.notes });
+        const collab = await supervisor.collabs.review({ id, actor, approve: body.approve === true, notes: body.notes });
         if (collab.proposal.status === "merged") {
           for (const participant of collab.participants) {
             const userId = sandbox.loadUsers().find((user) => user.name === participant)?.userId;

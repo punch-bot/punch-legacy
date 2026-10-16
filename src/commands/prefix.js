@@ -66,16 +66,16 @@ function userTimeZone(userId) {
   return store.getUserSettings(userId).timeZone || "UTC";
 }
 
-function statisticsExtrasForUser(userId) {
+async function statisticsExtrasForUser(userId) {
   const sandboxName = sandbox.loadUsers().find((entry) => entry.userId === userId)?.name || null;
-  const activeRoutines = routines.listRoutines(userId).filter((routine) => routine.enabled !== false).length;
+  const activeRoutines = (await routines.listRoutines(userId)).filter((routine) => routine.enabled !== false).length;
   const memoryRecords = store.list("user", userId).length;
   return { sandboxName, activeRoutines, memoryRecords };
 }
 
 async function createRoutineReply(message, opts) {
   const timezone = opts.timezone || userTimeZone(opts.userId || message.author.id);
-  const routine = routines.addRoutine({ ...opts, timezone });
+  const routine = await routines.addRoutine({ ...opts, timezone });
   const when = formatInTimeZone(routine.nextRunAt, routine.timezone || timezone) || new Date(routine.nextRunAt).toISOString();
   await reply(message, `⏰ Scheduled (\`${routine.id}\`) — fires ${when}`);
   return routine;
@@ -403,7 +403,7 @@ async function handleCommand(message, cmd, rest) {
       const tailRest = tail.join(" ").trim();
 
       if (sub === "history") {
-        const entries = routines.listHistory(uid, tailRest || null, 15);
+        const entries = await routines.listHistory(uid, tailRest || null, 15);
         if (entries.length === 0) {
           await reply(message, "No routine history.");
         } else {
@@ -420,7 +420,7 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "remove") {
         const id = tailRest.trim();
         if (!id) return void (await reply(message, `Usage: \`${PREFIX}routine remove <id>\``)), true;
-        const ok = routines.removeRoutine(id, uid);
+        const ok = await routines.removeRoutine(id, uid);
         await reply(message, ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`);
         return true;
       }
@@ -428,7 +428,7 @@ async function handleCommand(message, cmd, rest) {
       if (sub === "pause" || sub === "resume") {
         const id = tailRest.trim();
         if (!id) return void (await reply(message, `Usage: \`${PREFIX}routine ${sub} <id>\``)), true;
-        const r = routines.setRoutineEnabled(id, uid, sub === "resume");
+        const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
         await reply(message, r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`);
         return true;
       }
@@ -489,7 +489,7 @@ async function handleCommand(message, cmd, rest) {
       }
 
       if (sub === "list") {
-        const list = routines.listRoutines(uid);
+        const list = await routines.listRoutines(uid);
         await reply(message, list.length === 0
           ? "No routines yet."
           : `**Your routines:**\n${list.map(routines.formatRoutine).join("\n")}`);

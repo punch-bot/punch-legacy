@@ -26,7 +26,7 @@ function dependencies(fetchImpl) {
     },
     apiUrl: "http://sandbox-ember:4097",
     gatewayUrl: "http://sandbox-ember:4096",
-    routines: { listAll: () => [validRoutine] },
+    routines: { listRoutines: () => [validRoutine] },
     env: {
       PI_SERVER_PASSWORD: "secret",
       fetch: fetchImpl,
@@ -66,7 +66,7 @@ test("runDoctor reports unavailable routing without throwing", async () => {
     sandbox: { loadUsers: () => [], isContainerRunning: () => false },
     apiUrl: null,
     gatewayUrl: null,
-    routines: { listAll: () => [] },
+    routines: { listRoutines: () => [] },
     env: { PI_SERVER_PASSWORD: "" },
   });
 

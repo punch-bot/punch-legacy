@@ -5,7 +5,7 @@
 import "dotenv/config";
 import { REST, Routes, Events } from "discord.js";
 import * as sandbox from "./sandbox-manager.js";
-import * as routines from "./routines.js";
+import * as supervisor from "./supervisor.js";
 import { reloadSandboxMap } from "./agent.js";
 import { TOKEN } from "./core/config.js";
 import { createClient } from "./core/discord.js";
@@ -14,7 +14,6 @@ import { registerMessageCreate } from "./chat/message-create.js";
 import { registerReactionAdd } from "./chat/reaction-add.js";
 import { registerInteractions } from "./commands/interactions.js";
 import { buildSlashCommands } from "./commands/slash.js";
-import { fireRoutine } from "./chat/routines-fire.js";
 import { startBotHttpServer } from "./gateway/bot-server.js";
 
 if (!TOKEN) {
@@ -97,7 +96,17 @@ client.once(Events.ClientReady, async (c) => {
     console.error("Failed to register slash commands:", err.message);
   }
 
-  routines.startScheduler(fireRoutine);
+  if (!supervisor.supervisorEnabled) {
+    console.warn("PUNCH_SUPERVISOR_URL unset; supervisor-backed routine scheduling and firing are disabled (routine slash commands will report the supervisor is disabled)");
+  }
+  const hostRegistration = supervisor.registerHost({
+    participants: () => sandbox.loadUsers().map((user) => user.name).filter(Boolean),
+  });
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      void hostRegistration.stop();
+    });
+  }
 });
 
 startBotHttpServer();

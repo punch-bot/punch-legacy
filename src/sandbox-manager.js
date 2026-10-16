@@ -250,20 +250,44 @@ export function getContainerLogs(name, tail = 50) {
 // Only collaboration code calls this with fixed Git arguments. This avoids
 // exposing a model-controlled shell endpoint between isolated sandboxes.
 export async function gitInSandbox(name, args, { cwd } = {}) {
-  validateSandboxName(name);
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
     throw new Error("Git arguments must be strings.");
   }
+  const result = await execInSandbox(name, ["git", ...args], { cwd });
+  if (result.code !== 0) throw new Error(result.stderr || "Git command failed.");
+  return { stdout: result.stdout, stderr: result.stderr };
+}
+
+/**
+ * Run an argv inside a participant's workspace.
+ *
+ * This is the host's execution seam: the supervisor asks the host to run a
+ * command for a participant, and the host decides how. Docker sandboxes use the
+ * container backend; a Desktop host would swap in a local-worktree backend.
+ * The command is argv-only (no shell) so a participant cannot inject a command
+ * string, and the caller is expected to pass fixed, validated arguments.
+ */
+export async function execInSandbox(name, argv, { cwd } = {}) {
+  validateSandboxName(name);
+  if (!Array.isArray(argv) || argv.length === 0 || argv.some((arg) => typeof arg !== "string")) {
+    throw new Error("exec argv must be a non-empty array of strings.");
+  }
+  const backend = process.env.PUNCH_EXEC_BACKEND || "docker";
+  if (backend !== "docker") throw new Error(`Unsupported PUNCH_EXEC_BACKEND "${backend}".`);
   const container = containerForSandbox(name);
   if (!container) throw new Error(`Sandbox "${name}" is not running.`);
   const command = ["exec"];
   if (cwd) command.push("--workdir", cwd);
-  command.push(container, "git", ...args);
+  command.push(container, ...argv);
   try {
-    const { stdout, stderr } = await execFileAsync("docker", command, { timeout: 30000 });
-    return { stdout: stdout.trim(), stderr: stderr.trim() };
+    const { stdout, stderr } = await execFileAsync("docker", command, { timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
+    return { code: 0, stdout: stdout.trim(), stderr: stderr.trim() };
   } catch (error) {
-    throw new Error(error.stderr?.trim() || error.message || "Git command failed.");
+    return {
+      code: typeof error.code === "number" ? error.code : 1,
+      stdout: (error.stdout || "").trim(),
+      stderr: (error.stderr || error.message || "exec failed").trim(),
+    };
   }
 }
 

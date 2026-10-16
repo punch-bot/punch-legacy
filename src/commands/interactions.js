@@ -19,7 +19,7 @@ import * as statistics from "../statistics.js";
 import * as state from "../state.js";
 import * as routines from "../routines.js";
 import * as logs from "../logs.js";
-import * as collabs from "../collabs.js";
+import * as supervisor from "../supervisor.js";
 
 import {
   apiUrlFor,
@@ -506,7 +506,7 @@ export function registerInteractions(client) {
       }
       try {
         if (sub === "status") {
-          const records = collabs.listFor(owner);
+          const records = await supervisor.collabs.listFor(owner);
           const text = records.length
             ? records.map((record) => {
                 const proposal = record.proposal;
@@ -520,7 +520,7 @@ export function registerInteractions(client) {
         const workspace = interaction.options.getString("workspace", true);
         const task = sub === "start" ? interaction.options.getString("task", true) : "";
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const collab = await collabs.create({ owner, reviewer, workspace });
+        const collab = await supervisor.collabs.create({ owner, reviewer, workspace, task });
         if (task) {
           const reviewerId = sandbox.loadUsers().find((user) => user.name === reviewer)?.userId;
           if (reviewerId) {
@@ -1062,7 +1062,7 @@ export function registerInteractions(client) {
           const activeEnd = interaction.options.getInteger("active_end");
           const activeHours = activeStart === null || activeEnd === null ? null : { start: activeStart, end: activeEnd, timezone };
           const schedule = routines.parseRecurrence(when, recurrence, timezone);
-          const routine = routines.addRoutine({
+          const routine = await routines.addRoutine({
             ...ctx,
             channelId: type === "heartbeat" ? null : ctx.channelId,
             type, payload: text, schedule, timezone, activeHours,
@@ -1083,7 +1083,7 @@ export function registerInteractions(client) {
 
       if (sub === "history") {
         const id = interaction.options.getString("id") || null;
-        const entries = routines.listHistory(ctx.userId, id, 20);
+        const entries = await routines.listHistory(ctx.userId, id, 20);
         const body = entries.length
           ? `**Routine history:**\n${entries.map((entry) => `${entry.status === "succeeded" ? "✅" : entry.status === "failed" ? "❌" : "⏳"} \`${entry.routineId}\` attempt ${entry.attempt} ${new Date(entry.startedAt).toLocaleString()}${entry.error ? ` — ${entry.error.slice(0, 180)}` : ""}`).join("\n")}`
           : "No routine history.";
@@ -1093,7 +1093,7 @@ export function registerInteractions(client) {
 
       if (sub === "remove") {
         const id = interaction.options.getString("id", true);
-        const ok = routines.removeRoutine(id, ctx.userId);
+        const ok = await routines.removeRoutine(id, ctx.userId);
         await interaction.reply({
           content: ok ? `Removed routine \`${id}\`.` : `No routine \`${id}\` found.`,
           flags: MessageFlags.Ephemeral,
@@ -1103,7 +1103,7 @@ export function registerInteractions(client) {
 
       if (sub === "pause" || sub === "resume") {
         const id = interaction.options.getString("id", true);
-        const r = routines.setRoutineEnabled(id, ctx.userId, sub === "resume");
+        const r = await routines.setRoutineEnabled(id, ctx.userId, sub === "resume");
         await interaction.reply({
           content: r ? `${sub === "pause" ? "Paused" : "Resumed"} routine \`${id}\`.` : `No routine \`${id}\` found.`,
           flags: MessageFlags.Ephemeral,
@@ -1171,7 +1171,7 @@ export function registerInteractions(client) {
       const ctx = routineContextFromInteraction(interaction);
       try {
         const zone = userTimeZone(ctx.userId);
-        const routine = routines.addRoutine({
+        const routine = await routines.addRoutine({
           ...ctx,
           type: "message",
           payload: message,
@@ -1301,7 +1301,7 @@ export function registerInteractions(client) {
         try {
           const zone = userTimeZone(uid);
           const schedule = routines.parseRecurrence(when, "once", zone);
-          const routine = routines.addRoutine({
+          const routine = await routines.addRoutine({
             userId: uid, channelId: null, guildId: interaction.guild?.id || null,
             type: "heartbeat", payload: prompt, schedule, timezone: zone,
           });
@@ -1317,7 +1317,7 @@ export function registerInteractions(client) {
       }
 
       if (sub === "list") {
-        const list = routines.listRoutines(uid).filter((r) => r.type === "heartbeat");
+        const list = (await routines.listRoutines(uid)).filter((r) => r.type === "heartbeat");
         const body = list.length === 0
           ? "No heartbeat automations scheduled."
           : `**Your heartbeats (${list.length}):**\n${list.map(routines.formatRoutine).join("\n")}`;
@@ -1327,7 +1327,7 @@ export function registerInteractions(client) {
 
       if (sub === "remove") {
         const id = interaction.options.getString("id", true);
-        const ok = routines.removeRoutine(id, uid);
+        const ok = await routines.removeRoutine(id, uid);
         await interaction.reply({
           content: ok ? `Removed heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.`,
           flags: MessageFlags.Ephemeral,
@@ -1337,7 +1337,7 @@ export function registerInteractions(client) {
 
       if (sub === "pause" || sub === "resume") {
         const id = interaction.options.getString("id", true);
-        const r = routines.setRoutineEnabled(id, uid, sub === "resume");
+        const r = await routines.setRoutineEnabled(id, uid, sub === "resume");
         await interaction.reply({
           content: r ? `${sub === "pause" ? "Paused" : "Resumed"} heartbeat \`${id}\`.` : `No heartbeat \`${id}\` found.`,
           flags: MessageFlags.Ephemeral,
