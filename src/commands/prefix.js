@@ -99,6 +99,18 @@ async function sendLogReply(target, userId, { source = "all", lines = 30 } = {})
   }
 }
 
+// Memory reads/writes raise MEMORY_UNAVAILABLE while the store is being repaired.
+// Commands must answer the user instead of throwing out of the message handler.
+async function withMemoryStore(message, fn) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    if (error?.code !== "MEMORY_UNAVAILABLE") throw error;
+    await reply(message, "Memory is unavailable right now. Run `/doctor` and restore the store, then retry.");
+    return { ok: false, value: null };
+  }
+}
+
 async function handleCommand(message, cmd, rest) {
   const uid = message.author.id;
   const cid = message.channelId;
@@ -137,14 +149,16 @@ async function handleCommand(message, cmd, rest) {
 
     case "remember": {
       if (!rest) return void (await reply(message, "Usage: \`remember <text>\`")), true;
-      const e = store.remember("user", uid, rest);
+      const { ok, value: e } = await withMemoryStore(message, () => store.remember("user", uid, rest));
+      if (!ok) return true;
       await reply(message, `Got it. Remembered (id \`${e.id}\`).`);
       return true;
     }
 
     case "remember-channel": {
       if (!rest) return void (await reply(message, "Usage: \`remember-channel <text>\`")), true;
-      const e = store.remember("channel", cid, rest);
+      const { ok, value: e } = await withMemoryStore(message, () => store.remember("channel", cid, rest));
+      if (!ok) return true;
       await reply(message, `Noted for this channel (id \`${e.id}\`).`);
       return true;
     }
@@ -152,15 +166,22 @@ async function handleCommand(message, cmd, rest) {
     case "forget": {
       const id = rest.trim();
       if (!id) return void (await reply(message, "Usage: \`forget <id>\`")), true;
-      const ok =
-        store.forget("user", uid, id) || store.forget("channel", cid, id);
-      await reply(message, ok ? `Forgot \`${id}\`.` : `No memory \`${id}\``);
+      const { ok, value: removed } = await withMemoryStore(
+        message,
+        () => store.forget("user", uid, id) || store.forget("channel", cid, id),
+      );
+      if (!ok) return true;
+      await reply(message, removed ? `Forgot \`${id}\`.` : `No memory \`${id}\``);
       return true;
     }
 
     case "memories": {
-      const u = store.list("user", uid);
-      const c = store.list("channel", cid);
+      const { ok, value } = await withMemoryStore(message, () => ({
+        u: store.list("user", uid),
+        c: store.list("channel", cid),
+      }));
+      if (!ok) return true;
+      const { u, c } = value;
       const lines = [];
       lines.push(`**Your memories (${u.length}):**`);
       for (const e of u) lines.push(`\`${e.id}\` ${e.text}`);

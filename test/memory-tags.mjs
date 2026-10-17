@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +11,7 @@ const memory = await import(new URL("../src/memory.js", import.meta.url).href);
 const { persistMemoryTags } = await import(new URL("../src/chat/memory-tags.js", import.meta.url).href);
 
 test.after(() => {
+  memory.closeMemory();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -52,4 +54,38 @@ test("empty fact is skipped and empty input returns empty clean text", () => {
   const result = persistMemoryTags('<remember scope="user">  </remember>', "speaker-5", null);
   assert.equal(result.saved, 0);
   assert.equal(result.clean, "");
+});
+
+test("write/delete failures preserve the reply and count only successful mutations", (t) => {
+  const retained = memory.remember("user", "partial", "retain this fact");
+  const db = new DatabaseSync(join(dataDir, "memory.sqlite"));
+  t.after(() => {
+    db.exec("DROP TRIGGER reject_test_insert; DROP TRIGGER reject_test_delete;");
+    db.close();
+  });
+  db.exec(`CREATE TRIGGER reject_test_insert BEFORE INSERT ON memory_records WHEN new.text = 'reject this fact'
+    BEGIN SELECT RAISE(ABORT, 'synthetic insert failure'); END;
+    CREATE TRIGGER reject_test_delete BEFORE DELETE ON memory_records WHEN old.text = 'retain this fact'
+    BEGIN SELECT RAISE(ABORT, 'synthetic delete failure'); END;`);
+  t.mock.method(console, "warn", () => {});
+  const result = persistMemoryTags(`Useful reply.
+    <remember>first persisted fact</remember><remember>reject this fact</remember>
+    <remember>last persisted fact</remember><forget id="${retained.id}"></forget>`, "partial", "channel");
+  assert.equal(result.clean, "Useful reply.");
+  assert.deepEqual({ saved: result.saved, dropped: result.dropped, failed: result.failed }, { saved: 2, dropped: 0, failed: 2 });
+  assert.deepEqual(memory.list("user", "partial").map((entry) => entry.text), ["retain this fact", "first persisted fact", "last persisted fact"]);
+});
+
+test("disabled memory strips remember/forget tags and reports failure without throwing", (t) => {
+  memory.closeMemory();
+  rmSync(join(dataDir, "memory.sqlite"));
+  rmSync(join(dataDir, "memory.sqlite.cutover"));
+  writeFileSync(join(dataDir, "memory.json"), "{broken");
+  assert.equal(memory.initializeMemory({ strict: false }).available, false);
+  const warnings = [];
+  t.mock.method(console, "warn", (message) => warnings.push(message));
+  const result = persistMemoryTags('Useful reply. <remember>private fact</remember><forget id="old-id"></forget>', "partial", "channel");
+  assert.deepEqual(result, { clean: "Useful reply.", saved: 0, dropped: 0, failed: 2 });
+  assert.equal(warnings.length, 2);
+  assert.ok(warnings.every((message) => message.includes("MEMORY_UNAVAILABLE") && !message.includes("private fact")));
 });

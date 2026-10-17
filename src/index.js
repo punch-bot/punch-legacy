@@ -16,11 +16,17 @@ import { registerInteractions } from "./commands/interactions.js";
 import { buildSlashCommands } from "./commands/slash.js";
 import { fireRoutine } from "./chat/routines-fire.js";
 import { startBotHttpServer } from "./gateway/bot-server.js";
+import { initializeMemory } from "./memory.js";
 
 if (!TOKEN) {
   console.error("Missing DISCORD_TOKEN. Copy .env.example to .env and fill it in.");
   process.exit(1);
 }
+
+// Keep the bot available when memory needs repair. A failed import disables
+// memory reads/writes; it never substitutes an empty writable store.
+const memoryStatus = initializeMemory({ strict: false });
+if (!memoryStatus.available) console.error(`${memoryStatus.error} Memory is disabled; inspect /doctor and restore the source/backup before retrying.`);
 
 const client = createClient();
 registry.client = client;
@@ -39,26 +45,6 @@ client.once(Events.ClientReady, async (c) => {
     registry.spectrumHandle = await startSpectrumAlongsideBot();
     if (registry.spectrumHandle && !registry.spectrumSignalsBound) {
       registry.spectrumSignalsBound = true;
-      for (const signal of ["SIGINT", "SIGTERM"]) {
-        process.on(signal, () => {
-          // Discord owns process lifetime; only sync-stop Spectrum here.
-          void shutdownSpectrum(signal);
-        });
-      }
-    }
-  } catch (err) {
-    console.error(
-      "[spectrum] failed to boot alongside Discord:",
-      err && err.message ? err.message : String(err),
-    );
-  }
-
-  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
-  try {
-    const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
-    spectrumHandle = await startSpectrumAlongsideBot();
-    if (spectrumHandle && !spectrumSignalsBound) {
-      spectrumSignalsBound = true;
       for (const signal of ["SIGINT", "SIGTERM"]) {
         process.on(signal, () => {
           // Discord owns process lifetime; only sync-stop Spectrum here.

@@ -13,7 +13,7 @@
     "lint": "eslint src/spectrum.js src/spectrum src/punch-turn.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "chrono-node": "^2.9.1",

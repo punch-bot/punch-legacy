@@ -77,6 +77,16 @@ test("runDoctor reports unavailable routing without throwing", async () => {
   assert.equal(result.checks.find((item) => item.id === "security-password").status, "warn");
 });
 
+test("doctor reports disabled memory with an actionable recovery message", async () => {
+  const result = await runDoctor({ ...dependencies(successfulFetch), memory: {
+    getMemoryStatus: () => ({ available: false, error: "migration refused: malformed /state/memory/2026-10-17.json" }),
+  } });
+  const memory = result.checks.find((item) => item.id === "memory");
+  assert.equal(memory.status, "fail");
+  assert.match(memory.message, /2026-10-17.json/);
+  assert.match(memory.fix, /Restore/);
+});
+
 test("runDoctor sends the per-sandbox doctor credential", async () => {
   const headers = [];
   await runDoctor({

@@ -2,20 +2,19 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { MemoryDatabase } from "./memory-db.js";
+import { cleanLine, normalize, terms, matchesTerm, MEMORY_PREAMBLE_MAX_CHARS } from "./memory-text.js";
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
-const MEM_FILE = join(DATA_DIR, "memory.json");
 const SESSION_FILE = join(DATA_DIR, "sessions.json");
 const THREAD_OWNERS_FILE = join(DATA_DIR, "thread-owners.json");
 const CONFIG_FILE = join(DATA_DIR, "config.json");
-const SECRETS_FILE = join(DATA_DIR, "secrets.json");
-const DAILY_DIR = join(DATA_DIR, "memory");
 const DAILY_RETENTION_DAYS = 30;
 const DAILY_MAX_RECORDS = 200;
 const NOTE_PART_MAX_CHARS = 1_000;
@@ -85,15 +84,42 @@ function save(file, obj) {
   }
 }
 
-let mem = load(MEM_FILE, { users: {}, channels: {} });
+let memoryDatabase;
+let memoryFailure;
+function database() {
+  // Initialize on the first memory operation. A failed migration never enables
+  // writes to an empty fallback and may be retried after restoring the source.
+  if (memoryFailure) throw memoryFailure;
+  try {
+    return memoryDatabase ||= new MemoryDatabase(DATA_DIR);
+  } catch (error) {
+    memoryFailure = Object.assign(new Error(`[memory] store unavailable: ${error.message}`), { code: "MEMORY_UNAVAILABLE", status: 503 });
+    throw memoryFailure;
+  }
+}
+
+export function initializeMemory({ strict = true } = {}) {
+  // An explicit initialization is also the recovery/retry operation. Ordinary
+  // turns never keep reparsing a broken source or write to an empty fallback.
+  memoryFailure = undefined;
+  try { database(); } catch (error) {
+    if (strict) throw error;
+  }
+  return getMemoryStatus();
+}
+
+export function getMemoryStatus() {
+  return { available: !memoryFailure, initialized: Boolean(memoryDatabase), error: memoryFailure?.message || null };
+}
+
+export function closeMemory() {
+  memoryDatabase?.close();
+  memoryDatabase = undefined;
+  memoryFailure = undefined;
+}
 let sessions = load(SESSION_FILE, {});
 let threadOwners = load(THREAD_OWNERS_FILE, {});
 let config = load(CONFIG_FILE, { allowedChannels: {}, summonWords: {}, guildSettings: {} });
-
-// Tolerate old or partially-written memory documents without changing their format.
-if (!mem || typeof mem !== "object") mem = {};
-if (!mem.users || typeof mem.users !== "object") mem.users = {};
-if (!mem.channels || typeof mem.channels !== "object") mem.channels = {};
 
 export const GUILD_SETTINGS_DEFAULTS = {
   reactionSummonEmoji: "🤖",
@@ -127,127 +153,73 @@ export const USER_SETTINGS_DEFAULTS = {
   timeZone: "UTC",
 };
 
-let seq = 0;
 function newId() {
-  seq += 1;
-  return (Date.now().toString(36) + seq.toString(36)).slice(-6);
+  return randomUUID();
 }
 
-function bank(scope) {
-  return scope === "channel" ? mem.channels : mem.users;
-}
-
-export function remember(scope, ownerId, text) {
-  const b = bank(scope);
-  if (!b[ownerId]) b[ownerId] = [];
-  const entry = { id: newId(), text: text.trim(), ts: Date.now() };
-  b[ownerId].push(entry);
-  save(MEM_FILE, mem);
+export function remember(scope, ownerId, text, { pinned = false } = {}) {
+  if (!["user", "channel"].includes(scope) || ownerId == null || !String(ownerId) || !String(text).trim()) {
+    throw new Error("Memory requires a scope, owner, and nonempty text.");
+  }
+  const entry = { id: newId(), text: text.trim(), ts: Date.now(), ...(pinned ? { pinned: true } : {}) };
+  database().insert("fact", scope, ownerId, entry);
   return entry;
 }
 
 export function forget(scope, ownerId, id) {
-  const b = bank(scope);
-  const entries = b[ownerId];
-  if (!entries) return false;
-  const i = entries.findIndex((e) => e.id === id);
-  if (i < 0) return false;
-  entries.splice(i, 1);
-  save(MEM_FILE, mem);
-  return true;
+  return database().forget(scope, ownerId, id);
 }
 
 export function list(scope, ownerId) {
-  return bank(scope)[ownerId] || [];
+  return database().list(scope, ownerId);
 }
 
-const STOP_WORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "how",
-  "i", "in", "is", "it", "me", "my", "of", "on", "or", "that", "the", "this", "to",
-  "was", "what", "when", "where", "which", "who", "with", "you", "your",
-]);
-
-function terms(text) {
-  // PNCH-42: keep + and # attached to tokens so "C++"/"C#" are their own terms.
-  const words = String(text || "").toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}_'+#-]*/gu) || [];
-  const useful = words.filter((word) => word.length > 1 && !STOP_WORDS.has(word));
-  return [...new Set(useful.length ? useful : words.filter((word) => word.length > 1))];
+export function pinMemory(scope, ownerId, id, pinned = true) {
+  return database().pin(scope, ownerId, id, Boolean(pinned));
 }
 
-function cleanLine(text) {
-  return String(text || "").replace(/\s+/g, " ").trim();
-}
-
-function normalize(text) {
-  // PNCH-42: keep significant punctuation. Stripping \p{P}\p{S} made
-  // "C++", "C#", and "C" normalize identically and dedupe into one fact.
-  // Drop only casing and whitespace differences, plus quote/bullet glyphs
-  // that vary by formatting, never + # . - (they change meaning).
-  return cleanLine(text)
-    .toLowerCase()
-    .normalize("NFKC")
-    .replace(/["'`\u201c\u201d\u2018\u2019\u2022\u2013\u2014]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+export function coreProfile(userId) {
+  const lines = [];
+  const timeZone = config.userSettings?.[userId]?.timeZone;
+  if (timeZone) lines.push(`- Configured time zone: ${cleanLine(timeZone).slice(0, 80)}`);
+  let entries;
+  try { entries = database().coreFacts(userId); } catch {
+    return lines.join("\n");
+  }
+  const seen = new Set();
+  let used = lines.join("\n").length;
+  for (const entry of entries) {
+    if (containsSensitive(entry.text)) continue;
+    const text = cleanLine(entry.text);
+    const key = normalize(text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const available = 600 - used - (lines.length ? 1 : 0);
+    if (available < 4 || lines.length >= 5) break;
+    // One long fact cannot hide all other profile items.
+    const budget = Math.min(available, 180);
+    const line = text.length + 2 > budget ? `- ${text.slice(0, budget - 3).trimEnd()}…` : `- ${text}`;
+    lines.push(line);
+    used += line.length + (lines.length > 1 ? 1 : 0);
+  }
+  return lines.join("\n");
 }
 
 function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-function dailyFile(date) {
-  return join(DAILY_DIR, `${date}.json`);
-}
-
-function readDailyRecords(userId, channelId) {
-  if (!existsSync(DAILY_DIR)) return [];
-  const cutoff = dateKey(new Date(Date.now() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
-  const records = [];
-  for (const name of readdirSync(DAILY_DIR)) {
-    const match = /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name);
-    if (!match || match[1] < cutoff) continue;
-    const document = load(join(DAILY_DIR, name), { records: [] });
-    const entries = Array.isArray(document) ? document : document.records;
-    if (!Array.isArray(entries)) continue;
-    for (const entry of entries) {
-      if (String(entry.userId) !== String(userId) || String(entry.channelId) !== String(channelId)) continue;
-      records.push({ ...entry, date: entry.date || match[1] });
-    }
-  }
-  return records;
-}
-
-function candidates({ userId, channelId, isDm }) {
-  const records = [];
-  for (const entry of list("user", userId)) {
-    records.push({ ...entry, scope: "user", source: "durable", citation: `[memory:user:${entry.id}]` });
-  }
-  for (const entry of list("channel", channelId)) {
-    records.push({ ...entry, scope: "channel", source: "durable", citation: `[memory:channel:${entry.id}]` });
-  }
-  if (isDm) {
-    for (const entry of readDailyRecords(userId, channelId)) {
-      records.push({
-        ...entry,
-        text: entry.text || [entry.userText, entry.assistantText].filter(Boolean).join(" / "),
-        scope: "dm",
-        source: "daily",
-        citation: `[daily:${entry.date}:${entry.id}]`,
-      });
-    }
-  }
-  return records.filter((record) => cleanLine(record.text));
-}
-
 export function searchMemory({ userId, channelId, query = "", isDm = false, limit = 10 } = {}) {
-  const records = candidates({ userId, channelId, isDm });
   const queryTerms = terms(query);
+  if (!queryTerms.length) return [];
+  const cutoff = dateKey(new Date(Date.now() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
+  const records = database().search({ userId, channelId, isDm, queryTerms, cutoff });
   const now = Date.now();
   const documentFrequency = new Map();
   for (const record of records) {
     const recordTerms = new Set(terms(record.text));
     for (const term of queryTerms) {
-      if (recordTerms.has(term) || cleanLine(record.text).toLowerCase().includes(term)) {
+      if ([...recordTerms].some((word) => matchesTerm(word, term))) {
         documentFrequency.set(term, (documentFrequency.get(term) || 0) + 1);
       }
     }
@@ -256,13 +228,12 @@ export function searchMemory({ userId, channelId, query = "", isDm = false, limi
   const ranked = [];
   for (const record of records) {
     const text = cleanLine(record.text);
-    const lower = text.toLowerCase();
     const recordTerms = terms(text);
     let keywordScore = 0;
     const matches = [];
     for (const term of queryTerms) {
       const exactCount = recordTerms.filter((word) => word === term).length;
-      const partial = exactCount === 0 && lower.includes(term);
+      const partial = exactCount === 0 && recordTerms.some((word) => matchesTerm(word, term));
       if (!exactCount && !partial) continue;
       const df = documentFrequency.get(term) || 0;
       const idf = Math.log(1 + (records.length + 1) / (df + 1));
@@ -302,7 +273,7 @@ export function explainMemory(args) {
 }
 
 export function preamble(userId, channelId, query = "", options = {}) {
-  const maxChars = Math.max(0, Math.min(20_000, Number(options.maxChars ?? 3_500) || 0));
+  const maxChars = Math.max(0, Math.min(MEMORY_PREAMBLE_MAX_CHARS, Number(options.maxChars ?? 3_500) || 0));
   const limit = Math.max(0, Math.min(100, Number(options.limit ?? 10) || 0));
   if (!maxChars || !limit) return "";
   const recallSessionId = options.recallSessionId ? String(options.recallSessionId) : null;
@@ -360,7 +331,7 @@ export function clearMemoryRecall(sessionId) {
 function dedupeEntries(entries) {
   const seen = new Set();
   const kept = [];
-  const ordered = [...entries].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+  const ordered = [...entries].sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true) || Number(b.ts || 0) - Number(a.ts || 0));
   for (const entry of ordered) {
     const key = normalize(entry.text);
     if (!key || seen.has(key)) continue;
@@ -377,6 +348,7 @@ export function exportUserMemory(userId, { source = "punch" } = {}) {
       text: cleanLine(entry.text),
       ts: Number.isFinite(Number(entry.ts)) ? Number(entry.ts) : Date.now(),
       ...(entry.origin ? { origin: String(entry.origin).slice(0, 120) } : {}),
+      ...(entry.pinned === true ? { pinned: true } : {}),
     }));
   return {
     format: "punch-memory-v1",
@@ -399,52 +371,54 @@ export function importUserMemory(userId, document, { source = "import" } = {}) {
     throw new Error("Memory export has an invalid record count.");
   }
 
-  const before = list("user", userId).length;
-  const existing = new Set(list("user", userId).map((entry) => normalize(entry.text)));
-  let imported = 0;
-  let skipped = 0;
-  for (const record of document.records) {
-    const text = cleanLine(record?.text);
-    const key = normalize(text);
-    if (!text || text.length > 2_000 || containsSensitive(text) || existing.has(key)) {
-      skipped += 1;
-      continue;
+  return database().transaction(() => {
+    const before = list("user", userId).length;
+    const existing = new Set(list("user", userId).map((entry) => normalize(entry.text)));
+    let imported = 0;
+    let skipped = 0;
+    for (const record of document.records) {
+      const text = cleanLine(record?.text);
+      const key = normalize(text);
+      if (!text || text.length > 2_000 || containsSensitive(text) || existing.has(key)) {
+        skipped += 1;
+        continue;
+      }
+      database().insert("fact", "user", userId, {
+        id: newId(), text,
+        ts: Number.isFinite(Number(record.ts)) ? Number(record.ts) : Date.now(),
+        origin: String(record.origin || document.source || source).slice(0, 120),
+        ...(record.pinned === true ? { pinned: true } : {}),
+      });
+      existing.add(key);
+      imported += 1;
     }
-    if (!mem.users[userId]) mem.users[userId] = [];
-    mem.users[userId].push({
-      id: newId(),
-      text,
-      ts: Number.isFinite(Number(record.ts)) ? Number(record.ts) : Date.now(),
-      origin: String(record.origin || document.source || source).slice(0, 120),
-    });
-    existing.add(key);
-    imported += 1;
-  }
-  if (mem.users[userId]) mem.users[userId] = dedupeEntries(mem.users[userId]);
-  const after = list("user", userId).length;
-  if (after !== before || imported) save(MEM_FILE, mem);
-  return { imported, skipped, before, after, removed: before + imported - after };
+    // Preserve the explicit import API's dedupe behavior, inside the same transaction.
+    const entries = list("user", userId);
+    const keep = new Set(dedupeEntries(entries).map((entry) => entry.id));
+    for (const entry of entries) if (!keep.has(entry.id)) database().forget("user", userId, entry.id);
+    const after = list("user", userId).length;
+    return { imported, skipped, before, after, removed: before + imported - after };
+  });
 }
 
 export function compactMemory({ userId, channelId } = {}) {
-  const userBefore = list("user", userId).length;
-  const channelBefore = list("channel", channelId).length;
-  if (userId != null && mem.users[userId]) mem.users[userId] = dedupeEntries(mem.users[userId]);
-  if (channelId != null && mem.channels[channelId]) mem.channels[channelId] = dedupeEntries(mem.channels[channelId]);
-  const userAfter = list("user", userId).length;
-  const channelAfter = list("channel", channelId).length;
-  const stats = {
-    before: userBefore + channelBefore,
-    after: userAfter + channelAfter,
-    removed: userBefore + channelBefore - userAfter - channelAfter,
-    userRemoved: userBefore - userAfter,
-    channelRemoved: channelBefore - channelAfter,
-  };
-  if (stats.removed) save(MEM_FILE, mem);
-  return stats;
+  return database().transaction(() => {
+    const removed = [];
+    const before = [];
+    for (const [scope, ownerId] of [["user", userId], ["channel", channelId]]) {
+      const entries = list(scope, ownerId);
+      before.push(entries.length);
+      const keep = new Set(dedupeEntries(entries).map((entry) => entry.id));
+      for (const entry of entries) if (!keep.has(entry.id)) database().forget(scope, ownerId, entry.id);
+      removed.push(entries.length - keep.size);
+    }
+    const total = before[0] + before[1];
+    return { before: total, after: total - removed[0] - removed[1],
+      removed: removed[0] + removed[1], userRemoved: removed[0], channelRemoved: removed[1] };
+  });
 }
 
-const SENSITIVE_RE = /(?:api[_ -]?key|password|passwd|secret|access[_ -]?token|auth(?:orization)?[_ -]?token|bearer)\s*(?:is|=|:)?\s*[^\s,;]+|\b(?:sk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gi;
+const SENSITIVE_RE = /\b(?:api[_ -]?key|password|passwd|secret|access[_ -]?token|auth(?:orization)?[_ -]?token|bearer)\b\s*(?:is|=|:)?\s*[^\s,;]+|\b(?:sk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gi;
 
 function containsSensitive(text) {
   SENSITIVE_RE.lastIndex = 0;
@@ -458,75 +432,58 @@ function safeNotePart(text) {
 }
 
 function extractFacts(userText) {
-  const text = String(userText || "");
-  const patterns = [
-    /\bmy name is\s+([^\n.!?]{1,100})/gi,
-    /\bi prefer\s+([^\n.!?]{1,180})/gi,
-    /\bmy time ?zone is\s+([^\n.!?]{1,80})/gi,
-    /\bi use\s+([^\n.!?]{1,180})/gi,
-    /\bremember that\s+([^\n.!?]{1,240})/gi,
-  ];
+  // Dots inside names/URLs are not sentence boundaries. Skip an entire question
+  // before matching a fact prefix, so its declarative-looking tail is not saved.
+  const sentences = String(userText || "").split(/(?<=[.!?])(?:[ \t]+|$)|[\r\n]+/u);
+  const pattern = /\b(?:my name is|i prefer|my time ?zone is|i use|remember that)\s+.+/i;
   const facts = [];
   const seen = new Set();
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const fact = cleanLine(match[0]);
-      const key = normalize(fact);
-      if (!fact || containsSensitive(fact) || seen.has(key)) continue;
-      seen.add(key);
-      facts.push(fact);
-    }
+  for (const sentence of sentences) {
+    if (/\?\s*$/.test(sentence)) continue;
+    const match = sentence.match(pattern);
+    if (!match) continue;
+    const fact = cleanLine(match[0]).replace(/[.!]$/, "");
+    const key = normalize(fact);
+    if (!fact || fact.length > 260 || containsSensitive(fact) || seen.has(key)) continue;
+    seen.add(key);
+    facts.push(fact);
+    if (facts.length === 3) break;
   }
   return facts;
 }
 
-function pruneDailyFiles(today) {
-  if (!existsSync(DAILY_DIR)) return;
-  const cutoff = dateKey(new Date(new Date(`${today}T00:00:00.000Z`).getTime() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
-  for (const name of readdirSync(DAILY_DIR)) {
-    const match = /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name);
-    if (match && match[1] < cutoff) unlinkSync(join(DAILY_DIR, name));
-  }
-}
-
 export function captureConversation({ userId, channelId, isDm, userText, assistantText, extractDurableFacts = true } = {}) {
   if (!isDm) return { notesAdded: 0, factsAdded: 0, facts: [] };
-
-  const today = dateKey();
-  const file = dailyFile(today);
-  const document = load(file, { date: today, records: [] });
-  const records = Array.isArray(document.records) ? document.records : [];
-  const safeUser = safeNotePart(userText);
-  const safeAssistant = safeNotePart(assistantText);
-  let notesAdded = 0;
-  if (safeUser || safeAssistant) {
-    records.push({
-      id: newId(),
-      userId: String(userId),
-      channelId: String(channelId),
-      text: cleanLine(`User: ${safeUser}${safeAssistant ? ` Assistant: ${safeAssistant}` : ""}`),
-      userText: safeUser,
-      assistantText: safeAssistant,
-      ts: Date.now(),
-      date: today,
-    });
-    document.date = today;
-    document.records = records.slice(-DAILY_MAX_RECORDS);
-    save(file, document);
-    pruneDailyFiles(today);
-    notesAdded = 1;
+  if (userId == null || channelId == null || !String(userId) || !String(channelId)) {
+    throw new Error("Daily memory requires user and channel ownership.");
   }
-
-  const existing = new Set(list("user", userId).map((entry) => normalize(entry.text)));
-  const facts = [];
-  for (const fact of extractDurableFacts ? extractFacts(userText) : []) {
-    const key = normalize(fact);
-    if (existing.has(key)) continue;
-    remember("user", userId, fact);
-    existing.add(key);
-    facts.push(fact);
-  }
-  return { notesAdded, factsAdded: facts.length, facts };
+  return database().transaction(() => {
+    const today = dateKey();
+    const safeUser = safeNotePart(userText);
+    const safeAssistant = safeNotePart(assistantText);
+    let notesAdded = 0;
+    if (safeUser || safeAssistant) {
+      const entry = {
+        id: newId(), userId: String(userId), channelId: String(channelId),
+        text: cleanLine(`User: ${safeUser}${safeAssistant ? ` Assistant: ${safeAssistant}` : ""}`),
+        userText: safeUser, assistantText: safeAssistant, ts: Date.now(), date: today,
+      };
+      database().insert("daily", "dm", userId, entry, channelId, today);
+      const cutoff = dateKey(new Date(Date.now() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
+      database().pruneDaily(userId, channelId, today, cutoff, DAILY_MAX_RECORDS);
+      notesAdded = 1;
+    }
+    const existing = new Set(list("user", userId).map((entry) => normalize(entry.text)));
+    const facts = [];
+    for (const fact of extractDurableFacts ? extractFacts(userText) : []) {
+      const key = normalize(fact);
+      if (existing.has(key)) continue;
+      remember("user", userId, fact);
+      existing.add(key);
+      facts.push(fact);
+    }
+    return { notesAdded, factsAdded: facts.length, facts };
+  });
 }
 
 export function getSession(channelId) {

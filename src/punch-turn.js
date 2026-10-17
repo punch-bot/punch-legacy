@@ -7,7 +7,6 @@
 
 import {
   runAgent,
-  getFile,
   reloadSandboxMap,
   apiUrlFor,
 } from "./agent.js";
@@ -19,6 +18,7 @@ import {
   promptBlock,
 } from "./prompt-blocks.js";
 import { formatMessageTimestamp } from "./timezone.js";
+import { beginMemoryRecall, endMemoryRecall } from "./memory-recall.js";
 
 const NO_SANDBOX_MSG =
   "You don't have a Punch sandbox yet. Ask an admin to set one up with `/sandbox create <name>` " +
@@ -48,16 +48,6 @@ function spectrumTurnInstructions() {
       "Do not emit Discord-only tags (<react>, <embed>, <question>).",
     "this turn",
   );
-}
-
-async function fetchProjectMemory(uid) {
-  try {
-    const file = await getFile("/work/.punch-memory.md", uid);
-    const text = file.buffer.toString("utf8").trim().slice(0, 12_000);
-    return text || "";
-  } catch {
-    return "";
-  }
 }
 
 /**
@@ -107,8 +97,7 @@ export async function runPunchTurn({
     };
   }
 
-  const projectMemory = await fetchProjectMemory(uid);
-  const relatedText = store.preamble(uid, key, body, { isDm: true });
+  const memoryContextId = beginMemoryRecall(uid, key, true);
   const settings = store.getUserSettings(uid);
   const sentAt = formatMessageTimestamp(Date.now(), settings.timeZone);
   const who = speaker || `spectrum-user`;
@@ -117,7 +106,8 @@ export async function runPunchTurn({
   const preambleParts = [];
   if (sentAt) preambleParts.push(`Message sent at ${sentAt}.`);
   preambleParts.push(spectrumTurnInstructions());
-  preambleParts.push(memoryBlock({ projectMemory, relatedText }));
+  const profile = store.coreProfile(uid);
+  preambleParts.push(memoryBlock({ contextId: memoryContextId, profile, unavailable: !store.getMemoryStatus().available }));
 
   const prompt = assemblePrompt(
     preambleParts,
@@ -136,6 +126,8 @@ export async function runPunchTurn({
       ? String(/** @type {{ message: unknown }} */ (err).message)
       : String(err);
     return { ok: false, code: "agent_error", error: message };
+  } finally {
+    endMemoryRecall(memoryContextId);
   }
 
   if (result?.sessionId) {
@@ -143,13 +135,17 @@ export async function runPunchTurn({
   }
 
   const replyText = stripDiscordMarkup(result?.text || "");
-  store.captureConversation({
-    userId: uid,
-    channelId: key,
-    isDm: true,
-    userText: body,
-    assistantText: replyText,
-  });
+  try {
+    store.captureConversation({
+      userId: uid,
+      channelId: key,
+      isDm: true,
+      userText: body,
+      assistantText: replyText,
+    });
+  } catch (error) {
+    console.error(`[memory] capture unavailable for ${uid}:`, error.message);
+  }
 
   return {
     ok: true,

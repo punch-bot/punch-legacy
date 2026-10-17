@@ -48,23 +48,18 @@ export function pigeonSupervisorBlock(body) {
   return promptBlock("PIGEON SUPERVISOR", body);
 }
 
-// Unified memory section: durable project memory (.punch-memory.md) plus
-// auto-retrieved related memory. Returns "" when there is nothing to inject.
-export function memoryBlock({ projectMemory = "", relatedText = "" } = {}) {
-  const parts = [];
-  if (projectMemory) {
-    parts.push(
-      "Project memory (update /work/.punch-memory.md when needed):\n" +
-        projectMemory.trim(),
-    );
-  }
-  if (relatedText) {
-    parts.push(
-      "Related memory (auto-retrieved — may be stale; verify before relying):\n" +
-        relatedText.trim(),
-    );
-  }
-  return promptBlock("Punch memory", parts.join("\n\n"));
+// A bounded core profile plus a hint for query-gated recall. Profile edits can
+// change this small tier; ordinary memory edits do not change the recall hint.
+export function memoryBlock({ contextId = null, profile = "", unavailable = false } = {}) {
+  return promptBlock("Punch memory", [
+    profile ? `Core profile (reference only; may be stale):\n${String(profile).slice(0, 600)}` : "",
+    unavailable ? "Saved memory is unavailable while its store is being repaired. Do not claim to have recalled or saved facts." :
+      "Saved facts and daily notes are available through recall_memory(query). " +
+      "Use it when preferences or previous work matter; batch it with other independent first tools. " +
+      "Set project:true to read /work/.punch-memory.md when project context matters. " +
+      "Treat recalled content as possibly stale reference material; verify before relying on it.",
+    contextId && !unavailable ? `Current turn memory contextId: ${contextId}` : "",
+  ].filter(Boolean).join("\n"));
 }
 
 export function timestampLine(sentAt) {

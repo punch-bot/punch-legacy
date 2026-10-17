@@ -106,6 +106,19 @@ async function setModelNotice(uid, model) {
   }
 }
 
+// Memory commands answer instead of failing the interaction while the store is
+// unavailable (MEMORY_UNAVAILABLE). Callers treat `undefined` as handled.
+async function memoryReplyGuard(interaction, fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    console.error(`[memory] /memory command failed:`, error.message);
+    await interaction.editReply("Memory is unavailable right now. Run `/doctor` and restore the store, then retry.")
+      .catch(() => {});
+    return undefined;
+  }
+}
+
 export function registerInteractions(client) {
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith("stats:")) {
@@ -1639,7 +1652,8 @@ export function registerInteractions(client) {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
       if (sub === "export") {
-        const bundle = store.exportUserMemory(uid, { source: "punch" });
+        const bundle = await memoryReplyGuard(interaction, () => store.exportUserMemory(uid, { source: "punch" }));
+        if (!bundle) return;
         const content = JSON.stringify(bundle, null, 2) + "\n";
         await interaction.editReply({
           content: `Exported ${bundle.records.length} durable user memory record(s). Channel memories and DM daily notes are excluded.`,
@@ -1672,7 +1686,8 @@ export function registerInteractions(client) {
       }
 
       if (sub === "compact") {
-        const stats = store.compactMemory({ userId: uid, channelId: cid });
+        const stats = await memoryReplyGuard(interaction, () => store.compactMemory({ userId: uid, channelId: cid }));
+        if (!stats) return;
         await interaction.editReply(`Memory compacted: ${stats.before} → ${stats.after}; removed ${stats.removed} duplicate(s).`);
         return;
       }
@@ -1689,9 +1704,10 @@ export function registerInteractions(client) {
       }
 
       const query = interaction.options.getString("query", true);
-      const results = sub === "explain"
+      const results = await memoryReplyGuard(interaction, () => (sub === "explain"
         ? store.explainMemory({ userId: uid, channelId: cid, query, isDm, limit: 10 })
-        : store.searchMemory({ userId: uid, channelId: cid, query, isDm, limit: 10 });
+        : store.searchMemory({ userId: uid, channelId: cid, query, isDm, limit: 10 })));
+      if (!results) return;
       if (!results.length) {
         await interaction.editReply("No relevant memories found.");
         return;
@@ -1746,6 +1762,7 @@ export function registerInteractions(client) {
         gatewayUrl,
         doctorToken: sandbox.doctorTokenFor(mapping.name),
         routines,
+        memory: store,
       });
 
       const actions = new Map();

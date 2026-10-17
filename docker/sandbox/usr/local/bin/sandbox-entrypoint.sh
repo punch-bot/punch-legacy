@@ -13,6 +13,7 @@ node /usr/local/lib/pi-runtime-migration.mjs
 # SearXNG remains a sandbox extension; refresh its image copy each start.
 mkdir -p /work/.pi/extensions
 cp /opt/pi/extensions/searxng.ts /work/.pi/extensions/searxng.ts
+cp /opt/pi/extensions/memory-recall.ts /work/.pi/extensions/memory-recall.ts
 # Seed .punch-memory.md if it doesn't exist
 if [ ! -f /work/.punch-memory.md ]; then
   cat > /work/.punch-memory.md << 'PUNCH_MEMORY_EOF'

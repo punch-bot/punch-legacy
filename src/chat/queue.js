@@ -2,7 +2,7 @@
 // shared Pi gateway (chat + routines/heartbeat) never sees concurrent turns.
 
 import { writeFileSync } from "node:fs";
-import { getFile, sandboxNameForUser } from "../agent.js";
+import { sandboxNameForUser } from "../agent.js";
 import { registry } from "../core/registry.js";
 import { shouldUseMultitaskWorker, trySpawnMultitaskWorker } from "./multitask.js";
 import { shouldSteerTurn, trySteerTurn } from "./steer.js";
@@ -140,24 +140,10 @@ function labelLineFor(userId) {
   return name ? `\n\n-# from sandbox:${name}` : "";
 }
 
-// Durable project memory (.punch-memory.md) kept inside the user's sandbox.
-// Injected per turn as part of the unified memory block; missing/unreachable
-// sandbox yields "" and the turn proceeds with related memory only.
-async function fetchProjectMemory(uid) {
-  try {
-    const file = await getFile("/work/.punch-memory.md", uid);
-    const text = file.buffer.toString("utf8").trim().slice(0, 12_000);
-    return text || "";
-  } catch {
-    return "";
-  }
-}
-
 export {
   withUserRunLock,
   enqueueChat,
   processQueue,
   setCurrentUserId,
   labelLineFor,
-  fetchProjectMemory,
 };

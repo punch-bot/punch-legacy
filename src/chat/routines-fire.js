@@ -53,7 +53,7 @@ async function fireRoutine(routine) {
       );
       state.setHeartbeatSession(uid, res.sessionId);
 
-      const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, null);
+      const { clean: textAfterMemory, saved, dropped, failed } = persistMemoryTags(res.text, uid, null);
       const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
 
       const filesToSend = [];
@@ -74,6 +74,7 @@ async function fireRoutine(routine) {
       const notes = [];
       if (saved) notes.push(`remembered ${saved}`);
       if (dropped) notes.push(`forgot ${dropped}`);
+      if (failed) notes.push(`memory update failed (${failed})`);
       if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
       if (embedErrors.length) notes.push(embedErrors.join("; "));
       if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
@@ -178,7 +179,7 @@ async function fireRoutine(routine) {
 
   const filesToSend = [];
 
-  const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
+  const { clean: textAfterMemory, saved, dropped, failed } = persistMemoryTags(res.text, uid, cid);
   const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
 
   for (const relPath of attachments) {
@@ -198,6 +199,7 @@ async function fireRoutine(routine) {
   const notes = [];
   if (saved) notes.push(`remembered ${saved}`);
   if (dropped) notes.push(`forgot ${dropped}`);
+  if (failed) notes.push(`memory update failed (${failed})`);
   if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
   if (embedErrors.length) notes.push(embedErrors.join("; "));
   if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;

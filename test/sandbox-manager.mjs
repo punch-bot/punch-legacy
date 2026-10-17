@@ -7,7 +7,7 @@ import { join } from "node:path";
 const tmpDir = mkdtempSync(join(tmpdir(), "sandbox-manager-test-"));
 process.env.DATA_DIR = tmpDir;
 
-const { isValidSandboxName, botTokenFor, resolveBotToken, addUser, removeUser } =
+const { isValidSandboxName, botTokenFor, resolveBotToken, addUser, removeUser, sandboxRunArgs } =
   await import("../src/sandbox-manager.js");
 
 after(() => {
@@ -49,4 +49,22 @@ test("removing a user also invalidates their bot token", () => {
   assert.ok(resolveBotToken(token));
   removeUser("astra");
   assert.equal(resolveBotToken(token), null);
+});
+
+test("managed sandbox creation supplies the bot address/token and the shared network", (t) => {
+  addUser("recall-test", "333");
+  const originalUrl = process.env.PUNCH_BOT_URL;
+  t.after(() => {
+    if (originalUrl === undefined) delete process.env.PUNCH_BOT_URL;
+    else process.env.PUNCH_BOT_URL = originalUrl;
+  });
+  process.env.PUNCH_BOT_URL = "http://custom-bot:4098";
+  const args = sandboxRunArgs("recall-test");
+  const env = new Map(args.flatMap((value, index) => value === "--env" ? [args[index + 1].split(/=(.*)/s).slice(0, 2)] : []));
+  assert.equal(env.get("PUNCH_BOT_URL"), "http://custom-bot:4098");
+  assert.deepEqual(resolveBotToken(env.get("PUNCH_BOT_TOKEN")), { name: "recall-test", userId: "333" });
+  assert.equal(args[args.indexOf("--network") + 1], `${process.env.PUNCH_STACK_NAME || "punch"}_edge`);
+  assert.ok(args.includes("sandbox-recall-test"));
+  delete process.env.PUNCH_BOT_URL;
+  assert.ok(sandboxRunArgs("recall-test").includes("PUNCH_BOT_URL=http://bot:4098"));
 });
