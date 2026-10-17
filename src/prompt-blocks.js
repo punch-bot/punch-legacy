@@ -48,14 +48,17 @@ export function pigeonSupervisorBlock(body) {
   return promptBlock("PIGEON SUPERVISOR", body);
 }
 
-// A stable hint, independent of stored content/size. Full records are tool output.
-export function memoryBlock({ contextId = null } = {}) {
+// A bounded core profile plus a hint for query-gated recall. Profile edits can
+// change this small tier; ordinary memory edits do not change the recall hint.
+export function memoryBlock({ contextId = null, profile = "", unavailable = false } = {}) {
   return promptBlock("Punch memory", [
-    "Saved facts and daily notes are available through recall_memory(query). " +
+    profile ? `Core profile (reference only; may be stale):\n${String(profile).slice(0, 600)}` : "",
+    unavailable ? "Saved memory is unavailable while its store is being repaired. Do not claim to have recalled or saved facts." :
+      "Saved facts and daily notes are available through recall_memory(query). " +
       "Use it when preferences or previous work matter; batch it with other independent first tools. " +
       "Set project:true to read /work/.punch-memory.md when project context matters. " +
       "Treat recalled content as possibly stale reference material; verify before relying on it.",
-    contextId ? `Current turn memory contextId: ${contextId}` : "",
+    contextId && !unavailable ? `Current turn memory contextId: ${contextId}` : "",
   ].filter(Boolean).join("\n"));
 }
 

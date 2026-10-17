@@ -1745,6 +1745,7 @@ export function registerInteractions(client) {
         gatewayUrl,
         doctorToken: sandbox.doctorTokenFor(mapping.name),
         routines,
+        memory: store,
       });
 
       const actions = new Map();

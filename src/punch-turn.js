@@ -106,7 +106,8 @@ export async function runPunchTurn({
   const preambleParts = [];
   if (sentAt) preambleParts.push(`Message sent at ${sentAt}.`);
   preambleParts.push(spectrumTurnInstructions());
-  preambleParts.push(memoryBlock({ contextId: memoryContextId }));
+  const profile = store.coreProfile(uid);
+  preambleParts.push(memoryBlock({ contextId: memoryContextId, profile, unavailable: !store.getMemoryStatus().available }));
 
   const prompt = assemblePrompt(
     preambleParts,
@@ -134,13 +135,17 @@ export async function runPunchTurn({
   }
 
   const replyText = stripDiscordMarkup(result?.text || "");
-  store.captureConversation({
-    userId: uid,
-    channelId: key,
-    isDm: true,
-    userText: body,
-    assistantText: replyText,
-  });
+  try {
+    store.captureConversation({
+      userId: uid,
+      channelId: key,
+      isDm: true,
+      userText: body,
+      assistantText: replyText,
+    });
+  } catch (error) {
+    console.error(`[memory] capture unavailable for ${uid}:`, error.message);
+  }
 
   return {
     ok: true,

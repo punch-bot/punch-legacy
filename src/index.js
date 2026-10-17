@@ -23,9 +23,10 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-// Complete the atomic import before accepting any turns. Invalid legacy data
-// fails startup visibly rather than serving an apparently empty memory store.
-initializeMemory();
+// Keep the bot available when memory needs repair. A failed import disables
+// memory reads/writes; it never substitutes an empty writable store.
+const memoryStatus = initializeMemory({ strict: false });
+if (!memoryStatus.available) console.error(`${memoryStatus.error} Memory is disabled; inspect /doctor and restore the source/backup before retrying.`);
 
 const client = createClient();
 registry.client = client;

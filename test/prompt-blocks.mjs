@@ -105,6 +105,16 @@ test("memoryBlock is a compact stable recall hint with the authorized turn conte
   assert.equal(memoryBlock(), memoryBlock({}));
 });
 
+test("memoryBlock keeps the core tier bounded and describes a disabled store honestly", () => {
+  const profile = "x".repeat(2_000);
+  const block = memoryBlock({ profile, contextId: "ctx" });
+  assert.ok(block.includes("x".repeat(600)) && !block.includes("x".repeat(601)));
+  const degraded = memoryBlock({ unavailable: true, contextId: "ctx", profile: "- Configured time zone: Europe/London" });
+  assert.match(degraded, /Europe\/London/);
+  assert.match(degraded, /Saved memory is unavailable/);
+  assert.doesNotMatch(degraded, /contextId|Saved facts and daily notes are available/);
+});
+
 test("timestampLine reports the message send time", () => {
   assert.equal(timestampLine("Saturday, August 8, 2026 at 3:42:00 PM EDT (America/New_York)"), "Message sent at Saturday, August 8, 2026 at 3:42:00 PM EDT (America/New_York).");
 });

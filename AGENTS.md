@@ -55,8 +55,8 @@ Discord / Spectrum → bot :4098 → http://sandbox-<name>:4096 (pi-gateway) →
 - `/work` is the workspace. User extensions go in `/work/.pi/extensions/*.ts`, skills in `/work/.pi/skills/<name>/SKILL.md`, and the prompt addendum in `/work/.pi/SYSTEM.md`.
 - Skill precedence is workspace, then user (`/data/pi/skills`), then bundled (`/opt/pi/skills`).
 - The supervisor writes provider keys to `/data/pi/agent/auth.json`. Sessions live in `/data/pi/sessions`, and logical session ids in `/data/pi/gateway-sessions.json`.
-- Facts and DM daily notes live in `DATA_DIR/memory.sqlite` (Node >=22.13). Startup imports legacy JSON transactionally and preserves the sources. See `docs/memory-sqlite.md` before rollback or recovery.
-- Project memory lives in `/work/.punch-memory.md`. Turns include a compact recall hint; the `recall_memory` deployment extension reads project memory only on demand (up to 12k chars). Keep that cap in sync with `MAX_MEMORY_CHARS` in core's context-pruning extension. Bot-backed recall is capped at 4k chars and authorized by sandbox identity plus a bot-created turn context.
+- Facts and DM daily notes live in `DATA_DIR/memory.sqlite` (Node >=22.13). Startup imports legacy JSON transactionally and preserves the sources. Migration failure disables memory, keeps the bot online, and is reported by `/doctor`. See `docs/memory-sqlite.md` before rollback or recovery.
+- Project memory lives in `/work/.punch-memory.md`. Turns include a core user profile (up to 5 items/600 chars) plus a compact recall hint; the `recall_memory` deployment extension reads project memory only on demand (up to 12k chars). Keep that cap in sync with `MAX_MEMORY_CHARS` in core's context-pruning extension. Bot-backed recall is capped at 4k chars and authorized by sandbox identity plus a bot-created turn context. Managed sandboxes receive `PUNCH_BOT_TOKEN` and `PUNCH_BOT_URL` (default `http://bot:4098`) at creation/recreation.
 
 ## Gotchas
 

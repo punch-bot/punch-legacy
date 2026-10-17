@@ -15,7 +15,6 @@ const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 const SESSION_FILE = join(DATA_DIR, "sessions.json");
 const THREAD_OWNERS_FILE = join(DATA_DIR, "thread-owners.json");
 const CONFIG_FILE = join(DATA_DIR, "config.json");
-const SECRETS_FILE = join(DATA_DIR, "secrets.json");
 const DAILY_RETENTION_DAYS = 30;
 const DAILY_MAX_RECORDS = 200;
 const NOTE_PART_MAX_CHARS = 1_000;
@@ -86,19 +85,37 @@ function save(file, obj) {
 }
 
 let memoryDatabase;
+let memoryFailure;
 function database() {
   // Initialize on the first memory operation. A failed migration never enables
   // writes to an empty fallback and may be retried after restoring the source.
-  return memoryDatabase ||= new MemoryDatabase(DATA_DIR);
+  if (memoryFailure) throw memoryFailure;
+  try {
+    return memoryDatabase ||= new MemoryDatabase(DATA_DIR);
+  } catch (error) {
+    memoryFailure = Object.assign(new Error(`[memory] store unavailable: ${error.message}`), { code: "MEMORY_UNAVAILABLE", status: 503 });
+    throw memoryFailure;
+  }
 }
 
-export function initializeMemory() {
-  database();
+export function initializeMemory({ strict = true } = {}) {
+  // An explicit initialization is also the recovery/retry operation. Ordinary
+  // turns never keep reparsing a broken source or write to an empty fallback.
+  memoryFailure = undefined;
+  try { database(); } catch (error) {
+    if (strict) throw error;
+  }
+  return getMemoryStatus();
+}
+
+export function getMemoryStatus() {
+  return { available: !memoryFailure, initialized: Boolean(memoryDatabase), error: memoryFailure?.message || null };
 }
 
 export function closeMemory() {
   memoryDatabase?.close();
   memoryDatabase = undefined;
+  memoryFailure = undefined;
 }
 let sessions = load(SESSION_FILE, {});
 let threadOwners = load(THREAD_OWNERS_FILE, {});
@@ -140,11 +157,11 @@ function newId() {
   return randomUUID();
 }
 
-export function remember(scope, ownerId, text) {
+export function remember(scope, ownerId, text, { pinned = false } = {}) {
   if (!["user", "channel"].includes(scope) || ownerId == null || !String(ownerId) || !String(text).trim()) {
     throw new Error("Memory requires a scope, owner, and nonempty text.");
   }
-  const entry = { id: newId(), text: text.trim(), ts: Date.now() };
+  const entry = { id: newId(), text: text.trim(), ts: Date.now(), ...(pinned ? { pinned: true } : {}) };
   database().insert("fact", scope, ownerId, entry);
   return entry;
 }
@@ -155,6 +172,37 @@ export function forget(scope, ownerId, id) {
 
 export function list(scope, ownerId) {
   return database().list(scope, ownerId);
+}
+
+export function pinMemory(scope, ownerId, id, pinned = true) {
+  return database().pin(scope, ownerId, id, Boolean(pinned));
+}
+
+export function coreProfile(userId) {
+  const lines = [];
+  const timeZone = config.userSettings?.[userId]?.timeZone;
+  if (timeZone) lines.push(`- Configured time zone: ${cleanLine(timeZone).slice(0, 80)}`);
+  let entries;
+  try { entries = database().coreFacts(userId); } catch {
+    return lines.join("\n");
+  }
+  const seen = new Set();
+  let used = lines.join("\n").length;
+  for (const entry of entries) {
+    if (containsSensitive(entry.text)) continue;
+    const text = cleanLine(entry.text);
+    const key = normalize(text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const available = 600 - used - (lines.length ? 1 : 0);
+    if (available < 4 || lines.length >= 5) break;
+    // One long fact cannot hide all other profile items.
+    const budget = Math.min(available, 180);
+    const line = text.length + 2 > budget ? `- ${text.slice(0, budget - 3).trimEnd()}…` : `- ${text}`;
+    lines.push(line);
+    used += line.length + (lines.length > 1 ? 1 : 0);
+  }
+  return lines.join("\n");
 }
 
 function dateKey(date = new Date()) {
@@ -283,7 +331,7 @@ export function clearMemoryRecall(sessionId) {
 function dedupeEntries(entries) {
   const seen = new Set();
   const kept = [];
-  const ordered = [...entries].sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0));
+  const ordered = [...entries].sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true) || Number(b.ts || 0) - Number(a.ts || 0));
   for (const entry of ordered) {
     const key = normalize(entry.text);
     if (!key || seen.has(key)) continue;
@@ -300,6 +348,7 @@ export function exportUserMemory(userId, { source = "punch" } = {}) {
       text: cleanLine(entry.text),
       ts: Number.isFinite(Number(entry.ts)) ? Number(entry.ts) : Date.now(),
       ...(entry.origin ? { origin: String(entry.origin).slice(0, 120) } : {}),
+      ...(entry.pinned === true ? { pinned: true } : {}),
     }));
   return {
     format: "punch-memory-v1",
@@ -338,6 +387,7 @@ export function importUserMemory(userId, document, { source = "import" } = {}) {
         id: newId(), text,
         ts: Number.isFinite(Number(record.ts)) ? Number(record.ts) : Date.now(),
         origin: String(record.origin || document.source || source).slice(0, 120),
+        ...(record.pinned === true ? { pinned: true } : {}),
       });
       existing.add(key);
       imported += 1;
@@ -368,7 +418,7 @@ export function compactMemory({ userId, channelId } = {}) {
   });
 }
 
-const SENSITIVE_RE = /(?:api[_ -]?key|password|passwd|secret|access[_ -]?token|auth(?:orization)?[_ -]?token|bearer)\s*(?:is|=|:)?\s*[^\s,;]+|\b(?:sk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gi;
+const SENSITIVE_RE = /\b(?:api[_ -]?key|password|passwd|secret|access[_ -]?token|auth(?:orization)?[_ -]?token|bearer)\b\s*(?:is|=|:)?\s*[^\s,;]+|\b(?:sk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gi;
 
 function containsSensitive(text) {
   SENSITIVE_RE.lastIndex = 0;

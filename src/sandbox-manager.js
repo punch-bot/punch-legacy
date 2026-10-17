@@ -142,6 +142,7 @@ function userEnvArgs(name) {
     "--env", `PI_MODEL=${process.env.PI_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
     "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
+    "--env", `PUNCH_BOT_URL=${process.env.PUNCH_BOT_URL || "http://bot:4098"}`,
   ];
 }
 
@@ -313,7 +314,13 @@ async function runSandboxContainer(name) {
   for (const volumeName of volumeNames) {
     await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
   }
-  const args = [
+  const { stdout } = await execFileAsync("docker", sandboxRunArgs(name), { timeout: 60000 });
+  return { ok: true, output: stdout.trim() };
+}
+
+export function sandboxRunArgs(name) {
+  validateSandboxName(name);
+  return [
     "run", "--detach",
     "--name", CONTAINER_NAME(name),
     "--network", NETWORK,
@@ -328,8 +335,6 @@ async function runSandboxContainer(name) {
     "--restart", "unless-stopped",
     SANDBOX_IMAGE,
   ];
-  const { stdout } = await execFileAsync("docker", args, { timeout: 60000 });
-  return { ok: true, output: stdout.trim() };
 }
 
 export async function composeUp(name) {

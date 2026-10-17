@@ -290,13 +290,19 @@ function summarize(checks) {
   return summary;
 }
 
-export async function runDoctor({ userId, sandboxName, deep = false, sandbox, apiUrl, gatewayUrl, doctorToken, routines, env = process.env } = {}) {
+export async function runDoctor({ userId, sandboxName, deep = false, sandbox, apiUrl, gatewayUrl, doctorToken, routines, memory, env = process.env } = {}) {
   const startedAt = Date.now();
   const fetchImpl = typeof env?.fetch === "function" ? env.fetch : globalThis.fetch;
   const context = { userId, sandboxName, deep: Boolean(deep), sandbox, apiUrl, gatewayUrl, doctorToken, routines, env, fetchImpl };
 
   const groups = await Promise.all([
     routingCheck(context),
+    typeof memory?.getMemoryStatus === "function" ? (() => {
+      const status = memory.getMemoryStatus();
+      return [check("memory", status.available ? "pass" : "fail", "Memory store",
+        status.available ? "SQLite memory is available." : String(status.error || "Memory is disabled.").slice(0, 700), 0,
+        status.available ? undefined : "Restore the named source or SQLite backup, then restart the bot. Memory writes remain disabled until recovery.")];
+    })() : [],
     containerCheck(context),
     gatewayCheck(context),
     supervisorChecks(context),

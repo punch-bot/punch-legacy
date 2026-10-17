@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,7 +13,7 @@ const { runPunchTurn } = await import("../src/punch-turn.js");
 const { handleChat } = await import("../src/chat/chat.js");
 test.after(() => { memory.closeMemory(); rmSync(dir, { recursive: true, force: true }); });
 
-function sandbox(t, fail = false) {
+function sandbox(t, fail = false, unavailable = false) {
   const prompts = [];
   const paths = [];
   const contexts = [];
@@ -31,10 +31,17 @@ function sandbox(t, fail = false) {
       const prompt = JSON.parse(options.body).parts[0].text;
       prompts.push(prompt);
       const contextId = prompt.match(/memory contextId: ([\w-]+)/)?.[1];
+      if (unavailable) {
+        assert.match(prompt, /Saved memory is unavailable/);
+        assert.equal(contextId, undefined);
+        return Response.json({ info: { role: "assistant", tokens: {} }, parts: [{ type: "text", text: "Safe answer" }] });
+      }
       assert.ok(contextId);
       contexts.push(contextId);
       assert.match(recallForSandbox({ userId: "alice" }, { query: "aurora", contextId }).text, /Aurora saved preference/);
-      assert.doesNotMatch(prompt, /Aurora saved preference/);
+      assert.match(prompt, /Core profile/);
+      assert.match(prompt, /Aurora saved preference/);
+      assert.doesNotMatch(prompt, /Recall-only previous project/);
       if (fail) return new Response("agent rejected the turn", { status: 400 });
       return Response.json({ info: { role: "assistant", tokens: {} }, parts: [{ type: "text", text: "Safe answer" }] });
     }
@@ -43,8 +50,10 @@ function sandbox(t, fail = false) {
   return { prompts, contexts, paths };
 }
 
-test("Spectrum recalls on demand without memory injection and revokes context on success/failure", async (t) => {
+test("Spectrum sends the core profile on a no-query turn and revokes recall on success/failure", async (t) => {
   memory.remember("user", "alice", "Aurora saved preference");
+  for (let n = 0; n < 6; n++) memory.remember("user", "alice", `Old stable fact ${n}`);
+  memory.remember("user", "alice", "Recall-only previous project");
   for (const fail of [false, true]) {
     const mock = sandbox(t, fail);
     const result = await runPunchTurn({ userId: "alice", sessionKey: "spectrum:alice:space", text: "hello" });
@@ -53,6 +62,29 @@ test("Spectrum recalls on demand without memory injection and revokes context on
     assert.throws(() => recallForSandbox({ userId: "alice" }, { query: "aurora", contextId: mock.contexts[0] }), (error) => error.status === 403);
     t.mock.restoreAll();
   }
+});
+
+test("both turn paths can reply with a disabled memory store after malformed legacy input", async (t) => {
+  memory.closeMemory();
+  rmSync(join(dir, "memory.sqlite"));
+  rmSync(join(dir, "memory.sqlite.cutover"));
+  writeFileSync(join(dir, "memory.json"), "{broken legacy");
+  assert.equal(memory.initializeMemory({ strict: false }).available, false);
+  sandbox(t, false, true);
+  const result = await runPunchTurn({ userId: "alice", sessionKey: "spectrum:alice:space", text: "hello" });
+  assert.equal(result.ok, true);
+  memory.patchUserSettings("alice", { noThinking: true });
+  const replies = [];
+  await handleChat({ id: "degraded", channelId: "dm", guildId: null, createdTimestamp: Date.now(),
+    author: { id: "alice", username: "Alice", bot: false }, attachments: new Map(),
+    channel: { sendTyping: async () => {} }, reply: async (payload) => { replies.push(payload.content); return null; },
+  }, "hello");
+  assert.ok(replies.some((text) => text.includes("Safe answer")));
+  assert.throws(() => memory.remember("user", "alice", "must not persist"), (error) => error.status === 503);
+  // Restore this fixture for the following healthy Discord turn test.
+  writeFileSync(join(dir, "memory.json"), JSON.stringify({ users: { alice: [{ id: "restored", text: "Aurora saved preference", ts: Date.now() }] }, channels: {} }));
+  assert.throws(() => memory.remember("user", "alice", "still disabled until explicit retry"), (error) => error.status === 503);
+  assert.equal(memory.initializeMemory().available, true);
 });
 
 test("Discord uses the same recall hint and revokes its context after the turn", async (t) => {

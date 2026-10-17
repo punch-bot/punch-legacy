@@ -261,7 +261,8 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const res = await withUserRunLock(uid, async () => {
       const currentSession = store.getSession(cid);
       memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage);
-      const memory = memoryBlock({ contextId: memoryRecallKey });
+      const profile = store.coreProfile(uid);
+      const memory = memoryBlock({ contextId: memoryRecallKey, profile, unavailable: !store.getMemoryStatus().available });
       if (memory) preambleParts.push(memory);
       const prompt = assemblePrompt(
         preambleParts,

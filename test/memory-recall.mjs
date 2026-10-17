@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -60,4 +61,47 @@ test("recall/preamble budgets cannot exceed the hard cap even if callers request
   const big = recallForSandbox({ userId: "budget" }, { query: "budget", maxChars: 100_000, limit: 100 }).text;
   assert.ok(big.length > 3_500 && big.length <= 4_000);
   assert.ok(recallForSandbox({ userId: "budget" }, { query: "budget", maxChars: 80 }).text.length <= 80);
+});
+
+test("core profiles prioritize persistent pins, include time zones, and stay within five items/600 characters", () => {
+  for (let n = 0; n < 8; n++) memory.remember("user", "profile", `Old project detail ${n}`);
+  memory.remember("user", "profile", "My time zone is Europe/London");
+  const pinned = memory.remember("user", "profile", "Always use accessible interfaces", { pinned: true });
+  const promoted = memory.remember("user", "profile", "Prefer short answers");
+  assert.equal(memory.pinMemory("user", "profile", promoted.id), true);
+  memory.remember("user", "foreign", "Foreign private fact", { pinned: true });
+  const profile = memory.coreProfile("profile");
+  assert.match(profile, /accessible interfaces/);
+  assert.match(profile, /short answers/);
+  assert.match(profile, /Europe\/London/);
+  assert.doesNotMatch(profile, /Foreign private/);
+  assert.ok(profile.length <= 600 && profile.split("\n").length <= 5);
+  memory.closeMemory();
+  assert.equal(memory.list("user", "profile").find((entry) => entry.id === pinned.id).pinned, true);
+  assert.equal(memory.list("user", "profile").find((entry) => entry.id === promoted.id).pinned, true);
+  memory.remember("user", "profile", "Always use accessible interfaces");
+  memory.compactMemory({ userId: "profile" });
+  assert.ok(memory.list("user", "profile").some((entry) => entry.id === pinned.id && entry.pinned));
+  const exported = memory.exportUserMemory("profile");
+  assert.equal(exported.records.filter((entry) => entry.pinned).length, 2);
+  memory.importUserMemory("copy-profile", { ...exported, ownerId: "copy-profile" });
+  assert.match(memory.coreProfile("copy-profile"), /accessible interfaces/);
+  assert.equal(memory.pinMemory("user", "profile", promoted.id, false), true);
+  assert.equal(memory.pinMemory("user", "foreign", promoted.id), false);
+  for (let n = 0; n < 6; n++) memory.remember("user", "long-profile", "Long pinned preference ".repeat(50) + n, { pinned: true });
+  const bounded = memory.coreProfile("long-profile");
+  assert.ok(bounded.length <= 600 && bounded.split("\n").length <= 5);
+});
+
+test("secret labels redact credentials without treating secretary as a secret", () => {
+  const result = memory.captureConversation({ userId: "secretary", channelId: "secretary-dm", isDm: true,
+    userText: "Remember that I am the secretary of the club. My secret is pizza. password: hunter2. api key is sk-syntheticexample1234.", assistantText: "Secretary noted" });
+  assert.deepEqual(result.facts, ["Remember that I am the secretary of the club"]);
+  const raw = new DatabaseSync(join(dir, "memory.sqlite"));
+  const note = raw.prepare("SELECT text FROM memory_records WHERE kind = 'daily' AND owner_id = 'secretary'").get().text;
+  raw.close();
+  assert.match(note, /secretary of the club/);
+  assert.match(note, /\[REDACTED\]/);
+  for (const secret of ["pizza", "hunter2", "sk-syntheticexample1234"]) assert.ok(!note.includes(secret));
+  assert.equal(memory.exportUserMemory("secretary").records.length, 1);
 });
