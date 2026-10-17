@@ -1,0 +1,205 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { normalize, terms, ftsQuery } from "./memory-text.js";
+
+const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const owner = (value) => (typeof value === "string" && value.length > 0) || (typeof value === "number" && Number.isFinite(value));
+
+function readLegacy(file) {
+  try {
+    return JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw new Error(`[memory] migration refused: cannot read/parse ${file} (${error.code || error.name}). Source preserved; restore it before retrying.`);
+  }
+}
+
+function validRecord(record, file) {
+  if (!object(record) || typeof record.id !== "string" || !record.id ||
+      typeof record.text !== "string" || !record.text.trim() ||
+      !Number.isFinite(record.ts)) {
+    throw new Error(`[memory] migration refused: malformed record in ${file}. Source preserved.`);
+  }
+}
+
+// One database per bot DATA_DIR (stack). Scope/owner predicates isolate users and
+// explicitly shared channels. No writable JSON fallback exists after cutover.
+export class MemoryDatabase {
+  constructor(dataDir) {
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    const file = join(dataDir, "memory.sqlite");
+    const cutoverFile = join(dataDir, "memory.sqlite.cutover");
+    if (existsSync(cutoverFile) && !existsSync(file)) {
+      throw new Error("[memory] SQLite disappeared after cutover. Restore a database backup; refusing to reimport stale JSON.");
+    }
+    this.db = new DatabaseSync(file);
+    try {
+      chmodSync(file, 0o600);
+      this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
+      this.transaction(() => {
+        const version = this.db.prepare("PRAGMA user_version").get().user_version;
+        if (version > 1) throw new Error("[memory] database schema is newer than this bot; refusing to open it.");
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS memory_records (
+            rowid INTEGER PRIMARY KEY,
+            kind TEXT NOT NULL CHECK(kind IN ('fact', 'daily')),
+            scope TEXT NOT NULL CHECK(scope IN ('user', 'channel', 'dm')),
+            owner_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL DEFAULT '',
+            day TEXT NOT NULL DEFAULT '',
+            id TEXT NOT NULL,
+            ts REAL NOT NULL,
+            text TEXT NOT NULL,
+            normalized TEXT NOT NULL,
+            search_text TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            UNIQUE(kind, scope, owner_id, channel_id, day, id)
+          );
+          CREATE INDEX IF NOT EXISTS memory_owner ON memory_records(kind, scope, owner_id);
+          CREATE INDEX IF NOT EXISTS memory_daily ON memory_records(kind, owner_id, channel_id, day);
+          CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+            search_text, content='memory_records', content_rowid='rowid',
+            tokenize="unicode61 remove_diacritics 0 tokenchars '+#._-'"
+          );
+          CREATE TRIGGER IF NOT EXISTS memory_insert AFTER INSERT ON memory_records BEGIN
+            INSERT INTO memory_fts(rowid, search_text) VALUES (new.rowid, new.search_text);
+          END;
+          CREATE TRIGGER IF NOT EXISTS memory_delete AFTER DELETE ON memory_records BEGIN
+            INSERT INTO memory_fts(memory_fts, rowid, search_text) VALUES ('delete', old.rowid, old.search_text);
+          END;
+          PRAGMA user_version = 1;
+        `);
+        if (!this.db.prepare("SELECT 1 FROM memory_meta WHERE key = 'legacy_json_v1'").get()) {
+          if (existsSync(cutoverFile)) throw new Error("[memory] SQLite cutover marker exists but database migration state is missing; restore a database backup.");
+          this.importLegacy(dataDir);
+          this.db.prepare("INSERT INTO memory_meta VALUES ('legacy_json_v1', ?)").run(new Date().toISOString());
+        }
+      });
+      // Written only after COMMIT. If a crash interrupts this step, the next
+      // open sees the committed DB marker and completes this file harmlessly.
+      try {
+        writeFileSync(cutoverFile, "legacy_json_v1\n", { mode: 0o600, flag: "wx", flush: true });
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
+  }
+
+  transaction(fn) {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const value = fn();
+      this.db.exec("COMMIT");
+      return value;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  insert(kind, scope, ownerId, entry, channelId = "", day = "") {
+    this.db.prepare(`INSERT INTO memory_records
+      (kind, scope, owner_id, channel_id, day, id, ts, text, normalized, search_text, payload)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(kind, scope, String(ownerId), String(channelId), day, entry.id, entry.ts,
+        entry.text, normalize(entry.text), terms(entry.text).join(" "), JSON.stringify(entry));
+  }
+
+  importLegacy(dataDir) {
+    const file = join(dataDir, "memory.json");
+    const document = readLegacy(file);
+    // Older guards quarantined corrupt files. Their absence must not be
+    // interpreted as an intentionally empty store on the next process start.
+    if (document === undefined && readdirSync(dataDir).some((name) => name.startsWith("memory.json.corrupt-"))) {
+      throw new Error("[memory] migration refused: restore quarantined memory.json before retrying.");
+    }
+    if (document !== undefined) {
+      if (!object(document) || (Object.keys(document).length && !("users" in document) && !("channels" in document))) {
+        throw new Error(`[memory] migration refused: malformed store ${file}.`);
+      }
+      for (const [key, scope] of [["users", "user"], ["channels", "channel"]]) {
+        if (document[key] === undefined) continue;
+        if (!object(document[key])) throw new Error(`[memory] migration refused: malformed ${key} in ${file}.`);
+        for (const [ownerId, entries] of Object.entries(document[key])) {
+          if (!ownerId || !Array.isArray(entries)) throw new Error(`[memory] migration refused: malformed owner in ${file}.`);
+          for (const entry of entries) {
+            validRecord(entry, file);
+            this.insert("fact", scope, ownerId, entry);
+          }
+        }
+      }
+    }
+    const dailyDir = join(dataDir, "memory");
+    let names;
+    try { names = readdirSync(dailyDir); } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      names = [];
+    }
+    if (names.some((name) => /\.json\.corrupt-/.test(name))) {
+      throw new Error("[memory] migration refused: restore quarantined daily notes before retrying.");
+    }
+    for (const name of names.sort()) {
+      const match = /^(\d{4}-\d{2}-\d{2})\.json$/.exec(name);
+      if (!match) continue;
+      const path = join(dailyDir, name);
+      const day = match[1];
+      if (new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day) throw new Error(`[memory] invalid daily date: ${name}`);
+      const daily = readLegacy(path);
+      const records = Array.isArray(daily) ? daily : daily?.records;
+      if (!Array.isArray(records)) throw new Error(`[memory] migration refused: malformed daily file ${path}.`);
+      for (const record of records) {
+        validRecord(record, path);
+        if (!owner(record.userId) || !owner(record.channelId) || (record.date && record.date !== day)) {
+          throw new Error(`[memory] migration refused: invalid ownership/date in ${path}.`);
+        }
+        this.insert("daily", "dm", record.userId, { ...record, date: day }, record.channelId, day);
+      }
+    }
+    const collisions = this.db.prepare(`SELECT count(*) AS count FROM (
+      SELECT 1 FROM memory_records WHERE kind = 'fact'
+      GROUP BY scope, owner_id, normalized HAVING count(*) > 1
+    )`).get().count;
+    if (collisions) console.warn(`[memory] imported ${collisions} normalized duplicate groups; all records preserved. Use compactMemory explicitly to deduplicate.`);
+  }
+
+  list(scope, ownerId) {
+    if (ownerId == null) return [];
+    return this.db.prepare(`SELECT payload FROM memory_records WHERE kind = 'fact'
+      AND scope = ? AND owner_id = ? ORDER BY rowid`).all(scope, String(ownerId)).map((row) => JSON.parse(row.payload));
+  }
+
+  forget(scope, ownerId, id) {
+    return this.db.prepare("DELETE FROM memory_records WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ?")
+      .run(scope, String(ownerId), String(id)).changes > 0;
+  }
+
+  search({ userId, channelId, isDm, queryTerms, cutoff }) {
+    if (!queryTerms.length) return [];
+    return this.db.prepare(`SELECT r.* FROM memory_fts JOIN memory_records r ON r.rowid = memory_fts.rowid
+      WHERE memory_fts MATCH ? AND (
+        (kind = 'fact' AND scope = 'user' AND owner_id = ?) OR
+        (kind = 'fact' AND scope = 'channel' AND owner_id = ?) OR
+        (? = 1 AND kind = 'daily' AND owner_id = ? AND channel_id = ? AND day >= ?)
+      )`).all(ftsQuery(queryTerms), String(userId ?? ""), String(channelId ?? ""),
+      isDm ? 1 : 0, String(userId ?? ""), String(channelId ?? ""), cutoff)
+      .map((row) => ({ ...JSON.parse(row.payload), scope: row.scope,
+        source: row.kind === "fact" ? "durable" : "daily",
+        citation: row.kind === "fact" ? `[memory:${row.scope}:${row.id}]` : `[daily:${row.day}:${row.id}]`,
+      }));
+  }
+
+  pruneDaily(userId, channelId, day, cutoff, maxRecords) {
+    this.db.prepare("DELETE FROM memory_records WHERE kind = 'daily' AND day < ?").run(cutoff);
+    this.db.prepare(`DELETE FROM memory_records WHERE rowid IN (
+      SELECT rowid FROM memory_records WHERE kind = 'daily' AND owner_id = ? AND channel_id = ? AND day = ?
+      ORDER BY ts DESC, rowid DESC LIMIT -1 OFFSET ?
+    )`).run(String(userId), String(channelId), day, maxRecords);
+  }
+
+  close() { this.db.close(); }
+}

@@ -95,37 +95,14 @@ test("pigeonTurnPreamble uses the shared block builders", () => {
   assert.match(block, /hop 0/);
 });
 
-test("memoryBlock renders project and related memory", () => {
-  const block = memoryBlock({
-    projectMemory: "## Guidelines\nkeep it simple",
-    relatedText: "- [memory:user:ab12] prefers concise replies",
-  });
-  assert.equal(
-    block,
-    [
-      "--- Punch memory ---",
-      "Project memory (update /work/.punch-memory.md when needed):",
-      "## Guidelines",
-      "keep it simple",
-      "",
-      "Related memory (auto-retrieved — may be stale; verify before relying):",
-      "- [memory:user:ab12] prefers concise replies",
-      "--- End Punch memory ---",
-    ].join("\n"),
-  );
-});
-
-test("memoryBlock omits empty halves and returns empty when both missing", () => {
-  const onlyProject = memoryBlock({ projectMemory: "## Project\nx" });
-  assert.match(onlyProject, /Project memory/);
-  assert.doesNotMatch(onlyProject, /Related memory/);
-
-  const onlyRelated = memoryBlock({ relatedText: "- [daily:2026-08-07:xy] note" });
-  assert.doesNotMatch(onlyRelated, /Project memory/);
-  assert.match(onlyRelated, /Related memory/);
-
-  assert.equal(memoryBlock({}), "");
-  assert.equal(memoryBlock(), "");
+test("memoryBlock is a compact stable recall hint with the authorized turn context", () => {
+  const block = memoryBlock({ contextId: "turn-context" });
+  assert.match(block, /recall_memory\(query\)/);
+  assert.match(block, /project:true/);
+  assert.match(block, /batch it with other independent first tools/);
+  assert.match(block, /contextId: turn-context/);
+  assert.ok(block.length < 700);
+  assert.equal(memoryBlock(), memoryBlock({}));
 });
 
 test("timestampLine reports the message send time", () => {

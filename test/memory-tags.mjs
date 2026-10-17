@@ -10,6 +10,7 @@ const memory = await import(new URL("../src/memory.js", import.meta.url).href);
 const { persistMemoryTags } = await import(new URL("../src/chat/memory-tags.js", import.meta.url).href);
 
 test.after(() => {
+  memory.closeMemory();
   rmSync(dataDir, { recursive: true, force: true });
 });
 

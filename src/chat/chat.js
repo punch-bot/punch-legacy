@@ -59,7 +59,8 @@ import { persistMemoryTags } from "./memory-tags.js";
 import { extractEmbeds, extractQuestions, sendQuestion } from "./embeds-questions.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
-import { fetchProjectMemory, labelLineFor, withUserRunLock } from "./queue.js";
+import { labelLineFor, withUserRunLock } from "./queue.js";
+import { beginMemoryRecall, endMemoryRecall } from "../memory-recall.js";
 import { notifyPigeonDM } from "../gateway/pigeon.js";
 
 async function handleChat(message, text, contextMessages = [], existingThinking = null, signal = null, opts = {}) {
@@ -182,8 +183,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
   const { useThinking } = progressSettingsFor(message);
 
-  const projectMemory = await fetchProjectMemory(uid);
-
   const preambleParts = [];
   const sentAt = formatMessageTimestamp(message.createdTimestamp, store.getUserSettings(uid).timeZone);
   if (sentAt) {
@@ -209,7 +208,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   let progressState = createProgressState(startedAt);
   let progressRenderer = null;
   let memoryRecallKey = null;
-  let memoryRecallAdopted = false;
 
   if (allowThinking) {
     const initial = renderProgressLive(progressState, startedAt);
@@ -262,15 +260,8 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
       const currentSession = store.getSession(cid);
-      // New sessions get a temporary recall key until Pi returns a session ID.
-      memoryRecallKey = currentSession || `pending:${uid}:${cid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-      const pre = store.preamble(uid, cid, memoryUserText, {
-        isDm: isDirectMessage,
-        maxChars: 1_200,
-        limit: 3,
-        recallSessionId: memoryRecallKey,
-      });
-      const memory = memoryBlock({ projectMemory, relatedText: pre });
+      memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage);
+      const memory = memoryBlock({ contextId: memoryRecallKey });
       if (memory) preambleParts.push(memory);
       const prompt = assemblePrompt(
         preambleParts,
@@ -278,8 +269,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       );
       console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
       const result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
-      store.moveMemoryRecall(memoryRecallKey, result.sessionId);
-      memoryRecallAdopted = true;
       store.setSession(cid, result.sessionId);
       if (result.sessionId && /<\/?compress\s*\/?\s*>/i.test(result.text)) {
         try {
@@ -407,7 +396,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
   } catch (err) {
     console.error(`[chat] cid=${cid} ERROR:`, err?.stack || err?.message || err);
-    if (memoryRecallKey && !memoryRecallAdopted) store.clearMemoryRecall(memoryRecallKey);
     const aborted = err.name === "AbortError" || /aborted|cancel/i.test(err.message);
     const timedOut = /timed out|timeout|stalled|ceiling|silent for|turn hung/i.test(err?.message || "");
     await finalizeProgress(null, aborted ? "aborted" : timedOut ? "timeout" : "error");
@@ -476,6 +464,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       duration: Date.now() - startedAt,
     });
   } finally {
+    endMemoryRecall(memoryRecallKey);
     registry.activeTurns.delete(uid);
     clearInterval(typing);
   }

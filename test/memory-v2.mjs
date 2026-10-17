@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -11,6 +12,7 @@ moduleUrl.searchParams.set("test", `${Date.now()}-${Math.random()}`);
 const memory = await import(moduleUrl.href);
 
 test.after(() => {
+  memory.closeMemory();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -44,13 +46,12 @@ test("keyword search is selective, ranked, cited, and explainable", () => {
   assert.match(explained[0].reason, /^Score /);
 
   const recent = memory.searchMemory({ userId: "rank-user", channelId: "rank-channel", query: "", limit: 2 });
-  assert.equal(recent.length, 2);
+  assert.equal(recent.length, 0);
 });
 
-test("preamble is bounded, cited on every line, and useful with the legacy call", () => {
+test("preamble is bounded and cited; an empty query recalls nothing", () => {
   const legacy = memory.preamble("rank-user", "rank-channel");
-  assert.ok(legacy.length > 0);
-  assert.ok(legacy.split("\n").every((line) => /^- \[(?:memory|daily):/.test(line)));
+  assert.equal(legacy, "");
 
   const bounded = memory.preamble("rank-user", "rank-channel", "python", { maxChars: 85, limit: 10 });
   assert.ok(bounded.length <= 85);
@@ -155,10 +156,10 @@ test("automatic facts are high precision, deduplicated, and secrets are filtered
   });
   assert.equal(second.factsAdded, 0);
 
-  const dailyDir = join(dataDir, "memory");
-  const serializedNotes = readdirSync(dailyDir)
-    .map((name) => readFileSync(join(dailyDir, name), "utf8"))
-    .join("\n");
+  const db = new DatabaseSync(join(dataDir, "memory.sqlite"));
+  const serializedNotes = db.prepare("SELECT payload FROM memory_records WHERE kind = 'daily'").all()
+    .map((row) => row.payload).join("\n");
+  db.close();
   assert.ok(!serializedNotes.includes(secret));
   assert.match(serializedNotes, /\[REDACTED\]/);
 });

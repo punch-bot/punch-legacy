@@ -16,11 +16,16 @@ import { registerInteractions } from "./commands/interactions.js";
 import { buildSlashCommands } from "./commands/slash.js";
 import { fireRoutine } from "./chat/routines-fire.js";
 import { startBotHttpServer } from "./gateway/bot-server.js";
+import { initializeMemory } from "./memory.js";
 
 if (!TOKEN) {
   console.error("Missing DISCORD_TOKEN. Copy .env.example to .env and fill it in.");
   process.exit(1);
 }
+
+// Complete the atomic import before accepting any turns. Invalid legacy data
+// fails startup visibly rather than serving an apparently empty memory store.
+initializeMemory();
 
 const client = createClient();
 registry.client = client;

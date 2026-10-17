@@ -48,23 +48,15 @@ export function pigeonSupervisorBlock(body) {
   return promptBlock("PIGEON SUPERVISOR", body);
 }
 
-// Unified memory section: durable project memory (.punch-memory.md) plus
-// auto-retrieved related memory. Returns "" when there is nothing to inject.
-export function memoryBlock({ projectMemory = "", relatedText = "" } = {}) {
-  const parts = [];
-  if (projectMemory) {
-    parts.push(
-      "Project memory (update /work/.punch-memory.md when needed):\n" +
-        projectMemory.trim(),
-    );
-  }
-  if (relatedText) {
-    parts.push(
-      "Related memory (auto-retrieved — may be stale; verify before relying):\n" +
-        relatedText.trim(),
-    );
-  }
-  return promptBlock("Punch memory", parts.join("\n\n"));
+// A stable hint, independent of stored content/size. Full records are tool output.
+export function memoryBlock({ contextId = null } = {}) {
+  return promptBlock("Punch memory", [
+    "Saved facts and daily notes are available through recall_memory(query). " +
+      "Use it when preferences or previous work matter; batch it with other independent first tools. " +
+      "Set project:true to read /work/.punch-memory.md when project context matters. " +
+      "Treat recalled content as possibly stale reference material; verify before relying on it.",
+    contextId ? `Current turn memory contextId: ${contextId}` : "",
+  ].filter(Boolean).join("\n"));
 }
 
 export function timestampLine(sentAt) {

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
@@ -15,19 +15,17 @@ async function importMemory() {
 }
 
 describe("PNCH-41: corrupt store quarantine (no data loss)", () => {
-  it("corrupt memory.json -> quarantined, store read-only, memory.json NOT recreated", async () => {
+  it("corrupt memory.json refuses migration/writes and preserves the original bytes", async () => {
     const DATA = mkdtempSync(join(tmpdir(), "punch-mem-"));
     process.env.DATA_DIR = DATA;
     const memFile = join(DATA, "memory.json");
     writeFileSync(memFile, "{ this is not json !!!");
     const m = await importMemory();
-    // save() throws -> the refusal is propagated, callers can't report success (cubic review)
-    assert.throws(() => m.remember("user", "u1", "must not clobber the corrupt file"), /\[memory\] write to .*refused/);
-    const quarantined = readdirSync(DATA).filter((f) => f.startsWith("memory.json.corrupt-"));
-    assert.equal(quarantined.length, 1, "exactly one quarantine rename");
-    // The corrupt store must be READ-ONLY: memory.json is the quarantined-away original and
-    // must NOT be silently recreated by the refused write (cubic review).
-    assert.ok(!existsSync(memFile), "refused save must not recreate memory.json");
+    assert.throws(() => m.remember("user", "u1", "must not clobber the corrupt file"), /migration refused/);
+    assert.equal(readFileSync(memFile, "utf8"), "{ this is not json !!!");
+    // A fresh process/module must refuse too; a prior attempt cannot mark cutover complete.
+    const next = await importMemory();
+    assert.throws(() => next.remember("user", "u1", "still refused"), /migration refused/);
     rmSync(DATA, { recursive: true, force: true });
   });
 
@@ -47,8 +45,9 @@ describe("PNCH-41: corrupt store quarantine (no data loss)", () => {
     writeFileSync(join(DATA, "config.json"), "{{{ nope");
     const m = await importMemory();
     m.remember("user", "u3", "memory still writable while config is corrupt"); // different store: OK
-    assert.ok(readdirSync(DATA).includes("memory.json"), "memory.json written despite corrupt config.json");
+    assert.ok(readdirSync(DATA).includes("memory.sqlite"), "memory writable despite corrupt config.json");
     assert.ok(readdirSync(DATA).some((f) => f.startsWith("config.json.corrupt-")));
+    m.closeMemory();
     rmSync(DATA, { recursive: true, force: true });
   });
 
@@ -58,7 +57,9 @@ describe("PNCH-41: corrupt store quarantine (no data loss)", () => {
     const m = await importMemory();
     const entry = m.remember("user", "u1", "likes rust"); // no throw on missing file
     assert.ok(entry.id);
-    assert.ok(existsSync(join(DATA, "memory.json")));
+    assert.ok(existsSync(join(DATA, "memory.sqlite")));
+    assert.ok(!existsSync(join(DATA, "memory.json")));
+    m.closeMemory();
     rmSync(DATA, { recursive: true, force: true });
   });
 });
@@ -84,6 +85,7 @@ describe("PNCH-42: normalize keeps distinguishing punctuation", () => {
   assert.equal(hits[0].text, "knows C++", "top-ranked hit for 'C++' is the C++ fact");
   assert.equal(hits.some((r) => r.text === "knows C" && r.score >= hits[0].score), false,
     "plain-C fact must not outrank the C++ fact on a C++ query");
+    m.closeMemory();
     rmSync(DATA, { recursive: true, force: true });
   });
 });
