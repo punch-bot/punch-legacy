@@ -286,7 +286,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
     const filesToSend = [];
 
-    const { clean: textAfterMemory, saved, dropped } = persistMemoryTags(res.text, uid, cid);
+    const { clean: textAfterMemory, saved, dropped, failed } = persistMemoryTags(res.text, uid, cid);
     const { clean: textAfterAttachments, attachments } = extractAttachments(textAfterMemory);
     const { clean: textAfterReacts, emojis: reactEmojis } = extractReactTags(textAfterAttachments);
     const { clean: textAfterCompress, requested: compressRequested } = extractCompressTag(textAfterReacts);
@@ -323,7 +323,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
           isDm: true,
           userText: memoryUserText,
           assistantText: out,
-          extractDurableFacts: saved === 0,
+          extractDurableFacts: saved === 0 && failed === 0,
         });
       } catch (error) {
         console.error(`[memory] capture failed uid=${uid}:`, error.message);
@@ -334,6 +334,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (saved) notes.push(`remembered ${saved}`);
     if (capturedMemory.factsAdded) notes.push(`auto-remembered ${capturedMemory.factsAdded}`);
     if (dropped) notes.push(`forgot ${dropped}`);
+    if (failed) notes.push(`memory update failed (${failed})`);
     const ctxNote = contextUsageNote(res.usage, uid);
     if (ctxNote) notes.push(ctxNote);
     if (compressed) notes.push("context compressed");

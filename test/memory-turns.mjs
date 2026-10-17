@@ -11,9 +11,12 @@ const memory = await import("../src/memory.js");
 const { recallForSandbox } = await import("../src/memory-recall.js");
 const { runPunchTurn } = await import("../src/punch-turn.js");
 const { handleChat } = await import("../src/chat/chat.js");
+const { fireRoutine } = await import("../src/chat/routines-fire.js");
+const { registry } = await import("../src/core/registry.js");
+const state = await import("../src/state.js");
 test.after(() => { memory.closeMemory(); rmSync(dir, { recursive: true, force: true }); });
 
-function sandbox(t, fail = false, unavailable = false) {
+function sandbox(t, fail = false, unavailable = false, taggedOutput = false) {
   const prompts = [];
   const paths = [];
   const contexts = [];
@@ -31,10 +34,14 @@ function sandbox(t, fail = false, unavailable = false) {
       const prompt = JSON.parse(options.body).parts[0].text;
       prompts.push(prompt);
       const contextId = prompt.match(/memory contextId: ([\w-]+)/)?.[1];
+      const output = taggedOutput ? 'Safe answer <remember>likes tea</remember><forget id="old-id"></forget>' : "Safe answer";
+      if (taggedOutput && /\((?:heartbeat|scheduled routine)\):/.test(prompt)) {
+        return Response.json({ info: { role: "assistant", tokens: {} }, parts: [{ type: "text", text: output }] });
+      }
       if (unavailable) {
         assert.match(prompt, /Saved memory is unavailable/);
         assert.equal(contextId, undefined);
-        return Response.json({ info: { role: "assistant", tokens: {} }, parts: [{ type: "text", text: "Safe answer" }] });
+        return Response.json({ info: { role: "assistant", tokens: {} }, parts: [{ type: "text", text: output }] });
       }
       assert.ok(contextId);
       contexts.push(contextId);
@@ -70,9 +77,10 @@ test("both turn paths can reply with a disabled memory store after malformed leg
   rmSync(join(dir, "memory.sqlite.cutover"));
   writeFileSync(join(dir, "memory.json"), "{broken legacy");
   assert.equal(memory.initializeMemory({ strict: false }).available, false);
-  sandbox(t, false, true);
+  sandbox(t, false, true, true);
   const result = await runPunchTurn({ userId: "alice", sessionKey: "spectrum:alice:space", text: "hello" });
   assert.equal(result.ok, true);
+  assert.equal(result.text, "Safe answer");
   memory.patchUserSettings("alice", { noThinking: true });
   const replies = [];
   await handleChat({ id: "degraded", channelId: "dm", guildId: null, createdTimestamp: Date.now(),
@@ -80,6 +88,21 @@ test("both turn paths can reply with a disabled memory store after malformed leg
     channel: { sendTyping: async () => {} }, reply: async (payload) => { replies.push(payload.content); return null; },
   }, "hello");
   assert.ok(replies.some((text) => text.includes("Safe answer")));
+  assert.ok(replies.some((text) => text.includes("memory update failed (2)")));
+  assert.ok(replies.every((text) => !/<remember|<forget|remembered|forgot/.test(text)));
+  const deliveries = [];
+  const originalClient = registry.client;
+  t.after(() => { registry.client = originalClient; });
+  const channel = { isTextBased: () => true, send: async (payload) => { deliveries.push(payload.content); } };
+  registry.client = { channels: { fetch: async () => channel }, users: { createDM: async () => channel } };
+  for (const type of ["heartbeat", "llm"]) {
+    await fireRoutine({ id: `disabled-${type}`, type, userId: "alice", channelId: "dm", payload: "Check in" });
+    const delivered = deliveries.at(-1);
+    assert.match(delivered, /Safe answer/);
+    assert.match(delivered, /memory update failed \(2\)/);
+    assert.doesNotMatch(delivered, /<remember|<forget|remembered|forgot|Heartbeat error|automation failed/);
+    assert.equal(state.getActivities("alice", { limit: 100 }).find((activity) => activity.routineId === `disabled-${type}`).status, "success");
+  }
   assert.throws(() => memory.remember("user", "alice", "must not persist"), (error) => error.status === 503);
   // Restore this fixture for the following healthy Discord turn test.
   writeFileSync(join(dir, "memory.json"), JSON.stringify({ users: { alice: [{ id: "restored", text: "Aurora saved preference", ts: Date.now() }] }, channels: {} }));
