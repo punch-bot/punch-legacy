@@ -62,7 +62,7 @@ test("a provider with no available models points at /apikey", () => {
   const r = checkModel("anthropic/claude-opus-5-5", MODELS);
   assert.equal(r.ok, false);
   assert.deepEqual(r.suggestions, []);
-  assert.match(r.error, /no models for provider `anthropic`.*\/apikey set anthropic/);
+  assert.match(r.error, /no models for provider `anthropic`.*`\/apikey provider:anthropic key:<key>`/);
   assert.equal(formatModelCheckError(r), r.error);
 });
 

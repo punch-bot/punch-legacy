@@ -97,6 +97,7 @@ async function selectTurnModel(providerID, modelID, thinkingLevel) {
     throw new Error(`${why}. Pick another model with /models.`);
   }
   try {
+    model ??= (await rpc("get_state")).data?.model;
     await applyThinkingLevel(thinkingLevel, model);
   } catch (e) {
     log("thinking level:", e.message);

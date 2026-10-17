@@ -51,7 +51,7 @@ export function checkModel(slug, models) {
   const suggestions = suggestModels(provider, modelId, list);
   const error = list.some((m) => m.provider === provider)
     ? `Pi has no model \`${modelId}\` for provider \`${provider}\`.`
-    : `Pi has no models for provider \`${provider}\`. Set its key with \`/apikey set ${provider} <key>\`, or check the provider name.`;
+    : `Pi has no models for provider \`${provider}\`. Set its key with \`/apikey provider:${provider} key:<key>\`, or check the provider name.`;
   return { ok: false, error, suggestions };
 }
 
