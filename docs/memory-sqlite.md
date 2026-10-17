@@ -39,11 +39,11 @@ If SQLite is damaged or disappears after cutover, memory stays disabled while no
 
 On Node 24.19.0, the full bot suite passed all 310 tests, including migration rollback/retry, ID-collision preservation, schema upgrades, pinned-profile persistence/bounds, scoped pruning, disabled-memory chat, sandbox arguments, concurrent SQLite writers, scope isolation, and five-fix regressions. Bot typecheck/lint passed. The sandbox extension was also typechecked against the installed `@punch-bot/cli` 1.2.0 and exercised with a mocked authenticated bot response and custom bot URL.
 
-A synthetic comparison against the checkout's JSON implementation at `f471259` used 34 durable facts and 6,000 daily records (30 days × 200, approximately 1,800 characters of note text each). After one warm-up, eight selective-query/capture iterations produced these medians:
+A synthetic comparison against the checkout's JSON implementation at `f471259` used 34 durable facts and 6,000 daily records (30 days × 200, approximately 1,800 characters of note text each). SQLite measurements include the core profile read. After one warm-up, eight selective-query/capture iterations produced these medians:
 
 | Operation | JSON baseline | SQLite |
 | --- | ---: | ---: |
-| Memory lookup/preamble | 391.7 ms | 5.2 ms |
-| DM capture | 1.87 ms | 0.88 ms |
+| Memory lookup/preamble | 422.8 ms | 5.5 ms |
+| DM capture | 2.23 ms | 0.54 ms |
 
-Initial SQLite import took approximately 776 ms. The recall hint with its context ID is 447 characters, independent of memory size; the review follow-up adds at most 600 profile characters plus its label. These are local storage/prompt measurements on generated data, not deployed model-latency measurements. The JSON baseline does not include the unpublished cache patch discussed in PNCH-34. SQLite uses WAL with `synchronous=FULL`.
+Initial SQLite import took approximately 1,043 ms. The recall hint with its context ID is 447 characters, independent of memory size; the core tier adds at most 600 profile characters plus its label. These are local storage/prompt measurements on generated data, not deployed model-latency measurements. The JSON baseline does not include the unpublished cache patch discussed in PNCH-34. SQLite uses WAL with `synchronous=FULL`.
