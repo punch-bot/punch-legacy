@@ -161,7 +161,7 @@ async function api(path, body, baseUrl, signal = null) {
             await abortableSleep(1500, signal);
             continue;
           }
-         throw new Error(`pi API ${res.status}: ${t.slice(0, 200)}`);
+         throw piApiError(res.status, t);
       }
      return res.json();
   }
@@ -486,7 +486,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
           if (postAC.signal.aborted) throw new Error("aborted");
           continue;
         }
-        throw new Error(`pi API ${res.status}: ${t.slice(0, 200)}`);
+        throw piApiError(res.status, t);
       }
       return res.json();
     }
@@ -568,6 +568,15 @@ function extractContextUsage(info, model) {
     model,
     pct: limit ? Math.min(100, Math.round((used / limit) * 100)) : null,
   };
+}
+
+// Pi gateway failures, using the gateway's `{ error }` message when it sends one.
+function piApiError(status, body) {
+  let msg = body;
+  try {
+    msg = JSON.parse(body)?.error || body;
+  } catch {}
+  return new Error(`pi API ${status}: ${String(msg).slice(0, 300)}`);
 }
 
 function formatAgentError(info) {
