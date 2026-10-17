@@ -821,8 +821,10 @@ export function registerInteractions(client) {
       const apiUrl = apiUrlFor(uid);
       const auth = supervisorAuth();
       const sub = interaction.options.getSubcommand();
+      // `/provider model add` also reports sub "add"; check the group first.
+      const group = interaction.options.getSubcommandGroup();
 
-      if (sub === "add") {
+      if (!group && sub === "add") {
         const name = interaction.options.getString("name", true).toLowerCase().replace(/[^a-z0-9_-]/g, "");
         const endpoint = interaction.options.getString("endpoint", true);
         const api = interaction.options.getString("api") || "openai-completions";
@@ -841,7 +843,7 @@ export function registerInteractions(client) {
         return;
       }
 
-      if (sub === "edit") {
+      if (!group && sub === "edit") {
         const name = interaction.options.getString("name", true).toLowerCase();
         const endpoint = interaction.options.getString("endpoint") || undefined;
         const api = interaction.options.getString("api") || undefined;
@@ -861,7 +863,7 @@ export function registerInteractions(client) {
         return;
       }
 
-      if (sub === "remove") {
+      if (!group && sub === "remove") {
         const name = interaction.options.getString("name", true).toLowerCase();
         try {
           const res = await fetch(`${apiUrl}/provider`, {
@@ -875,7 +877,7 @@ export function registerInteractions(client) {
         return;
       }
 
-      if (sub === "list") {
+      if (!group && sub === "list") {
         try {
           const res = await fetch(`${apiUrl}/providers`, { headers: { authorization: auth } });
           if (!res.ok) throw new Error(`supervisor API ${res.status}`);
@@ -894,7 +896,6 @@ export function registerInteractions(client) {
         return;
       }
 
-      const group = interaction.options.getSubcommandGroup();
       if (group === "model") {
         if (sub === "add") {
           const provider = interaction.options.getString("provider", true).toLowerCase();

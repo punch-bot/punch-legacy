@@ -1,5 +1,5 @@
 // Model / API-key / provider routes for the sandbox supervisor.
-import { checkModel, formatModelCheckError } from "/usr/local/lib/pi-model-check.mjs";
+import { checkModel, formatModelCheckError, splitModelSlug } from "/usr/local/lib/pi-model-check.mjs";
 import { normalizeThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
 import {
   AUTH_FILE,
@@ -118,6 +118,17 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         const normalized = normalizeModel(model);
+        // A custom provider is only listed by Pi once it has models, so name
+        // the real fix before Pi's generic "set its key" error.
+        const slug = splitModelSlug(normalized);
+        const custom = slug && Object.hasOwn(models.providers || {}, slug.provider) ? models.providers[slug.provider] : null;
+        if (custom && !(custom.models || []).some((m) => m.id === slug.modelId)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({
+            error: `Model \`${slug.modelId}\` isn't registered on custom provider \`${slug.provider}\`. Add it with \`/provider model add ${slug.provider} ${slug.modelId}\`.`,
+          }));
+          return;
+        }
         const piModels = await fetchPiModels();
         if (!piModels) {
           res.writeHead(503, { "content-type": "application/json" });
