@@ -74,6 +74,16 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         const normalized = normalizeModel(model);
+        // Pi drops custom providers whose model list lacks the id, then falls
+        // back to another provider; refuse instead of saving a dead model.
+        const [pid, ...rest] = normalized.split("/");
+        const mid = rest.join("/");
+        const custom = Object.hasOwn(models.providers || {}, pid) ? models.providers[pid] : null;
+        if (mid && custom && !(custom.models || []).some((m) => m.id === mid)) {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: `Model ${mid} is not registered on custom provider ${pid}. Add it with /provider model add ${pid} ${mid}` }));
+          return;
+        }
         state.CURRENT_MODEL = normalized;
         process.env.PI_DEFAULT_MODEL = normalized;
         process.env.PI_MODEL = normalized;
