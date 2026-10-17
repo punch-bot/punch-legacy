@@ -1,6 +1,18 @@
 // Model / API-key / provider routes for the sandbox supervisor.
+import { checkModel, formatModelCheckError, splitModelSlug } from "/usr/local/lib/pi-model-check.mjs";
 import { normalizeThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
-import { AUTH_FILE, ENV_FILE, MODELS_FILE, loadJSON, log, saveJSON, state } from "./state.mjs";
+import {
+  AUTH_FILE,
+  ENV_FILE,
+  MODELS_FILE,
+  PI_MODELS_URL,
+  loadJSON,
+  log,
+  probeAuth,
+  saveJSON,
+  sleep,
+  state,
+} from "./state.mjs";
 import { forceRestart } from "./gateway.mjs";
 import {
   PROVIDER_ENV_MAP,
@@ -14,6 +26,29 @@ import {
 
 function sanitizeId(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
+// The gateway may be mid-restart (a key or model change restarts it), so
+// retry briefly before giving up.
+const PI_MODELS_WAIT_MS = 15000;
+
+/** Pi's available models ({ provider, id, name }[]), or null if Pi can't be reached. */
+async function fetchPiModels() {
+  const deadline = Date.now() + PI_MODELS_WAIT_MS;
+  for (;;) {
+    try {
+      const res = await fetch(PI_MODELS_URL, {
+        headers: { authorization: probeAuth() },
+        signal: AbortSignal.timeout(Math.max(1000, deadline - Date.now())),
+      });
+      if (res.ok) return (await res.json()).models || [];
+      log(`pi models: HTTP ${res.status}`);
+    } catch (e) {
+      log("pi models:", e.message);
+    }
+    if (Date.now() >= deadline) return null;
+    await sleep(1000);
+  }
 }
 
 function titlecase(s) {
@@ -62,26 +97,49 @@ export function handleProviderRoutes(req, res, url) {
     return true;
   }
 
+  // Only exact ids Pi lists are saved. A near miss (claude-opus-5-5 vs 5.5)
+  // gets a 400 with hints, never a substitute model.
   if (req.method === "POST" && url.pathname === "/model") {
     let body = "";
     req.on("data", (c) => (body += c));
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
-        const { model } = JSON.parse(body);
+        let model;
+        try {
+          ({ model } = JSON.parse(body));
+        } catch {
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid JSON" }));
+          return;
+        }
         if (!model) {
           res.writeHead(400, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: "Missing model" }));
           return;
         }
         const normalized = normalizeModel(model);
-        // Pi drops custom providers whose model list lacks the id, then falls
-        // back to another provider; refuse instead of saving a dead model.
-        const [pid, ...rest] = normalized.split("/");
-        const mid = rest.join("/");
-        const custom = Object.hasOwn(models.providers || {}, pid) ? models.providers[pid] : null;
-        if (mid && custom && !(custom.models || []).some((m) => m.id === mid)) {
+        // A custom provider is only listed by Pi once it has models, so name
+        // the real fix before Pi's generic "set its key" error.
+        const slug = splitModelSlug(normalized);
+        const custom = slug && Object.hasOwn(models.providers || {}, slug.provider) ? models.providers[slug.provider] : null;
+        if (custom && !(custom.models || []).some((m) => m.id === slug.modelId)) {
           res.writeHead(400, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: `Model ${mid} is not registered on custom provider ${pid}. Add it with /provider model add ${pid} ${mid}` }));
+          res.end(JSON.stringify({
+            error: `Model \`${slug.modelId}\` isn't registered on custom provider \`${slug.provider}\`. Add it with \`/provider model add ${slug.provider} ${slug.modelId}\`.`,
+          }));
+          return;
+        }
+        const piModels = await fetchPiModels();
+        if (!piModels) {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "Pi isn't responding, so the model couldn't be checked. Try again in a moment." }));
+          return;
+        }
+        const check = checkModel(normalized, piModels);
+        if (!check.ok) {
+          log(`model rejected: ${normalized} (${check.error})`);
+          res.writeHead(400, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: formatModelCheckError(check), suggestions: check.suggestions }));
           return;
         }
         state.CURRENT_MODEL = normalized;
@@ -92,9 +150,12 @@ export function handleProviderRoutes(req, res, url) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true, model: normalized }));
         log(`model changed to: ${normalized}`);
-      } catch {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      } catch (e) {
+        log("set model:", e.message);
+        if (!res.headersSent) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: e.message }));
+        }
       }
     });
     return true;
