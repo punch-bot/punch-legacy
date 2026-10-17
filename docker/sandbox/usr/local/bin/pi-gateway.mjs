@@ -82,17 +82,21 @@ function parseModel(m) {
 
 /**
  * set_model plus the user's reasoning level for a turn.
- * Logs failures instead of throwing.
+ * Throws if Pi can't select the model: on failure Pi keeps the session's
+ * previous model, and the turn would run on it without telling the user.
+ * Reasoning-level failures are only logged.
  */
 async function selectTurnModel(providerID, modelID, thinkingLevel) {
-  let model = null;
+  let model;
   try {
     model = (await rpc("set_model", { provider: providerID, modelId: modelID })).data;
   } catch (e) {
     log("set_model:", e.message);
+    const slug = `${providerID}/${modelID}`;
+    const why = e.message.includes(slug) ? e.message : `${slug}: ${e.message}`;
+    throw new Error(`${why}. Pick another model with /models.`);
   }
   try {
-    model ??= (await rpc("get_state")).data?.model;
     await applyThinkingLevel(thinkingLevel, model);
   } catch (e) {
     log("thinking level:", e.message);
@@ -795,21 +799,25 @@ async function promptAndWait(promptText, signal) {
       }
     }, 5_000);
   });
+  // One finally for both steps: a failed prompt (e.g. no API key) must clear
+  // the timers too, or turnIdle rejects unhandled later and kills the gateway.
   try {
-    await rpc("prompt", { message: promptText, streamingBehavior: "followUp" }, 60000);
-  } catch (e) {
-    turnP.cancel(e);
-    await turnP.catch(() => {});
-    throw e;
-  }
-  try {
-    await Promise.race([turnP, turnMax, turnIdle]);
-  } catch (e) {
-    turnP.cancel(e);
-    if (!signal?.aborted) {
-      void recoverStuckPi(e.message || "turn failed");
+    try {
+      await rpc("prompt", { message: promptText, streamingBehavior: "followUp" }, 60000);
+    } catch (e) {
+      turnP.cancel(e);
+      await turnP.catch(() => {});
+      throw e;
     }
-    throw e;
+    try {
+      await Promise.race([turnP, turnMax, turnIdle]);
+    } catch (e) {
+      turnP.cancel(e);
+      if (!signal?.aborted) {
+        void recoverStuckPi(e.message || "turn failed");
+      }
+      throw e;
+    }
   } finally {
     clearTimeout(turnTimer);
     clearInterval(idleIv);
@@ -842,6 +850,16 @@ const server = createServer(async (req, res) => {
       json(res, ready ? 200 : 503, {
         ok: ready,
         tools: ["bash", "read", "write", "edit"],
+      });
+      return;
+    }
+
+    // Pi's models with a configured key; the supervisor checks /model against it.
+    if (req.method === "GET" && url.pathname === "/models") {
+      await waitReady();
+      const models = (await rpc("get_available_models", {}, 15000)).data?.models || [];
+      json(res, 200, {
+        models: models.map((m) => ({ provider: m.provider, id: m.id, name: m.name })),
       });
       return;
     }

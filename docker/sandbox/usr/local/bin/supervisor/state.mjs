@@ -21,6 +21,8 @@ export const HEALTHY_MS = 8000;
 
 export const WORK = "/work";
 export const PROBE_URL = "http://127.0.0.1:4096/health";
+// Pi's available models, from the gateway (get_available_models).
+export const PI_MODELS_URL = "http://127.0.0.1:4096/models";
 // Recomputed per call so password rotation via /env or /apikey is picked up.
 export function probeAuth() {
   return (
