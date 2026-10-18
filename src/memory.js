@@ -145,13 +145,36 @@ export const USER_SETTINGS_DEFAULTS = {
   noThinking: false,
   showContext: false,
   gitCoAuthor: true,
-  multitaskEnabled: false,
-  multitaskWorkersCap: 3,
+  multitaskWorkersCap: 3, // /workers cap; the old name is kept so saved caps survive
   threadModeEnabled: false,
-  steeringEnabled: false,
+  steeringEnabled: true,
   autoCompressThreshold: 75,
   timeZone: "UTC",
 };
+
+// patchUserSettings used to snapshot every default into config.json, so most
+// stored values are old defaults rather than choices: a stored
+// `steeringEnabled: false` predates steering-by-default, and `multitaskEnabled`
+// is gone (steering replaced it). Drop those, and any value equal to its
+// current default, once so later default changes reach existing users too.
+// A non-object config.json must not crash module load; settings access reports it later.
+const configIsObject = config && typeof config === "object" && !Array.isArray(config);
+if (configIsObject && !config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
+  for (const stored of Object.values(config.userSettings || {})) {
+    if (!stored) continue;
+    if (stored.steeringEnabled === false) delete stored.steeringEnabled;
+    delete stored.multitaskEnabled;
+    for (const [key, value] of Object.entries(stored)) {
+      if (key in USER_SETTINGS_DEFAULTS && JSON.stringify(value) === JSON.stringify(USER_SETTINGS_DEFAULTS[key])) {
+        delete stored[key];
+      }
+    }
+  }
+  config.steeringDefaultOn = true;
+  try { save(CONFIG_FILE, config); } catch (error) {
+    console.error(`[memory] settings migration not saved: ${error.message}`);
+  }
+}
 
 function newId() {
   return randomUUID();
@@ -613,7 +636,8 @@ export function getUserSettings(userId) {
 export function patchUserSettings(userId, partial) {
   if (!userId) return false;
   if (!config.userSettings) config.userSettings = {};
-  config.userSettings[userId] = { ...getUserSettings(userId), ...partial };
+  // Store overrides only, so later default changes still reach this user.
+  config.userSettings[userId] = { ...config.userSettings[userId], ...partial };
   save(CONFIG_FILE, config);
   return true;
 }

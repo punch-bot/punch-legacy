@@ -90,3 +90,12 @@ test("getUsageStatistics aggregates messages, tokens, and periods", async () => 
   assert.equal(statistics.parseStatisticsButtonCustomId("stats:month:user-123").period, "month");
   assert.equal(statistics.parseStatisticsButtonCustomId("stats:bad:user-123"), null);
 });
+
+test("getUsageStatistics counts messages steered into a turn", () => {
+  const userId = "user-steered";
+  state.recordActivity({ userId, type: "reactive", status: "success", messages: 3 });
+  state.recordActivity({ userId, type: "reactive", status: "success" });
+  const stats = state.getUsageStatistics(userId, "week");
+  assert.equal(stats.userMessages, 4);
+  assert.equal(stats.totalTurns, 2);
+});

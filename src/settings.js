@@ -27,7 +27,6 @@ function formatSettingsView(guildId, userId, prefix, botUsername) {
   const us = store.getUserSettings(userId);
   lines.push("**Personal:**");
   lines.push(trigger ? `- Trigger word: \`${trigger}\`` : "- Trigger word: none");
-  lines.push(`- Multitask: ${us.multitaskEnabled ? "on" : "off"}`);
   lines.push(`- Thread mode: ${us.threadModeEnabled ? "on" : "off"}`);
   lines.push(`- Steering: ${us.steeringEnabled ? "on" : "off"}`);
   lines.push(`- Timezone: \`${us.timeZone}\``);
@@ -123,13 +122,6 @@ export function setProgressMode(guildId, mode) {
   return "Progress mode no longer applies — reactions were removed; progress is always the live status message.";
 }
 
-export function setMultitaskEnabled(userId, enabled) {
-  store.patchUserSettings(userId, { multitaskEnabled: enabled });
-  return enabled
-    ? "Multitask **enabled** — new messages while I'm busy spawn parallel subtasks instead of queuing."
-    : "Multitask **disabled** — messages queue until the current turn finishes.";
-}
-
 export function setThreadModeEnabled(userId, enabled) {
   store.patchUserSettings(userId, { threadModeEnabled: enabled });
   return enabled
@@ -140,8 +132,8 @@ export function setThreadModeEnabled(userId, enabled) {
 export function setSteeringEnabled(userId, enabled) {
   store.patchUserSettings(userId, { steeringEnabled: enabled });
   return enabled
-    ? "Steering **enabled** — messages you send while I'm working steer the active turn instead of queuing or spawning subtasks."
-    : "Steering **disabled** — new messages queue (or multitask) as before.";
+    ? "Steering **enabled** — messages you send while I'm working steer the active turn instead of queuing."
+    : "Steering **disabled** — new messages queue until the current turn finishes.";
 }
 
 export function setWorkingPigeonsEnabled(userId, enabled) {
@@ -381,12 +373,6 @@ export async function handleSettingsPrefix(message, rest, { prefix, botUsername,
     );
   }
 
-  if (sub === "multitask") {
-    if (sub2 === "on" || sub2 === "enable") return setMultitaskEnabled(uid, true);
-    if (sub2 === "off" || sub2 === "disable") return setMultitaskEnabled(uid, false);
-    throw new Error(`Usage: \`${prefix}settings multitask on|off|enable|disable\``);
-  }
-
   if (sub === "threads" || sub === "thread") {
     if (sub2 === "on" || sub2 === "enable") return setThreadModeEnabled(uid, true);
     if (sub2 === "off" || sub2 === "disable") return setThreadModeEnabled(uid, false);
@@ -555,15 +541,6 @@ export async function handleSettingsSlash(interaction, { prefix, botUsername, se
       const count = interaction.options.getInteger("count", true);
       const minutes = interaction.options.getInteger("minutes") ?? 10;
       await interaction.reply({ content: setPigeonRateLimit(uid, count, minutes) });
-    }
-    return;
-  }
-
-  if (sub === "multitask") {
-    if (cmd === "enable") {
-      await interaction.reply({ content: setMultitaskEnabled(uid, true) });
-    } else if (cmd === "disable") {
-      await interaction.reply({ content: setMultitaskEnabled(uid, false) });
     }
     return;
   }
@@ -794,15 +771,6 @@ export function getSlashCommandDefinition() {
       },
       {
         type: 2,
-        name: "multitask",
-        description: "Parallel subtasks while main chat is busy (personal)",
-        options: [
-          { type: 1, name: "enable", description: "Spawn workers instead of queuing when busy" },
-          { type: 1, name: "disable", description: "Queue messages until the current turn finishes" },
-        ],
-      },
-      {
-        type: 2,
         name: "threads",
         description: "Open a Punch thread per summon; messages inside auto-summon (personal)",
         options: [
@@ -816,7 +784,7 @@ export function getSlashCommandDefinition() {
         description: "Steer the running turn with new messages instead of queuing (personal)",
         options: [
           { type: 1, name: "enable", description: "New messages steer the active turn" },
-          { type: 1, name: "disable", description: "New messages queue or multitask" },
+          { type: 1, name: "disable", description: "New messages queue until the turn finishes" },
         ],
       },
       {

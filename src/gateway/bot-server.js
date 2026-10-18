@@ -124,6 +124,7 @@ const botHttpServer = createServer(async (req, res) => {
     }
     registry.workerProgressSent.delete(`${userId}:${worker.id}`);
     try {
+      // Workers started by the removed multitask mode still post back to their channel.
       const isSubtask = worker.source === "multitask" || worker.channelId;
       const label = isSubtask ? "subtask" : "worker";
       const icon = worker.status === "succeeded" ? "✅" : worker.status === "stopped" ? "🛑" : "⚠️";
