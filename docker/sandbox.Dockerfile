@@ -1,6 +1,6 @@
 FROM node:22-bookworm
 
-ARG PI_VERSION=1.2.0
+ARG PI_VERSION=1.3.0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl wget ca-certificates openssh-client openssh-server \
