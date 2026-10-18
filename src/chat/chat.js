@@ -65,7 +65,7 @@ import { notifyPigeonDM } from "../gateway/pigeon.js";
 
 async function handleChat(message, text, contextMessages = [], existingThinking = null, signal = null, opts = {}) {
   const uid = opts.userId ?? message.author.id;
-  const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox", channelId: message.channelId };
+  const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox", channelId: message.channelId, steeredTexts: [] };
   registry.activeTurns.set(uid, turn);
 
   // Ensure this user has their own sandbox workspace
@@ -259,9 +259,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     turn.detail = "waiting for Pi";
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
-      // Only now is the gateway's active session this chat's rather than a
-      // routine's or heartbeat's, so only now may messages steer it.
-      turn.steerable = true;
       const currentSession = store.getSession(cid);
       memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage);
       const profile = store.coreProfile(uid);
@@ -272,7 +269,16 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         userTurnLine(uid, speaker, text, { channelId: cid, timeZone: store.getUserSettings(uid).timeZone }),
       );
       console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
-      const result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
+      let result;
+      try {
+        // Only while this chat holds the lock and runs Pi is the gateway's
+        // active session this chat's rather than a routine's or heartbeat's,
+        // so only then may messages steer it.
+        turn.steerable = true;
+        result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
+      } finally {
+        turn.steerable = false;
+      }
       store.setSession(cid, result.sessionId);
       if (result.sessionId && /<\/?compress\s*\/?\s*>/i.test(result.text)) {
         try {
@@ -324,7 +330,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
           userId: uid,
           channelId: cid,
           isDm: true,
-          userText: memoryUserText,
+          userText: [memoryUserText, ...turn.steeredTexts].filter(Boolean).join("\n\n"),
           assistantText: out,
           extractDurableFacts: saved === 0 && failed === 0,
         });

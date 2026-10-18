@@ -28,6 +28,8 @@ export function shouldSteerTurn(uid, message, opts = {}) {
 }
 
 export async function trySteerTurn(message, text, opts = {}) {
+  // An empty summon queues so handleChat can answer "Say something".
+  if (!String(text ?? "").trim()) return false;
   const uid = opts.userId ?? message.author.id;
   const who = opts.displayName ?? (message.member?.displayName || message.author.username);
   const speaker = `${who} (@${opts.speakerUsername ?? message.author.username}, id:${uid})`;
@@ -46,6 +48,8 @@ export async function trySteerTurn(message, text, opts = {}) {
     console.log(`[steer] uid=${uid} steer failed (${result.error}) — falling back to queue`);
     return false;
   }
+  // handleChat folds steered text into the turn's DM memory capture.
+  registry.activeTurns.get(uid)?.steeredTexts?.push(text);
   console.log(`[steer] uid=${uid} cid=${message.channelId} steered (${result.disposition || "ok"})`);
   await safeReact(message, "🧭");
   return true;

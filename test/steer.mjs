@@ -9,7 +9,7 @@ process.env.DATA_DIR = dataDir;
 
 const memory = await import("../src/memory.js");
 const { registry } = await import("../src/core/registry.js");
-const { shouldSteerTurn } = await import("../src/chat/steer.js");
+const { shouldSteerTurn, trySteerTurn } = await import("../src/chat/steer.js");
 
 after(() => {
   rmSync(dataDir, { recursive: true, force: true });
@@ -68,6 +68,12 @@ describe("shouldSteerTurn", () => {
     // A routine holds the lock, so the gateway's active session is the routine's.
     registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId: "chan-1" });
     assert.equal(shouldSteerTurn(uid, msg("chan-1")), false);
+    idle();
+  });
+
+  it("queues empty summons so the normal empty-input reply runs", async () => {
+    busy("chan-1");
+    assert.equal(await trySteerTurn(msg("chan-1"), "   "), false);
     idle();
   });
 
