@@ -18,7 +18,7 @@ after(() => {
 const uid = "user-steer-test";
 const msg = (channelId = "chan-1") => ({ channelId, author: { id: uid } });
 const busy = (channelId = "chan-1") => {
-  registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId });
+  registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId, steerable: true });
 };
 const idle = () => registry.activeTurns.delete(uid);
 
@@ -60,6 +60,14 @@ describe("shouldSteerTurn", () => {
     assert.equal(shouldSteerTurn(uid, { ...msg("chan-1"), attachments: new Map([["a", {}]]) }), false);
     assert.equal(shouldSteerTurn(uid, msg("chan-1"), { reactedTo: "--- Reacted to ---" }), false);
     assert.equal(shouldSteerTurn(uid, { ...msg("chan-1"), attachments: new Map() }), true);
+    idle();
+  });
+
+  it("queues while the turn is still waiting for the run lock", () => {
+    memory.patchUserSettings(uid, { steeringEnabled: true });
+    // A routine holds the lock, so the gateway's active session is the routine's.
+    registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId: "chan-1" });
+    assert.equal(shouldSteerTurn(uid, msg("chan-1")), false);
     idle();
   });
 

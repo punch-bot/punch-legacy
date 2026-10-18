@@ -259,6 +259,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     turn.detail = "waiting for Pi";
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
+      // Only now is the gateway's active session this chat's rather than a
+      // routine's or heartbeat's, so only now may messages steer it.
+      turn.steerable = true;
       const currentSession = store.getSession(cid);
       memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage);
       const profile = store.coreProfile(uid);
