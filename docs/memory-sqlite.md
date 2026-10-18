@@ -29,6 +29,25 @@ Successful import preserves ownership, timestamps, and record metadata. When leg
 - Managed sandbox creation injects `PUNCH_BOT_TOKEN` and `PUNCH_BOT_URL` (default `http://bot:4098`) and attaches the sandbox to the bot's Compose network. Token resolution remains tied to the registered sandbox owner. The Compose `sandbox` profile is only a base image/container, not a registered user's authenticated sandbox. Existing containers need recreation to receive the new image/environment; override `PUNCH_BOT_URL` in the bot's deployment environment if its service address differs. Container argument wiring is tested; live Docker/DNS reachability still needs rollout validation.
 - Project memory remains at `/work/.punch-memory.md`, managed by core's existing `update_memory` tool. `recall_memory(project:true)` reads it locally alongside bot recall, without the bot fetching it on each turn. Existing session history may still contain previously injected memory until compression/reset.
 
+## Injection diagnostics (PNCH-45)
+
+Every successful `preamble()` call logs `[memory] recall-preamble chars=N
+approxTokens=N/4`, including empty/disabled-budget results. Its 4,000-character
+ceiling includes citation prefixes, truncation markers, and line separators;
+callers can only lower it. Each Discord/Spectrum memory block logs its actual
+assembled size as `[memory] turn-memory-block chars=N approxTokens=N/4`, including
+the bounded profile, recall hint, and block delimiters. These logs contain sizes
+only; they do not include queries, facts, identities, or context IDs. The token
+count is a character-based estimate, not provider token accounting.
+
+When investigating repeated facts, first inspect the corresponding turn's core
+profile, recall tool results/citations (`memory:user`, `memory:channel`, or
+`daily`), any requested project-memory result, and quoted/session history. The
+always-on block is a profile and hint; a repeated fact may also come from daily
+notes, project memory, or old conversation context. Size logs identify which
+payload was sent and its budget, but cannot establish which source the model
+used. No production recitation trace was supplied for this change.
+
 ## Backup and recovery
 
 Stop the bot before copying `memory.sqlite`, any `memory.sqlite-wal`/`memory.sqlite-shm` files, and `memory.sqlite.cutover` together. Alternatively use SQLite's backup API with the database online; copying the main file alone while WAL is active can omit committed data.

@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync, execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
+import { turnTimeouts, timeoutSeconds } from "./turn-timeouts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -140,6 +141,8 @@ function userEnvArgs(name) {
     "--env", `PI_SERVER_USERNAME=${process.env.PI_SERVER_USERNAME || "pi"}`,
     "--env", `PI_SERVER_PASSWORD=${process.env.PI_SERVER_PASSWORD || ""}`,
     "--env", `PI_MODEL=${process.env.PI_MODEL || "opencode/big-pickle"}`,
+    "--env", `PI_HARD_TIMEOUT=${turnTimeouts().hard}`,
+    "--env", `PI_IDLE_TIMEOUT=${timeoutSeconds(process.env.PI_IDLE_TIMEOUT, 90)}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
     "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
     "--env", `PUNCH_BOT_URL=${process.env.PUNCH_BOT_URL || "http://bot:4098"}`,

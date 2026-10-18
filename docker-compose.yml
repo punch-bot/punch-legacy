@@ -15,9 +15,10 @@ services:
       PI_SERVER_URL: ""
       SANDBOX_MAP: "{}"
       PI_REMOTE_DIR: /work
-      PI_TIMEOUT: "60"
-      PI_IDLE_TIMEOUT: "90"
-      PI_MAX: "1800"
+      PI_TIMEOUT: ${PI_TIMEOUT:-1800}
+      PI_IDLE_TIMEOUT: ${PI_IDLE_TIMEOUT:-90}
+      PI_MAX: ${PI_MAX:-${PI_TIMEOUT:-1800}}
+      PI_HARD_TIMEOUT: ${PI_HARD_TIMEOUT:-${PI_MAX:-${PI_TIMEOUT:-1800}}}
     tmpfs:
       - /tmp
     pids_limit: 256
@@ -47,6 +48,8 @@ services:
       PI_SERVER_USERNAME: ${PI_SERVER_USERNAME:-pi}
       PI_SERVER_PASSWORD: ${PI_SERVER_PASSWORD:?PI_SERVER_PASSWORD is required for sandbox services}
       PI_MODEL: ${PI_MODEL:-opencode/big-pickle}
+      PI_HARD_TIMEOUT: ${PI_HARD_TIMEOUT:-${PI_MAX:-${PI_TIMEOUT:-1800}}}
+      PI_IDLE_TIMEOUT: ${PI_IDLE_TIMEOUT:-90}
     networks:
       - edge
     devices:

@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { MemoryDatabase } from "./memory-db.js";
 import { cleanLine, normalize, terms, matchesTerm, MEMORY_PREAMBLE_MAX_CHARS } from "./memory-text.js";
+import { logMemorySize } from "./memory-metrics.js";
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 const SESSION_FILE = join(DATA_DIR, "sessions.json");
@@ -275,7 +276,10 @@ export function explainMemory(args) {
 export function preamble(userId, channelId, query = "", options = {}) {
   const maxChars = Math.max(0, Math.min(MEMORY_PREAMBLE_MAX_CHARS, Number(options.maxChars ?? 3_500) || 0));
   const limit = Math.max(0, Math.min(100, Number(options.limit ?? 10) || 0));
-  if (!maxChars || !limit) return "";
+  if (!maxChars || !limit) {
+    logMemorySize("recall-preamble", "");
+    return "";
+  }
   const recallSessionId = options.recallSessionId ? String(options.recallSessionId) : null;
   let recalled = null;
   if (recallSessionId) {
@@ -309,7 +313,9 @@ export function preamble(userId, channelId, query = "", options = {}) {
     recalled?.add(result.citation);
     if (lines.length >= limit) break;
   }
-  return lines.join("\n");
+  const text = lines.join("\n");
+  logMemorySize("recall-preamble", text);
+  return text;
 }
 
 export function moveMemoryRecall(fromSessionId, toSessionId) {
@@ -434,7 +440,7 @@ function safeNotePart(text) {
 function extractFacts(userText) {
   // Dots inside names/URLs are not sentence boundaries. Skip an entire question
   // before matching a fact prefix, so its declarative-looking tail is not saved.
-  const sentences = String(userText || "").split(/(?<=[.!?])(?:[ \t]+|$)|[\r\n]+/u);
+  const sentences = String(userText || "").split(/(?<=[.!?])["'”’)\]]*(?:\s+|$)|[\r\n]+/u);
   const pattern = /\b(?:my name is|i prefer|my time ?zone is|i use|remember that)\s+.+/i;
   const facts = [];
   const seen = new Set();

@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import { abortPiTurn } from "/usr/local/lib/pi-turn-abort.mjs";
 import { syncPiSkillSettings } from "/usr/local/lib/skills-manager.mjs";
 import {
   mergePiSettings,
@@ -199,6 +200,7 @@ let reqSeq = 0;
 const pending = new Map();
 const sseClients = new Set();
 const eventWaiters = new Set();
+const turnCancellations = new Set();
 const reportProgressCalls = new Set();
 // Pi RPC has one active agent. Hold session switching and complete prompt lifecycles
 // in a FIFO so a second Discord turn cannot collide with an in-flight Pi turn.
@@ -303,13 +305,16 @@ loadSessionMap();
 function clearPiWaiters(err) {
   for (const [, p] of pending) p.reject(err);
   pending.clear();
+  for (const cancel of turnCancellations) cancel(err);
   eventWaiters.clear();
 }
 
-function forceKillPi(reason = "forced") {
+function forceKillPi(reason, proc) {
+  // The exit handler owns respawn. A delayed recovery must never restart an
+  // already-exited child or kill a replacement created since recovery began.
+  if (!proc || child !== proc) return;
   log("force-kill pi:", reason);
   clearPiWaiters(new Error("pi force-killed"));
-  const proc = child;
   child = null;
   ready = false;
   stdoutBuf = "";
@@ -322,16 +327,27 @@ function forceKillPi(reason = "forced") {
         proc.kill("SIGKILL");
       } catch {}
     }, 2000).unref();
-  } else {
-    startPi();
   }
 }
 
 async function recoverStuckPi(reason = "stuck") {
+  const proc = child;
   try {
     await rpc("abort", {}, ABORT_GRACE_MS);
   } catch {}
-  forceKillPi(reason);
+  forceKillPi(reason, proc);
+}
+
+let abortingPi = null;
+function stopPiTurn(reason) {
+  const proc = child;
+  // HTTP disconnect, deadline, and /abort can arrive for the same turn.
+  abortingPi ??= abortPiTurn({
+    rpc, waitTurn, forceKillPi: (why) => forceKillPi(why, proc),
+    graceMs: ABORT_GRACE_MS, reason,
+  })
+    .finally(() => { abortingPi = null; });
+  return abortingPi;
 }
 
 function startPi() {
@@ -729,6 +745,7 @@ function waitTurn(signal) {
       if (done) return;
       done = true;
       eventWaiters.delete(onEvent);
+      turnCancellations.delete(cancel);
       if (signal) signal.removeEventListener("abort", onAbort);
       fn(arg);
     };
@@ -750,6 +767,7 @@ function waitTurn(signal) {
     };
 
     // Attach waiter first — before any await — so events during prompt are caught.
+    turnCancellations.add(cancel);
     eventWaiters.add(onEvent);
     if (signal) {
       if (signal.aborted) onAbort();
@@ -786,6 +804,9 @@ async function promptAndWait(promptText, signal) {
   eventWaiters.add(onPiActivity);
   let turnTimer;
   let idleIv;
+  let probing = false;
+  let watching = true;
+  const progressSessionId = activeLogicalId;
   const turnMax = new Promise((_, reject) => {
     turnTimer = setTimeout(
       () => reject(new Error(`turn exceeded ${TURN_MAX_MS / 1000}s hard cap`)),
@@ -793,10 +814,25 @@ async function promptAndWait(promptText, signal) {
     );
   });
   const turnIdle = new Promise((_, reject) => {
-    idleIv = setInterval(() => {
-      if (signal?.aborted) return;
-      if (Date.now() - lastPiEventAt > TURN_IDLE_MS) {
-        reject(new Error(`pi silent for ${Math.round(TURN_IDLE_MS / 1000)}s (turn hung)`));
+    idleIv = setInterval(async () => {
+      if (signal?.aborted || probing) return;
+      // A quiet tool can still be working. Probe Pi before calling it stuck,
+      // early enough to send a verified heartbeat to the bot's idle watchdog.
+      if (Date.now() - lastPiEventAt > TURN_IDLE_MS / 2) {
+        probing = true;
+        try {
+          const state = await rpc("get_state", {}, Math.min(TURN_IDLE_MS / 2, 5000));
+          if (!watching) return;
+          if (state.data?.isStreaming !== true) throw new Error("Pi is idle without settling");
+          const progress = turnProgress.get(progressSessionId);
+          if (progress) broadcastSse(progressEvent(progressSessionId, {
+            ...progressSnapshot(progress, Date.now()), heartbeat: true,
+          }));
+        } catch {
+          reject(new Error(`pi silent for ${Math.round(TURN_IDLE_MS / 1000)}s (turn hung)`));
+        } finally {
+          probing = false;
+        }
       }
     }, 5_000);
   });
@@ -815,11 +851,16 @@ async function promptAndWait(promptText, signal) {
     } catch (e) {
       turnP.cancel(e);
       if (!signal?.aborted) {
-        void recoverStuckPi(e.message || "turn failed");
+        if (/silent for|turn hung/i.test(e.message || "")) {
+          await recoverStuckPi(e.message);
+        } else {
+          await stopPiTurn(e.message || "turn failed");
+        }
       }
       throw e;
     }
   } finally {
+    watching = false;
     clearTimeout(turnTimer);
     clearInterval(idleIv);
     eventWaiters.delete(onPiActivity);
@@ -906,7 +947,7 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/abort") {
-      void recoverStuckPi("global abort");
+      await stopPiTurn("global abort");
       if (activeLogicalId) finishTurnProgress(activeLogicalId, "aborted");
       json(res, 200, { ok: true });
       return;
@@ -965,7 +1006,7 @@ const server = createServer(async (req, res) => {
       }
 
       if (req.method === "POST" && action === "abort") {
-        void recoverStuckPi("session abort");
+        await stopPiTurn("session abort");
         finishTurnProgress(sid, "aborted");
         json(res, 200, { ok: true });
         return;
@@ -1095,10 +1136,9 @@ const server = createServer(async (req, res) => {
           });
         } catch (e) {
           if (e.name === "AbortError" || ac.signal.aborted) {
-            void recoverStuckPi("client disconnect");
+            await stopPiTurn("client disconnect");
             json(res, 499, { error: "aborted" });
           } else if (/hard cap|force-killed|timed out/i.test(e.message || "")) {
-            void recoverStuckPi(e.message);
             json(res, 504, { error: e.message });
           } else {
             log("message error:", e.message);
