@@ -9,7 +9,6 @@ import {
   pigeonSupervisorBlock,
   memoryBlock,
   timestampLine,
-  multitaskPrompt,
   userTurnLine,
   assemblePrompt,
 } from "../src/prompt-blocks.js";
@@ -117,34 +116,6 @@ test("memoryBlock keeps the core tier bounded and describes a disabled store hon
 
 test("timestampLine reports the message send time", () => {
   assert.equal(timestampLine("Saturday, August 8, 2026 at 3:42:00 PM EDT (America/New_York)"), "Message sent at Saturday, August 8, 2026 at 3:42:00 PM EDT (America/New_York).");
-});
-
-test("multitaskPrompt nests the channel context block", () => {
-  const prompt = multitaskPrompt("do the thing", [{ author: "Alice", content: "please" }]);
-  assert.ok(prompt.startsWith("--- Multitask subtask ---"));
-  assert.match(prompt, /Work independently/);
-  assert.match(prompt, /return concise results/);
-  assert.match(prompt, /--- Channel context \(background only\) ---/);
-  assert.match(prompt, /\[Alice\] please/);
-  assert.ok(prompt.endsWith("do the thing"));
-});
-
-test("multitaskPrompt omits channel context when empty", () => {
-  const prompt = multitaskPrompt("standalone", []);
-  assert.doesNotMatch(prompt, /Channel context/);
-  assert.match(prompt, /Work independently/);
-  assert.match(prompt, /return concise results/);
-  assert.ok(prompt.endsWith("standalone"));
-});
-
-test("multitaskPrompt includes the timestamp line when provided", () => {
-  const prompt = multitaskPrompt("do the thing", [], "Saturday, August 8, 2026 at 3:42:00 PM EDT (America/New_York)");
-  assert.match(prompt, /\n\nMessage sent at Saturday, August 8, 2026 at 3:42:00 PM EDT \(America\/New_York\)\.\n\ndo the thing$/);
-});
-
-test("multitaskPrompt omits the timestamp when absent", () => {
-  assert.doesNotMatch(multitaskPrompt("standalone", []), /was sent at/);
-  assert.doesNotMatch(multitaskPrompt("do the thing", [{ author: "Alice", content: "please" }]), /was sent at/);
 });
 
 test("userTurnLine and assemblePrompt build the final user line", () => {

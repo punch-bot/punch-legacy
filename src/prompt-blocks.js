@@ -66,19 +66,6 @@ export function timestampLine(sentAt) {
   return `Message sent at ${sentAt}.`;
 }
 
-export function multitaskPrompt(text, contextMessages = [], sentAt) {
-  const body = [sentAt ? timestampLine(sentAt) : "", String(text ?? "").trim()].filter(Boolean).join("\n\n");
-  let prompt = body;
-  if (contextMessages.length > 0) {
-    prompt = `${channelContextBlock(contextMessages)}\n\n${prompt}`;
-  }
-  return (
-    "--- Multitask subtask ---\n" +
-    "Parallel to the main Punch turn. Work independently; return concise results.\n\n" +
-    prompt
-  );
-}
-
 export function userTurnLine(uid, speaker, text, { channelId = null, timeZone = null } = {}) {
   const meta = [
     channelId ? `channel:${channelId}` : null,

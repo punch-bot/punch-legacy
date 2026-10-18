@@ -25,14 +25,14 @@ import {
   apiUrlFor,
   getEnv,
   getFile,
-  getMultitaskWorkerSettings,
+  getWorkerSettings,
   killBackgroundTask,
   listBackgroundTasks,
   reloadSandboxMap,
   sandboxNameForUser,
   setEnv,
   summarizeSession,
-  syncMultitaskWorkerCap,
+  syncWorkerCap,
 } from "../agent.js";
 
 import { PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
@@ -41,7 +41,6 @@ import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
 import { settingsDeps } from "../chat/context.js";
 import { enqueueChat, withUserRunLock } from "../chat/queue.js";
-import { activeStatusText, startMultitaskWorker } from "../chat/multitask.js";
 import { formatInTimeZone } from "../timezone.js";
 import { renderDoctorReport, runDoctor } from "../doctor/index.js";
 import * as pigeonGate from "../pigeon-gate.js";
@@ -644,62 +643,6 @@ export function registerInteractions(client) {
       return;
     }
 
-    if (interaction.commandName === "multitask") {
-      const uid = interaction.user.id;
-      const sub = interaction.options.getSubcommand();
-      if (sub === "on") {
-        await interaction.reply({
-          content: settings.setMultitaskEnabled(uid, true),
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-      if (sub === "off") {
-        await interaction.reply({
-          content: settings.setMultitaskEnabled(uid, false),
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-      if (sub === "status") {
-        const enabled = store.getUserSettings(uid).multitaskEnabled;
-        const body = await activeStatusText(uid);
-        await interaction.reply({
-          content: `Multitask: **${enabled ? "on" : "off"}**\n${body}`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return;
-      }
-      if (sub === "start") {
-        const prompt = interaction.options.getString("prompt", true);
-        const kind = interaction.options.getString("kind") || "coding";
-        const model = interaction.options.getString("model") || undefined;
-        const timeoutMinutes = Math.max(1, Math.min(30, interaction.options.getInteger("timeout_minutes") || 10));
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        const result = await startMultitaskWorker(uid, {
-          channelId: interaction.channelId,
-          messageId: null,
-          text: prompt,
-          contextMessages: [],
-          opts: { workerKind: kind, model, timeoutMinutes },
-        });
-        if (result.ok) {
-          await interaction.editReply({
-            content: `Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — watch this channel for the result.`,
-          });
-          await interaction.channel.send({
-            content: `🧵 Started subtask \`${result.worker.id.slice(0, 8)}\` (${result.worker.kind}) — I'll reply here when done.`,
-            allowedMentions: { parse: [] },
-          });
-        } else {
-          await interaction.editReply({
-            content: `⚠️ Could not start subtask: ${result.error || "unknown error"}`,
-          });
-        }
-        return;
-      }
-    }
-
     if (interaction.commandName === "workers") {
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
@@ -707,15 +650,29 @@ export function registerInteractions(client) {
       if (!url) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       const sub = interaction.options.getSubcommand();
       try {
-        await syncMultitaskWorkerCap(uid);
+        await syncWorkerCap(uid);
         if (sub === "list") {
           const res = await fetch(`${url}/workers`, { headers: { authorization: auth } });
           if (!res.ok) throw new Error(`supervisor API ${res.status}`);
           const { workers } = await res.json();
-          const settings = await getMultitaskWorkerSettings(uid);
+          const settings = await getWorkerSettings(uid);
           const header = settings ? `**Workers** (${settings.active}/${settings.cap} active):\n` : "**Workers:**\n";
           const body = workers?.length ? `${header}${workers.slice(0, 15).map((worker) => `\`${worker.id.slice(0, 8)}\` ${worker.kind} **${worker.status}** — ${new Date(worker.createdAt).toLocaleString()}`).join("\n")}` : `${header.trim()} No workers.`;
           await interaction.reply({ content: body, flags: MessageFlags.Ephemeral });
+          return;
+        }
+        if (sub === "cap") {
+          const value = interaction.options.getInteger("value");
+          if (value != null) store.patchUserSettings(uid, { multitaskWorkersCap: value });
+          const settings = await syncWorkerCap(uid);
+          if (!settings) {
+            await interaction.reply({ content: "This sandbox predates worker caps. Recreate it to use `/workers cap`.", flags: MessageFlags.Ephemeral });
+            return;
+          }
+          await interaction.reply({
+            content: `${value != null ? "Worker cap set. " : ""}**Workers:** ${settings.active}/${settings.cap} active (${settings.available} slots free).`,
+            flags: MessageFlags.Ephemeral,
+          });
           return;
         }
         const id = interaction.options.getString("id", sub !== "start");
@@ -737,39 +694,6 @@ export function registerInteractions(client) {
         if (!res.ok) throw new Error(`supervisor API ${res.status}`);
         const { worker } = await res.json();
         await interaction.reply({ content: `Started isolated ${worker.kind} worker \`${worker.id}\`. Result will arrive in DM.`, flags: MessageFlags.Ephemeral });
-      } catch (error) { await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral }); }
-      return;
-    }
-
-    if (interaction.commandName === "multitask" && interaction.options.getSubcommandGroup() === "settings") {
-      const uid = interaction.user.id;
-      if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
-      const sub = interaction.options.getSubcommand();
-      try {
-        if (sub === "view") {
-          await syncMultitaskWorkerCap(uid);
-          const settings = await getMultitaskWorkerSettings(uid);
-          const stored = store.getUserSettings(uid).multitaskWorkersCap;
-          if (!settings) {
-            await interaction.reply({ content: `Stored multitask worker cap: **${stored}**. This sandbox does not support worker settings yet.`, flags: MessageFlags.Ephemeral });
-            return;
-          }
-          await interaction.reply({
-            content: `**Multitask workers:** ${settings.active}/${settings.cap} active (${settings.available} slots free). Stored cap: **${stored}**.`,
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-        if (sub === "cap-set") {
-          const cap = interaction.options.getInteger("cap", true);
-          store.patchUserSettings(uid, { multitaskWorkersCap: cap });
-          const settings = await syncMultitaskWorkerCap(uid);
-          await interaction.reply({
-            content: `Multitask worker cap set to **${settings.cap}** (${settings.active} active, ${settings.available} slots free).`,
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
       } catch (error) { await interaction.reply({ content: `⚠️ ${error.message}`, flags: MessageFlags.Ephemeral }); }
       return;
     }

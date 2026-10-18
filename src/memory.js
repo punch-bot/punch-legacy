@@ -121,6 +121,22 @@ let sessions = load(SESSION_FILE, {});
 let threadOwners = load(THREAD_OWNERS_FILE, {});
 let config = load(CONFIG_FILE, { allowedChannels: {}, summonWords: {}, guildSettings: {} });
 
+// Steering replaced the multitask toggle and became the default after
+// patchUserSettings had been snapshotting every default into config.json, so a
+// stored `steeringEnabled: false` is almost always the old default rather than
+// a choice. Drop both once so everyone, multitask users included, steers.
+if (!config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
+  for (const stored of Object.values(config.userSettings || {})) {
+    if (!stored) continue;
+    if (stored.steeringEnabled === false) delete stored.steeringEnabled;
+    delete stored.multitaskEnabled;
+  }
+  config.steeringDefaultOn = true;
+  try { save(CONFIG_FILE, config); } catch (error) {
+    console.error(`[memory] steering default migration not saved: ${error.message}`);
+  }
+}
+
 export const GUILD_SETTINGS_DEFAULTS = {
   reactionSummonEmoji: "🤖",
   reactionSummonEnabled: true,
@@ -145,10 +161,9 @@ export const USER_SETTINGS_DEFAULTS = {
   noThinking: false,
   showContext: false,
   gitCoAuthor: true,
-  multitaskEnabled: false,
-  multitaskWorkersCap: 3,
+  multitaskWorkersCap: 3, // /workers cap; the old name is kept so saved caps survive
   threadModeEnabled: false,
-  steeringEnabled: false,
+  steeringEnabled: true,
   autoCompressThreshold: 75,
   timeZone: "UTC",
 };
@@ -613,7 +628,8 @@ export function getUserSettings(userId) {
 export function patchUserSettings(userId, partial) {
   if (!userId) return false;
   if (!config.userSettings) config.userSettings = {};
-  config.userSettings[userId] = { ...getUserSettings(userId), ...partial };
+  // Store overrides only, so later default changes still reach this user.
+  config.userSettings[userId] = { ...config.userSettings[userId], ...partial };
   save(CONFIG_FILE, config);
   return true;
 }

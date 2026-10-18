@@ -23,8 +23,10 @@ const busy = (channelId = "chan-1") => {
 const idle = () => registry.activeTurns.delete(uid);
 
 describe("shouldSteerTurn", () => {
-  it("defaults off even while busy", () => {
+  it("defaults on while busy, and can be turned off", () => {
     busy();
+    assert.equal(shouldSteerTurn(uid, msg()), true);
+    memory.patchUserSettings(uid, { steeringEnabled: false });
     assert.equal(shouldSteerTurn(uid, msg()), false);
   });
 

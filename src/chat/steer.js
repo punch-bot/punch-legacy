@@ -1,6 +1,6 @@
 // Steering: while a user's main turn is in flight, a new message in the same
 // channel is injected into the running Pi turn via the gateway `steer` RPC
-// instead of queueing behind it or spawning a multitask worker.
+// instead of queueing behind it.
 
 import * as store from "../memory.js";
 import { registry } from "../core/registry.js";

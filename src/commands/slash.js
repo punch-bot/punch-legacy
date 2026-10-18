@@ -95,36 +95,6 @@ export function buildSlashCommands() {
         options: [{ type: 3, name: "name", description: "Extension filename", required: true }] },
     ],
   }, {
-    name: "multitask",
-    description: "Run parallel subtasks while main chat is busy",
-    options: [
-      { type: 1, name: "on", description: "Enable automatic multitasking" },
-      { type: 1, name: "off", description: "Disable automatic multitasking (queue messages)" },
-      { type: 1, name: "status", description: "Show multitask setting and active workers" },
-      { type: 1, name: "start", description: "Start a background subtask now",
-        options: [
-          { type: 3, name: "prompt", description: "Task for the subagent", required: true },
-          { type: 3, name: "kind", description: "Worker capability",
-            choices: [{ name: "research", value: "research" }, { name: "coding", value: "coding" }, { name: "browser", value: "browser" }] },
-          { type: 3, name: "model", description: "Optional model override" },
-          { type: 4, name: "timeout_minutes", description: "1-30; default 10" },
-        ] },
-      {
-        type: 2,
-        name: "settings",
-        description: "Worker concurrency settings",
-        options: [
-          { type: 1, name: "view", description: "Show worker cap and active count" },
-          {
-            type: 1,
-            name: "cap-set",
-            description: "Set max concurrent workers (1-10)",
-            options: [{ type: 4, name: "cap", description: "Max concurrent workers", required: true, min_value: 1, max_value: 10 }],
-          },
-        ],
-      },
-    ],
-  }, {
     name: "workers",
     description: "Manage isolated Pi background workers",
     options: [
@@ -138,6 +108,8 @@ export function buildSlashCommands() {
       { type: 1, name: "list", description: "List worker runs" },
       { type: 1, name: "stop", description: "Stop a worker", options: [{ type: 3, name: "id", description: "Worker id", required: true }] },
       { type: 1, name: "logs", description: "View worker log", options: [{ type: 3, name: "id", description: "Worker id", required: true }]     },
+      { type: 1, name: "cap", description: "Show or set max concurrent workers",
+        options: [{ type: 4, name: "value", description: "Max concurrent workers (1-10)", min_value: 1, max_value: 10 }] },
     ],
   }, {
     name: "models",

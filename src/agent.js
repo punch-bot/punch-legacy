@@ -914,7 +914,7 @@ export async function setEnv(key, value, userId) {
   return res.json();
 }
 
-export async function syncMultitaskWorkerCap(userId) {
+export async function syncWorkerCap(userId) {
   const url = apiUrlFor(userId);
   if (!url) return null;
   const cap = getUserSettings(userId).multitaskWorkersCap;
@@ -932,7 +932,7 @@ export async function syncMultitaskWorkerCap(userId) {
   return settings;
 }
 
-export async function getMultitaskWorkerSettings(userId) {
+export async function getWorkerSettings(userId) {
   const url = apiUrlFor(userId);
   if (!url) return null;
   const res = await fetch(`${url}/workers/settings`, { headers: headers() });

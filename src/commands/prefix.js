@@ -24,7 +24,7 @@ import { formatInTimeZone } from "../timezone.js";
 import { PREFIX } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { reply } from "../core/discord.js";
-import { activeStatusText } from "../chat/multitask.js";
+import { activeStatusText } from "../chat/status.js";
 import { settingsDeps } from "../chat/context.js";
 import { withUserRunLock } from "../chat/queue.js";
 
@@ -128,7 +128,7 @@ async function handleCommand(message, cmd, rest) {
           { name: "Memory", value: `\`\`${PREFIX}remember <text>\`\` — save a fact about you\n\`\`${PREFIX}remember-channel <text>\`\` — save a fact for this channel\n\`\`${PREFIX}memories\`\` — list your + channel memories\n\`\`${PREFIX}forget <id>\`\` — delete a memory by id`, inline: true },
           { name: "Session", value: `\`\`${PREFIX}reset\`\` — start a fresh Pi session here`, inline: true },
           { name: "\u200B", value: "\u200B" },
-          { name: "Background Tasks", value: `\`\`${PREFIX}status\`\` — show active turn + workers\n\`\`${PREFIX}stop\`\` — cancel all queued/in-flight requests\n\`/multitask\` — parallel subtasks while busy\n\`\`${PREFIX}exec <command>\`\` — run a command and get output\n\`\`${PREFIX}bg <command>\`\` — run a command in background\n\`\`${PREFIX}tasks\`\` — list processes (dropdown to kill)\n\`\`${PREFIX}task-log <filename>\`\` — view task log (last 20 lines)\n\`\`${PREFIX}logs [source] [lines]\`\` — sandbox / Pi gateway logs`, inline: true },
+          { name: "Background Tasks", value: `\`\`${PREFIX}status\`\` — show active turn + workers\n\`\`${PREFIX}stop\`\` — cancel all queued/in-flight requests\n\`/workers\` — isolated Pi background workers\n\`\`${PREFIX}exec <command>\`\` — run a command and get output\n\`\`${PREFIX}bg <command>\`\` — run a command in background\n\`\`${PREFIX}tasks\`\` — list processes (dropdown to kill)\n\`\`${PREFIX}task-log <filename>\`\` — view task log (last 20 lines)\n\`\`${PREFIX}logs [source] [lines]\`\` — sandbox / Pi gateway logs`, inline: true },
           { name: "\u200B", value: "\u200B" },
           { name: "Channel Settings", value: "`/settings` — summon word, channel lock, reaction summon, progress mode\n`/settings view` to see current values\n`!setup` / `!forget-channel` — channel lock aliases", inline: true },
           { name: "Routines", value: `\`\`${PREFIX}remind <when> <text>\`\` — one-shot reminder\n\`\`${PREFIX}routine list\`\` — list your routines\n\`\`${PREFIX}routine history [id]\`\` — recent runs and errors\n\`\`${PREFIX}routine remove <id>\`\` — delete a routine\n\`\`${PREFIX}routine pause/resume <id>\`\` — toggle a routine\n\`\`${PREFIX}routine daily <time> <text>\`\` — daily reminder\n\`\`${PREFIX}routine auto <when> <prompt>\`\` — LLM automation`, inline: true },

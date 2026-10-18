@@ -39,7 +39,7 @@ Discord / Spectrum → bot :4098 → http://sandbox-<name>:4096 (pi-gateway) →
 |------|------|
 | `src/index.js` | Bootstrap only |
 | `src/core/` | Shared config, client registry, Discord helpers, supervisor auth |
-| `src/chat/` | Message triggers, per-user turn queue, full chat turn, threads, steer, multitask |
+| `src/chat/` | Message triggers, per-user turn queue, full chat turn, threads, steer, turn/worker status |
 | `src/commands/` | Slash command definitions, interaction handlers, `!` prefix commands |
 | `src/gateway/` | Bot HTTP API (:4098) and pigeon delivery |
 | `src/agent.js` | Pi gateway client, routing, timeouts, context limits |
