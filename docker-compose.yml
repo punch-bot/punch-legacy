@@ -16,7 +16,7 @@ services:
       SANDBOX_MAP: "{}"
       PI_REMOTE_DIR: /work
       PI_TIMEOUT: "60"
-      PI_IDLE_TIMEOUT: "90"
+      PI_IDLE_TIMEOUT: "1800"
       PI_MAX: "1800"
     tmpfs:
       - /tmp

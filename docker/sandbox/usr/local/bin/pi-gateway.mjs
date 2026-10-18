@@ -61,7 +61,7 @@ const TURN_MAX_MS =
 const TURN_IDLE_MS =
   (Number(process.env.PI_GATEWAY_TURN_IDLE_MS) ||
     Number(process.env.PI_IDLE_TIMEOUT) ||
-    120) * 1000;
+    1800) * 1000;
 let piSpawnedAt = 0;
 let usedModelFallback = false;
 
