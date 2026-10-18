@@ -434,7 +434,7 @@ function safeNotePart(text) {
 function extractFacts(userText) {
   // Dots inside names/URLs are not sentence boundaries. Skip an entire question
   // before matching a fact prefix, so its declarative-looking tail is not saved.
-  const sentences = String(userText || "").split(/(?<=[.!?])(?:[ \t]+|$)|[\r\n]+/u);
+  const sentences = String(userText || "").split(/(?<=[.!?])["'”’)\]]*(?:\s+|$)|[\r\n]+/u);
   const pattern = /\b(?:my name is|i prefer|my time ?zone is|i use|remember that)\s+.+/i;
   const facts = [];
   const seen = new Set();
