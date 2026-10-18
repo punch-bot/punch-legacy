@@ -1058,10 +1058,10 @@ export function registerInteractions(client) {
         await interaction.reply({ content: "⏱️ Idle/stale timeouts disabled — hung turns won't be aborted for silence or heartbeat-only working (the hard ceiling still applies).", flags: MessageFlags.Ephemeral });
       } else if (sub === "enable") {
         store.patchUserSettings(uid, { disableIdleTimeout: false });
-        await interaction.reply({ content: "⏱️ Idle/stale timeouts re-enabled (90s silence / ~3m stuck tool-or-working).", flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: "⏱️ Idle/stale timeouts re-enabled (30m silence / 30m stuck tool-or-working).", flags: MessageFlags.Ephemeral });
       } else {
         const us = store.getUserSettings(uid);
-        await interaction.reply({ content: `⏱️ Idle/stale timeouts are currently **${us.disableIdleTimeout ? "disabled" : "enabled (90s silence / ~3m stuck working)"}**.`, flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: `⏱️ Idle/stale timeouts are currently **${us.disableIdleTimeout ? "disabled" : "enabled (30m silence / 30m stuck working)"}**.`, flags: MessageFlags.Ephemeral });
       }
       return;
     }

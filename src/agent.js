@@ -168,7 +168,7 @@ async function api(path, body, baseUrl, signal = null) {
   throw new Error(`cannot reach pi server at ${srv} (${lastCode})`);
 }
 
-const IDLE_MS = (Number(process.env.PI_IDLE_TIMEOUT) || 90) * 1000;
+const IDLE_MS = (Number(process.env.PI_IDLE_TIMEOUT) || 1800) * 1000;
 const CEIL_MS = (Number(process.env.PI_MAX) || 1800) * 1000;
 const HARD_MS = (Number(process.env.PI_HARD_TIMEOUT) || 1800) * 1000;
 
@@ -330,7 +330,7 @@ const KEEPALIVE_PHASES = new Set(["thinking", "writing", "compacting", "retrying
  * Decide whether an SSE event should keep the idle watchdog alive.
  * - Meaningful progress (new fingerprint, tool start/end, text) always resets.
  * - Heartbeats keep the silence timer alive (including working/tool) so the
- *   longer TOOL_STALE_MS path can fire instead of the 90s silence abort.
+ *   TOOL_STALE_MS path can fire instead of the silence abort.
  * - Heartbeat-only working/tool still goes stale after TOOL_STALE_MS.
  */
 export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
@@ -365,7 +365,7 @@ export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
   return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
 }
 
-const TOOL_STALE_MS = (Number(process.env.PI_TOOL_STALE_TIMEOUT) || 180) * 1000;
+const TOOL_STALE_MS = (Number(process.env.PI_TOOL_STALE_TIMEOUT) || 1800) * 1000;
 
 async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
   if (!baseUrl) throw new Error("No sandbox server assigned for this user");
