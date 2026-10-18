@@ -157,7 +157,9 @@ export const USER_SETTINGS_DEFAULTS = {
 // `steeringEnabled: false` predates steering-by-default, and `multitaskEnabled`
 // is gone (steering replaced it). Drop those, and any value equal to its
 // current default, once so later default changes reach existing users too.
-if (!config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
+// A non-object config.json must not crash module load; settings access reports it later.
+const configIsObject = config && typeof config === "object" && !Array.isArray(config);
+if (configIsObject && !config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
   for (const stored of Object.values(config.userSettings || {})) {
     if (!stored) continue;
     if (stored.steeringEnabled === false) delete stored.steeringEnabled;

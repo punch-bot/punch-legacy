@@ -49,6 +49,23 @@ describe("multitask migration", () => {
   });
 });
 
+describe("settings migration on a non-object config.json", () => {
+  it("loads without throwing", async () => {
+    const primitiveDir = mkdtempSync(join(tmpdir(), "punch-workers-primitive-"));
+    const previousDataDir = process.env.DATA_DIR;
+    try {
+      writeFileSync(join(primitiveDir, "config.json"), JSON.stringify("hello"));
+      process.env.DATA_DIR = primitiveDir;
+      const url = new URL("../src/memory.js", import.meta.url);
+      url.searchParams.set("test", `primitive-${Date.now()}`);
+      await import(url.href);
+    } finally {
+      process.env.DATA_DIR = previousDataDir;
+      rmSync(primitiveDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("worker channelId regression", () => {
   it("startWorker accepts channelId/messageId/source without ReferenceError", () => {
     const source = readFileSync(new URL("../docker/sandbox/usr/local/lib/worker-manager.mjs", import.meta.url), "utf8");
