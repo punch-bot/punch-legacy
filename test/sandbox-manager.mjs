@@ -68,3 +68,17 @@ test("managed sandbox creation supplies the bot address/token and the shared net
   delete process.env.PUNCH_BOT_URL;
   assert.ok(sandboxRunArgs("recall-test").includes("PUNCH_BOT_URL=http://bot:4098"));
 });
+
+test("managed sandboxes inherit deployment turn caps on creation and recreation", (t) => {
+  for (const key of ["PI_TIMEOUT", "PI_MAX", "PI_HARD_TIMEOUT"]) {
+    const previous = process.env[key];
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+    delete process.env[key];
+  }
+  process.env.PI_TIMEOUT = "2400";
+  assert.ok(sandboxRunArgs("recall-test").includes("PI_HARD_TIMEOUT=2400"));
+  process.env.PI_MAX = "2500";
+  assert.ok(sandboxRunArgs("recall-test").includes("PI_HARD_TIMEOUT=2500"));
+  process.env.PI_HARD_TIMEOUT = "2600";
+  assert.ok(sandboxRunArgs("recall-test").includes("PI_HARD_TIMEOUT=2600"));
+});

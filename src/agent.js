@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
 import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
+import { turnTimeouts, timeoutSeconds } from "./turn-timeouts.js";
 
 // Talks to the sandbox's Pi gateway (HTTP on :4096 over `pi --mode rpc`).
 // All tool execution (bash/read/write/edit) happens SERVER-SIDE in the sandbox
@@ -26,7 +27,8 @@ const MODEL_ID = rest.join("/");
 const USER = process.env.PI_SERVER_USERNAME || "pi";
 const PASS = process.env.PI_SERVER_PASSWORD || "";
 const DIR_BASE = process.env.PI_REMOTE_DIR || "/work";
-const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT) || 1800) * 1000;
+const timeouts = turnTimeouts();
+const TIMEOUT_MS = timeouts.request * 1000;
 
 // Map of Discord user IDs to sandbox hostnames.
 // e.g. {"12345":"sandbox-punch:4096","67890":"sandbox-ember:4096"}
@@ -168,12 +170,12 @@ async function api(path, body, baseUrl, signal = null) {
   throw new Error(`cannot reach pi server at ${srv} (${lastCode})`);
 }
 
-const IDLE_MS = (Number(process.env.PI_IDLE_TIMEOUT) || 90) * 1000;
-const CEIL_MS = (Number(process.env.PI_MAX) || 1800) * 1000;
-const HARD_MS = (Number(process.env.PI_HARD_TIMEOUT) || 1800) * 1000;
+const IDLE_MS = timeoutSeconds(process.env.PI_IDLE_TIMEOUT, 90) * 1000;
+const CEIL_MS = timeouts.ceiling * 1000;
+const HARD_MS = timeouts.hard * 1000;
 
 export function isStuckTurnError(message) {
-  return /timed out|stalled|ceiling|hard timeout|hard cap|silent for|turn hung/i.test(String(message || ""));
+  return /stalled|silent for|turn hung|session stuck|pi force-killed/i.test(String(message || ""));
 }
 
 export async function restartPiGateway(userId, reason = "stuck turn") {
@@ -365,7 +367,7 @@ export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
   return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
 }
 
-const TOOL_STALE_MS = (Number(process.env.PI_TOOL_STALE_TIMEOUT) || 180) * 1000;
+const TOOL_STALE_MS = timeoutSeconds(process.env.PI_TOOL_STALE_TIMEOUT, timeouts.hard) * 1000;
 
 async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
   if (!baseUrl) throw new Error("No sandbox server assigned for this user");
@@ -507,8 +509,11 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
     clearTimeout(sseReadyTimer);
     sseAC.abort();
     postAC.abort();
-    if (recoveryReason) {
+    if (recoveryReason === "stall" || recoveryReason === "stuck-turn") {
       void recoverStuckGateway(sid, userId, recoveryReason);
+    } else if (recoveryReason) {
+      // A deployment deadline cancels this turn, without restarting healthy Pi.
+      void abortSession(sid, userId);
     }
   }
 }
