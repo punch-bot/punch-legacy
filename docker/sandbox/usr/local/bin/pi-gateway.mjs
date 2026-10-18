@@ -200,6 +200,7 @@ let reqSeq = 0;
 const pending = new Map();
 const sseClients = new Set();
 const eventWaiters = new Set();
+const turnCancellations = new Set();
 const reportProgressCalls = new Set();
 // Pi RPC has one active agent. Hold session switching and complete prompt lifecycles
 // in a FIFO so a second Discord turn cannot collide with an in-flight Pi turn.
@@ -304,13 +305,16 @@ loadSessionMap();
 function clearPiWaiters(err) {
   for (const [, p] of pending) p.reject(err);
   pending.clear();
+  for (const cancel of turnCancellations) cancel(err);
   eventWaiters.clear();
 }
 
-function forceKillPi(reason = "forced") {
+function forceKillPi(reason, proc) {
+  // The exit handler owns respawn. A delayed recovery must never restart an
+  // already-exited child or kill a replacement created since recovery began.
+  if (!proc || child !== proc) return;
   log("force-kill pi:", reason);
   clearPiWaiters(new Error("pi force-killed"));
-  const proc = child;
   child = null;
   ready = false;
   stdoutBuf = "";
@@ -323,22 +327,25 @@ function forceKillPi(reason = "forced") {
         proc.kill("SIGKILL");
       } catch {}
     }, 2000).unref();
-  } else {
-    startPi();
   }
 }
 
 async function recoverStuckPi(reason = "stuck") {
+  const proc = child;
   try {
     await rpc("abort", {}, ABORT_GRACE_MS);
   } catch {}
-  forceKillPi(reason);
+  forceKillPi(reason, proc);
 }
 
 let abortingPi = null;
 function stopPiTurn(reason) {
+  const proc = child;
   // HTTP disconnect, deadline, and /abort can arrive for the same turn.
-  abortingPi ??= abortPiTurn({ rpc, waitTurn, forceKillPi, graceMs: ABORT_GRACE_MS, reason })
+  abortingPi ??= abortPiTurn({
+    rpc, waitTurn, forceKillPi: (why) => forceKillPi(why, proc),
+    graceMs: ABORT_GRACE_MS, reason,
+  })
     .finally(() => { abortingPi = null; });
   return abortingPi;
 }
@@ -738,6 +745,7 @@ function waitTurn(signal) {
       if (done) return;
       done = true;
       eventWaiters.delete(onEvent);
+      turnCancellations.delete(cancel);
       if (signal) signal.removeEventListener("abort", onAbort);
       fn(arg);
     };
@@ -759,6 +767,7 @@ function waitTurn(signal) {
     };
 
     // Attach waiter first — before any await — so events during prompt are caught.
+    turnCancellations.add(cancel);
     eventWaiters.add(onEvent);
     if (signal) {
       if (signal.aborted) onAbort();

@@ -52,14 +52,60 @@ async function gateway(t, hardSeconds) {
   };
 }
 
-test("gateway turn cap and explicit abort preserve Pi and allow the next turn", async (t) => {
+test("gateway turn cap preserves Pi and allows the next turn", async (t) => {
   const g = await gateway(t, 0.08);
   const capped = await g.post(`${g.path}/message`, { parts: [{ type: "text", text: "forever" }] });
   assert.equal(capped.status, 504, await capped.text());
-  assert.equal((await g.post(`${g.path}/abort`)).status, 200);
   const next = await g.post(`${g.path}/message`, { parts: [{ type: "text", text: "fast" }] });
   assert.equal(next.status, 200, await next.text());
   assert.doesNotMatch(g.logs(), /force-kill pi|pi exited/);
+});
+
+async function waitForTool(g, t) {
+  const reader = (await g.events()).body.getReader();
+  t.after(() => reader.cancel().catch(() => {}));
+  return async () => {
+    let frames = "";
+    while (!frames.includes('"phase":"tool"')) {
+      const { value, done } = await reader.read();
+      assert.equal(done, false, "SSE closed before the tool started");
+      frames += new TextDecoder().decode(value);
+    }
+    await reader.cancel();
+  };
+}
+
+test("explicit abort cancels a live tool and preserves Pi for the next turn", { timeout: 5000 }, async (t) => {
+  const g = await gateway(t, 30);
+  const toolStarted = await waitForTool(g, t);
+  let completed = false;
+  const message = g.post(`${g.path}/message`, { parts: [{ type: "text", text: "forever" }] })
+    .then((response) => { completed = true; return response; });
+  await toolStarted();
+  assert.equal(completed, false);
+  assert.equal((await g.post(`${g.path}/abort`)).status, 200);
+  const aborted = await message;
+  assert.equal(aborted.status, 200, await aborted.text());
+  const next = await g.post(`${g.path}/message`, { parts: [{ type: "text", text: "fast" }] });
+  assert.equal(next.status, 200, await next.text());
+  assert.doesNotMatch(g.logs(), /force-kill pi|pi exited/);
+});
+
+test("Pi exit during abort uses only the exit handler's scheduled replacement", { timeout: 5000 }, async (t) => {
+  const g = await gateway(t, 30);
+  const toolStarted = await waitForTool(g, t);
+  const message = g.post(`${g.path}/message`, { parts: [{ type: "text", text: "forever exit-on-abort" }] });
+  await toolStarted();
+  assert.equal((await g.post(`${g.path}/abort`)).status, 200);
+  const aborted = await message;
+  assert.equal(aborted.status, 500, await aborted.text());
+  // ensureSession waits for the scheduled respawn; a duplicate replacement
+  // gets killed while this next turn is running and cannot pass these checks.
+  const next = await g.post(`${g.path}/message`, { parts: [{ type: "text", text: "fast" }] });
+  assert.equal(next.status, 200, await next.text());
+  assert.doesNotMatch(g.logs(), /force-kill pi/);
+  assert.equal((g.logs().match(/starting: pi/g) || []).length, 2);
+  assert.equal((g.logs().match(/pi exited code=/g) || []).length, 1);
 });
 
 test("a quiet running tool survives idle probing and emits a verified heartbeat", async (t) => {
