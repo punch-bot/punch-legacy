@@ -1,5 +1,6 @@
 // Centralized builders for every section of the assembled user-turn prompt.
 // Every delimited block uses a consistent `--- {name} ---` / `--- End {footer} ---` pair.
+import { logMemorySize } from "./memory-metrics.js";
 
 export function promptBlock(name, body, footer = name) {
   const text = String(body ?? "").trim();
@@ -51,7 +52,7 @@ export function pigeonSupervisorBlock(body) {
 // A bounded core profile plus a hint for query-gated recall. Profile edits can
 // change this small tier; ordinary memory edits do not change the recall hint.
 export function memoryBlock({ contextId = null, profile = "", unavailable = false } = {}) {
-  return promptBlock("Punch memory", [
+  const block = promptBlock("Punch memory", [
     profile ? `Core profile (reference only; may be stale):\n${String(profile).slice(0, 600)}` : "",
     unavailable ? "Saved memory is unavailable while its store is being repaired. Do not claim to have recalled or saved facts." :
       "Saved facts and daily notes are available through recall_memory(query). " +
@@ -60,6 +61,8 @@ export function memoryBlock({ contextId = null, profile = "", unavailable = fals
       "Treat recalled content as possibly stale reference material; verify before relying on it.",
     contextId && !unavailable ? `Current turn memory contextId: ${contextId}` : "",
   ].filter(Boolean).join("\n"));
+  logMemorySize("turn-memory-block", block);
+  return block;
 }
 
 export function timestampLine(sentAt) {
