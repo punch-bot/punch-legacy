@@ -61,6 +61,8 @@ export function recordActivity(entry) {
     routineId: entry.routineId || null,
     cost: Number(entry.cost) || 0,
     tokens: normalizeTokens(entry.tokens),
+    // User messages this turn answered: the summon plus any steered into it.
+    messages: Math.max(1, Number(entry.messages) || 1),
   };
   state.activities.push(record);
   if (state.activities.length > MAX_ACTIVITIES) {
@@ -118,7 +120,7 @@ export function getUsageStatistics(userId, period = "week", now = Date.now()) {
     if (activity.type === "heartbeat" || activity.routineId) {
       automations += 1;
     } else if (activity.type === "reactive") {
-      userMessages += 1;
+      userMessages += activity.messages || 1;
     }
 
     if (activity.duration > 0) {

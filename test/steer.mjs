@@ -86,6 +86,23 @@ describe("shouldSteerTurn", () => {
     idle();
   });
 
+  it("queues messages that link another Discord conversation", () => {
+    memory.patchUserSettings(uid, { steeringEnabled: true });
+    busy("chan-1");
+    const linked = { ...msg("chan-1"), content: "see https://discord.com/channels/1/2/3" };
+    assert.equal(shouldSteerTurn(uid, linked), false);
+    idle();
+  });
+
+  it("rechecks the queue right before steering", async () => {
+    memory.patchUserSettings(uid, { steeringEnabled: true });
+    registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId: "chan-1", steerable: true, sessionId: "s1", steeredTexts: [] });
+    registry.userQueues.set(uid, [{ text: "in-flight" }, { text: "queued meanwhile" }]);
+    assert.equal(await trySteerTurn(msg("chan-1"), "hi"), false);
+    registry.userQueues.delete(uid);
+    idle();
+  });
+
   it("respects forceQueue and pigeon opts", () => {
     memory.patchUserSettings(uid, { steeringEnabled: true });
     busy("chan-1");

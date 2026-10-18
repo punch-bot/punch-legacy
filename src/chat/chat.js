@@ -387,6 +387,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
 
     state.recordActivity({
       userId: uid, channelId: cid, type: "reactive",
+      messages: 1 + turn.steeredTexts.length,
       prompt: text.slice(0, 500),
       response: (out || "").slice(0, 2000),
       sessionId: res.sessionId,
@@ -430,6 +431,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         userId: uid,
         channelId: cid,
         type: "reactive",
+      messages: 1 + turn.steeredTexts.length,
         prompt: text.slice(0, 500),
         response: String(err?.message || err).slice(0, 2000),
         sessionId: store.getSession(cid),
@@ -470,6 +472,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       userId: uid,
       channelId: cid,
       type: "reactive",
+      messages: 1 + turn.steeredTexts.length,
       prompt: text.slice(0, 500),
       response: String(err?.message || err).slice(0, 2000),
       sessionId: store.getSession(cid),
