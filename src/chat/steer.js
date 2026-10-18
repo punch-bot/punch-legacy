@@ -42,14 +42,19 @@ export async function trySteerTurn(message, text, opts = {}) {
     const ref = await message.channel?.messages?.fetch(message.reference.messageId).catch(() => null);
     if (ref?.attachments?.size > 0) return false;
   }
+  // Recheck after the await above: the chat may have finished and a routine
+  // taken the lock. Steering its own session keeps the gateway from injecting
+  // into another session that has become active meanwhile.
+  const turn = registry.activeTurns.get(uid);
+  if (!turn?.steerable || !turn.sessionId || turn.channelId !== message.channelId) return false;
   const steerText = opts.repliedTo ? `${opts.repliedTo}\n\n${line}` : line;
-  const result = await steerSession(null, steerText, uid);
+  const result = await steerSession(turn.sessionId, steerText, uid);
   if (!result.ok) {
     console.log(`[steer] uid=${uid} steer failed (${result.error}) — falling back to queue`);
     return false;
   }
   // handleChat folds steered text into the turn's DM memory capture.
-  registry.activeTurns.get(uid)?.steeredTexts?.push(text);
+  turn.steeredTexts?.push(text);
   console.log(`[steer] uid=${uid} cid=${message.channelId} steered (${result.disposition || "ok"})`);
   await safeReact(message, "🧭");
   return true;

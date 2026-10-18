@@ -658,11 +658,12 @@ async function fetchActiveModel(userId, signal = null) {
   return active;
 }
 
-export async function runAgent(message, sessionId = null, onProgress = null, signal = null, userId = null, attachments = []) {
+export async function runAgent(message, sessionId = null, onProgress = null, signal = null, userId = null, attachments = [], onSession = null) {
   const srv = serverFor(userId);
   if (!srv) throw new Error("No sandbox assigned. Ask an admin to create one with /sandbox, or wait for your turn.");
   const dir = userDir(userId);
   let sid = sessionId || (await createSession(userId));
+  onSession?.(sid);
   const q = `?directory=${encodeURIComponent(dir)}`;
 
   const systemPath = "/work/.pi/SYSTEM.md";
@@ -737,6 +738,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       if (attempt === 0 && sessionId && /session not found/i.test(err.message)) {
         console.log(`[pi] session ${sid} not found, creating new one`);
         sid = await createSession(userId);
+        onSession?.(sid);
         continue;
       }
       throw err;

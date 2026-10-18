@@ -77,6 +77,15 @@ describe("shouldSteerTurn", () => {
     idle();
   });
 
+  it("does not steer once the chat stopped running Pi or has no session yet", async () => {
+    memory.patchUserSettings(uid, { steeringEnabled: true });
+    registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId: "chan-1", steerable: false, sessionId: "s1" });
+    assert.equal(await trySteerTurn(msg("chan-1"), "hi"), false);
+    registry.activeTurns.set(uid, { startedAt: Date.now(), phase: "thinking", channelId: "chan-1", steerable: true });
+    assert.equal(await trySteerTurn(msg("chan-1"), "hi"), false);
+    idle();
+  });
+
   it("respects forceQueue and pigeon opts", () => {
     memory.patchUserSettings(uid, { steeringEnabled: true });
     busy("chan-1");

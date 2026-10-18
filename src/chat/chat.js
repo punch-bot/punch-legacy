@@ -275,7 +275,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         // active session this chat's rather than a routine's or heartbeat's,
         // so only then may messages steer it.
         turn.steerable = true;
-        result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments);
+        result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments, (sid) => {
+          turn.sessionId = sid;
+        });
       } finally {
         turn.steerable = false;
       }
