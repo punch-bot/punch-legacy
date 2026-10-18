@@ -121,22 +121,6 @@ let sessions = load(SESSION_FILE, {});
 let threadOwners = load(THREAD_OWNERS_FILE, {});
 let config = load(CONFIG_FILE, { allowedChannels: {}, summonWords: {}, guildSettings: {} });
 
-// Steering replaced the multitask toggle and became the default after
-// patchUserSettings had been snapshotting every default into config.json, so a
-// stored `steeringEnabled: false` is almost always the old default rather than
-// a choice. Drop both once so everyone, multitask users included, steers.
-if (!config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
-  for (const stored of Object.values(config.userSettings || {})) {
-    if (!stored) continue;
-    if (stored.steeringEnabled === false) delete stored.steeringEnabled;
-    delete stored.multitaskEnabled;
-  }
-  config.steeringDefaultOn = true;
-  try { save(CONFIG_FILE, config); } catch (error) {
-    console.error(`[memory] steering default migration not saved: ${error.message}`);
-  }
-}
-
 export const GUILD_SETTINGS_DEFAULTS = {
   reactionSummonEmoji: "🤖",
   reactionSummonEnabled: true,
@@ -167,6 +151,28 @@ export const USER_SETTINGS_DEFAULTS = {
   autoCompressThreshold: 75,
   timeZone: "UTC",
 };
+
+// patchUserSettings used to snapshot every default into config.json, so most
+// stored values are old defaults rather than choices: a stored
+// `steeringEnabled: false` predates steering-by-default, and `multitaskEnabled`
+// is gone (steering replaced it). Drop those, and any value equal to its
+// current default, once so later default changes reach existing users too.
+if (!config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
+  for (const stored of Object.values(config.userSettings || {})) {
+    if (!stored) continue;
+    if (stored.steeringEnabled === false) delete stored.steeringEnabled;
+    delete stored.multitaskEnabled;
+    for (const [key, value] of Object.entries(stored)) {
+      if (key in USER_SETTINGS_DEFAULTS && JSON.stringify(value) === JSON.stringify(USER_SETTINGS_DEFAULTS[key])) {
+        delete stored[key];
+      }
+    }
+  }
+  config.steeringDefaultOn = true;
+  try { save(CONFIG_FILE, config); } catch (error) {
+    console.error(`[memory] settings migration not saved: ${error.message}`);
+  }
+}
 
 function newId() {
   return randomUUID();

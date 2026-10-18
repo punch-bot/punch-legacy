@@ -13,6 +13,10 @@ import { userTurnLine } from "../prompt-blocks.js";
 // keep FIFO order (steering ahead of them would reorder the conversation).
 export function shouldSteerTurn(uid, message, opts = {}) {
   if (opts.forceQueue || opts.pigeonFrom) return false;
+  // Steering forwards text only. Voice memos and files need handleChat's
+  // transcription and upload, and a reaction summon's target lives in its
+  // context, so those queue instead of being dropped behind a 🧭.
+  if (opts.reactedTo || message.attachments?.size > 0) return false;
   if (!store.getUserSettings(uid).steeringEnabled) return false;
   const turn = registry.activeTurns.get(uid);
   if (!turn || turn.channelId !== message.channelId) return false;
@@ -31,7 +35,13 @@ export async function trySteerTurn(message, text, opts = {}) {
     channelId: message.channelId,
     timeZone: store.getUserSettings(uid).timeZone,
   });
-  const result = await steerSession(null, line, uid);
+  if (message.reference?.messageId) {
+    // Replied-to attachments are also uploaded only by handleChat.
+    const ref = await message.channel?.messages?.fetch(message.reference.messageId).catch(() => null);
+    if (ref?.attachments?.size > 0) return false;
+  }
+  const steerText = opts.repliedTo ? `${opts.repliedTo}\n\n${line}` : line;
+  const result = await steerSession(null, steerText, uid);
   if (!result.ok) {
     console.log(`[steer] uid=${uid} steer failed (${result.error}) — falling back to queue`);
     return false;

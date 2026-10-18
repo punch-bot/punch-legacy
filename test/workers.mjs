@@ -9,8 +9,11 @@ process.env.DATA_DIR = dataDir;
 // Settings as saved before steering replaced multitask.
 writeFileSync(join(dataDir, "config.json"), JSON.stringify({
   userSettings: {
-    "multitask-user": { multitaskEnabled: true, steeringEnabled: false, multitaskWorkersCap: 5 },
-    "snapshot-user": { multitaskEnabled: false, steeringEnabled: false },
+    "multitask-user": { multitaskEnabled: true, steeringEnabled: false, multitaskWorkersCap: 5, autoCompressThreshold: 60, timeZone: "UTC" },
+    "snapshot-user": {
+      multitaskEnabled: false, steeringEnabled: false, multitaskWorkersCap: 3,
+      autoCompressThreshold: 75, trustedPigeonSenders: [], pigeonBufferSeconds: 0, timeZone: "UTC",
+    },
   },
 }));
 const moduleUrl = new URL("../src/memory.js", import.meta.url);
@@ -22,7 +25,7 @@ after(() => {
 });
 
 describe("multitask migration", () => {
-  it("switches multitask and snapshotted users to steering, keeping their worker cap", () => {
+  it("switches multitask and snapshotted users to steering and drops snapshotted defaults, keeping real overrides", () => {
     assert.equal("multitaskEnabled" in memory.USER_SETTINGS_DEFAULTS, false);
     for (const uid of ["multitask-user", "snapshot-user"]) {
       assert.equal(memory.getUserSettings(uid).steeringEnabled, true);
@@ -32,6 +35,7 @@ describe("multitask migration", () => {
     const saved = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
     assert.equal(saved.steeringDefaultOn, true);
     assert.deepEqual(saved.userSettings["snapshot-user"], {});
+    assert.deepEqual(saved.userSettings["multitask-user"], { multitaskWorkersCap: 5, autoCompressThreshold: 60 });
   });
 
   it("saves only overrides, and keeps a later explicit opt-out", async () => {

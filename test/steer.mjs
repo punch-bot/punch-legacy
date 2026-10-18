@@ -54,6 +54,15 @@ describe("shouldSteerTurn", () => {
     registry.userQueues.delete(uid);
   });
 
+  it("queues voice memos, attachments, and reaction summons instead of steering", () => {
+    memory.patchUserSettings(uid, { steeringEnabled: true });
+    busy("chan-1");
+    assert.equal(shouldSteerTurn(uid, { ...msg("chan-1"), attachments: new Map([["a", {}]]) }), false);
+    assert.equal(shouldSteerTurn(uid, msg("chan-1"), { reactedTo: "--- Reacted to ---" }), false);
+    assert.equal(shouldSteerTurn(uid, { ...msg("chan-1"), attachments: new Map() }), true);
+    idle();
+  });
+
   it("respects forceQueue and pigeon opts", () => {
     memory.patchUserSettings(uid, { steeringEnabled: true });
     busy("chan-1");
