@@ -9,7 +9,10 @@ export default function (pi: ExtensionAPI) {
     label: "Web search",
     description: "Search the web using a self-hosted SearXNG instance",
     promptSnippet: "Search the web for information",
-    promptGuidelines: ["Use websearch for current information or references."],
+    promptGuidelines: [
+      "Use websearch for current information or references.",
+      "Batch independent search queries and other independent tools in the same assistant message. Wait for search results before fetching URLs discovered by that search.",
+    ],
     parameters: Type.Object({
       query: Type.String({ description: "Search query" }),
       maxResults: Type.Optional(Type.Number({ minimum: 1, maximum: 20 })),
