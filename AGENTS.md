@@ -26,6 +26,10 @@ Writing tests is strictly forbidden unless you're adding new functionality. Bug 
 
 Never change the thing that judges your work to make your work pass. That covers tests, assertions, fixtures, lint and type configs, timeouts, thresholds, and the task's own requirements. Don't skip, loosen, or delete them, and don't special-case code for them. When a check fails, fix the code. If you think the check itself is wrong, stop and say so rather than editing it.
 
+## Comments
+
+Comments are banned in every file: JS/TS, shell, Dockerfiles, YAML, and `.env.example`. That includes JSDoc, commented-out code, and lint or type directives. Make the code clear through names and structure. Context that code can't carry goes in the PR description or `docs/`.
+
 ## Architecture
 
 ```
