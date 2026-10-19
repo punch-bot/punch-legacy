@@ -20,14 +20,10 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args, signal) {
       const notes = (async () => {
-        const token = process.env.PUNCH_BOT_TOKEN;
-        if (!token) throw new Error("Punch memory recall is not configured for this sandbox.");
-        const botUrl = new URL(process.env.PUNCH_BOT_URL || "http://bot:4098");
-        if (!["http:", "https:"].includes(botUrl.protocol) || botUrl.username || botUrl.password) {
-          throw new Error("Punch memory recall has an invalid bot address.");
-        }
-        const response = await fetch(new URL("/memory/recall", botUrl), {
-          method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        const botUrl = process.env.PUNCH_BOT_URL || "http://localhost:4097/bot";
+        const credentials = Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
+        const response = await fetch(`${botUrl}/memory/recall`, {
+          method: "POST", headers: { authorization: `Basic ${credentials}`, "content-type": "application/json" },
           body: JSON.stringify({ query: args.query, contextId: args.contextId, maxChars: 4_000 }),
           signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
         });
