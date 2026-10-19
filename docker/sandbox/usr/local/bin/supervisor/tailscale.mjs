@@ -1,10 +1,8 @@
-// Tailscale management routes for the sandbox supervisor.
 import { execFile, spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const TAILSCALE_KEY_FILE = "/data/tailscale_key.json";
 
-/** Tailscale management. Returns true if handled. */
 export function handleTailscaleRoutes(req, res, url) {
   if (req.method === "POST" && url.pathname === "/tailscale/key") {
     let body = "";

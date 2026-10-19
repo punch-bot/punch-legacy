@@ -23,18 +23,10 @@ const recalledCitations = new Map();
 
 const readOnlyStores = new Set();
 
-/**
- * PNCH-41: distinguish "file missing" from "file corrupt"/unreadable.
- * - missing       -> { ok: true, value: null } (caller uses its fallback; save() may rewrite)
- * - corrupt JSON  -> { ok: false } (file quarantined; reads get fallback, saves refused)
- * - read EACCES etc -> { ok: false } (file left in place, NOT renamed; saves still refused)
- */
 function loadState(file) {
   if (!existsSync(file)) return { ok: true, value: null };
   let raw;
   try {
-    // Read outside the parse try: a valid-but-temporarily-unreadable file must NOT be
-    // renamed/quarantined as corrupt (cubic review).
     raw = readFileSync(file, "utf8");
   } catch (readError) {
     console.error(`[memory] ${file} unreadable this process:`, readError.message);
@@ -56,8 +48,6 @@ function loadState(file) {
 function load(file, fallback) {
   const state = loadState(file);
   if (state.ok) return state.value ?? fallback;
-  // Corrupt or unreadable: serve the fallback for reads but mark the store read-only
-  // this process, so the next save() cannot replace the real file with fallback content.
   readOnlyStores.add(file);
   return fallback;
 }
@@ -77,9 +67,7 @@ function save(file, obj) {
   } catch (error) {
     try {
       if (existsSync(temp)) unlinkSync(temp);
-    } catch {
-      // Preserve the original write error.
-    }
+    } catch {}
     throw error;
   }
 }
@@ -87,8 +75,6 @@ function save(file, obj) {
 let memoryDatabase;
 let memoryFailure;
 function database() {
-  // Initialize on the first memory operation. A failed migration never enables
-  // writes to an empty fallback and may be retried after restoring the source.
   if (memoryFailure) throw memoryFailure;
   try {
     return memoryDatabase ||= new MemoryDatabase(DATA_DIR);
@@ -99,8 +85,6 @@ function database() {
 }
 
 export function initializeMemory({ strict = true } = {}) {
-  // An explicit initialization is also the recovery/retry operation. Ordinary
-  // turns never keep reparsing a broken source or write to an empty fallback.
   memoryFailure = undefined;
   try { database(); } catch (error) {
     if (strict) throw error;
@@ -125,8 +109,8 @@ export const GUILD_SETTINGS_DEFAULTS = {
   reactionSummonEmoji: "🤖",
   reactionSummonEnabled: true,
   reactionProgressEnabled: true,
-  reactionProgressMode: "both", // inert (lifecycle reactions removed; progress is the live status message)
-  contextMode: "channel", // "channel" (legacy) | "thread" (reply-thread scoped)
+  reactionProgressMode: "both",
+  contextMode: "channel",
 };
 
 export const USER_SETTINGS_DEFAULTS = {
@@ -145,19 +129,13 @@ export const USER_SETTINGS_DEFAULTS = {
   noThinking: false,
   showContext: false,
   gitCoAuthor: true,
-  multitaskWorkersCap: 3, // /workers cap; the old name is kept so saved caps survive
+  multitaskWorkersCap: 3,
   threadModeEnabled: false,
   steeringEnabled: true,
   autoCompressThreshold: 75,
   timeZone: "UTC",
 };
 
-// patchUserSettings used to snapshot every default into config.json, so most
-// stored values are old defaults rather than choices: a stored
-// `steeringEnabled: false` predates steering-by-default, and `multitaskEnabled`
-// is gone (steering replaced it). Drop those, and any value equal to its
-// current default, once so later default changes reach existing users too.
-// A non-object config.json must not crash module load; settings access reports it later.
 const configIsObject = config && typeof config === "object" && !Array.isArray(config);
 if (configIsObject && !config.steeringDefaultOn && !readOnlyStores.has(CONFIG_FILE)) {
   for (const stored of Object.values(config.userSettings || {})) {
@@ -219,7 +197,6 @@ export function coreProfile(userId) {
     seen.add(key);
     const available = 600 - used - (lines.length ? 1 : 0);
     if (available < 4 || lines.length >= 5) break;
-    // One long fact cannot hide all other profile items.
     const budget = Math.min(available, 180);
     const line = text.length + 2 > budget ? `- ${text.slice(0, budget - 3).trimEnd()}…` : `- ${text}`;
     lines.push(line);
@@ -306,13 +283,11 @@ export function preamble(userId, channelId, query = "", options = {}) {
     if (!recalled) {
       recalled = new Set();
       recalledCitations.set(recallSessionId, recalled);
-      // Recall state is an optimization only; discard oldest sessions first.
       if (recalledCitations.size > RECALL_SESSION_CACHE_MAX) {
         recalledCitations.delete(recalledCitations.keys().next().value);
       }
     }
   }
-  // Get enough candidates that recalled entries cannot hide useful ones.
   const results = searchMemory({ userId, channelId, query, isDm: options.isDm === true, limit: 100 });
   const lines = [];
   let used = 0;
@@ -415,7 +390,6 @@ export function importUserMemory(userId, document, { source = "import" } = {}) {
       existing.add(key);
       imported += 1;
     }
-    // Preserve the explicit import API's dedupe behavior, inside the same transaction.
     const entries = list("user", userId);
     const keep = new Set(dedupeEntries(entries).map((entry) => entry.id));
     for (const entry of entries) if (!keep.has(entry.id)) database().forget("user", userId, entry.id);
@@ -455,8 +429,6 @@ function safeNotePart(text) {
 }
 
 function extractFacts(userText) {
-  // Dots inside names/URLs are not sentence boundaries. Skip an entire question
-  // before matching a fact prefix, so its declarative-looking tail is not saved.
   const sentences = String(userText || "").split(/(?<=[.!?])(?:[ \t]+|$)|[\r\n]+/u);
   const pattern = /\b(?:my name is|i prefer|my time ?zone is|i use|remember that)\s+.+/i;
   const facts = [];
@@ -525,9 +497,6 @@ export function clearSession(channelId) {
   save(SESSION_FILE, sessions);
 }
 
-// Which user summoned a Punch-owned thread. Auto-summon inside the thread is
-// restricted to them — the thread's session lives in their sandbox, and other
-// members' messages shouldn't silently inject into it.
 export function getThreadOwner(threadId) {
   return threadOwners[threadId] || null;
 }
@@ -570,7 +539,6 @@ export function clearSummonWord(guildId) {
   save(CONFIG_FILE, config);
 }
 
-// Per-user summon words — each user gets their own trigger keyword
 export function setUserTrigger(userId, word) {
   if (!userId) return false;
   if (!config.userTriggers) config.userTriggers = {};
@@ -587,7 +555,6 @@ export function getUserTrigger(userId) {
   return config.userTriggers?.[userId] || null;
 }
 
-// Environment variables for the sandbox (stored in shared config)
 export function setEnvVar(guildId, key, value) {
   if (!guildId) return false;
   if (!config.envVars) config.envVars = {};
@@ -636,7 +603,6 @@ export function getUserSettings(userId) {
 export function patchUserSettings(userId, partial) {
   if (!userId) return false;
   if (!config.userSettings) config.userSettings = {};
-  // Store overrides only, so later default changes still reach this user.
   config.userSettings[userId] = { ...config.userSettings[userId], ...partial };
   save(CONFIG_FILE, config);
   return true;

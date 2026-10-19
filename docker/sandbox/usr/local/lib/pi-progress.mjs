@@ -204,8 +204,6 @@ export function safeToolSsePart(event, callID, status) {
     id: callID,
     callID,
     tool: sanitizedToolName(event),
-    // `description` feeds the existing Discord progress formatter without
-    // forwarding any original argument or tool result fields.
     state: { status, title, input: { description: title } },
   };
 }

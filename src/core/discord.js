@@ -1,6 +1,3 @@
-// Discord client factory + message/reaction helpers shared across modules.
-// The live client lives in `registry.client` (set by src/index.js after login).
-
 import {
   Client,
   GatewayIntentBits,
@@ -41,9 +38,6 @@ export function progressBar(pct, width = 16) {
   return "[" + "█".repeat(filled) + "░".repeat(width - filled) + "]";
 }
 
-// Render a compact context-window indicator from a turn's token usage. Only
-// surfaced once the window starts filling (>=50%) so it isn't noisy on every
-// reply, or always when the user opted into `showContext`. Warns near the top.
 export function contextUsageNote(usage, uid) {
   if (!usage || usage.pct == null) return "";
   const always = store.getUserSettings(uid)?.showContext;

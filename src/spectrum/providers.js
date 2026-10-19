@@ -1,21 +1,5 @@
-/**
- * Build Spectrum provider configs from validated provider names.
- * Uses official spectrum-ts provider `.config()` APIs.
- */
-
 import { SpectrumConfigError } from "./config.js";
 
-/**
- * @typedef {object} ProviderModules
- * @property {{ config: (opts?: object) => unknown }} imessage
- * @property {{ config: (opts?: object) => unknown }} terminal
- */
-
-/**
- * @param {string[]} providerNames
- * @param {ProviderModules} modules
- * @returns {unknown[]}
- */
 export function buildProviderConfigs(providerNames, modules) {
   if (!Array.isArray(providerNames) || providerNames.length === 0) {
     throw new SpectrumConfigError("At least one Spectrum provider is required.");
@@ -39,18 +23,7 @@ export function buildProviderConfigs(providerNames, modules) {
   });
 }
 
-/**
- * Options object passed to Spectrum().
- * @param {{
- *   providers: any[],
- *   projectId?: string,
- *   projectSecret?: string,
- *   logLevel?: string,
- * }} opts
- * @returns {Record<string, any>}
- */
 export function buildSpectrumOptions(opts) {
-  /** @type {Record<string, any>} */
   const options = {
     providers: opts.providers,
   };

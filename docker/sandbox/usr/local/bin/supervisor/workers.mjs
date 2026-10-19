@@ -1,4 +1,3 @@
-// Isolated-worker routes for the sandbox supervisor.
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
 
 function botAuth() {
@@ -23,7 +22,6 @@ function notifyBot(path, progress) {
   };
 }
 
-/** Isolated workers. Each process has its own Pi RPC session and timeout. Returns true if handled. */
 export function handleWorkerRoutes(req, res, url) {
   if (req.method === "GET" && url.pathname === "/workers/settings") {
     res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ settings: getWorkerSettings() })); return true;

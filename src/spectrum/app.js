@@ -1,10 +1,3 @@
-// @ts-nocheck
-/**
- * Spectrum app factory and inbound message loop for Punch.
- * Official APIs: Spectrum(), imessage.config(), terminal.config(), app.messages, space.responding, message.reply.
- * Integrates with untyped Punch turn helpers; skip checkJs for this module.
- */
-
 import { Spectrum, text } from "spectrum-ts";
 import { imessage } from "spectrum-ts/providers/imessage";
 import { terminal } from "spectrum-ts/providers/terminal";
@@ -13,9 +6,6 @@ import { resolvePunchUserId } from "./identity.js";
 import { issuePairingCode, mergeUserMaps } from "./pairing.js";
 import { runPunchTurn } from "../punch-turn.js";
 
-/**
- * @param {string} value
- */
 function maskAddress(value) {
   const s = String(value || "").trim();
   if (!s) return "";
@@ -23,10 +13,6 @@ function maskAddress(value) {
   return `${s.slice(0, 2)}***${s.slice(-2)}`;
 }
 
-/**
- * @param {string} message
- * @param {Record<string, unknown>} [fields]
- */
 function logSpectrum(message, fields = {}) {
   const suffix = Object.keys(fields).length
     ? ` ${Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(" ")}`
@@ -34,36 +20,23 @@ function logSpectrum(message, fields = {}) {
   console.log(`[spectrum] ${message}${suffix}`);
 }
 
-/**
- * @param {unknown} err
- */
 function safeErrorMessage(err) {
   const message = err && typeof err === "object" && "message" in err
-    ? String(/** @type {{ message: unknown }} */ (err).message)
+    ? String(err.message)
     : String(err);
   return message.replace(/\b(sk_[a-zA-Z0-9_-]{8,}|sec_[a-zA-Z0-9_-]{8,})\b/g, "[redacted]");
 }
 
-/**
- * Extract plain text from a Spectrum message content union.
- * @param {any} content
- */
 export function extractInboundText(content) {
   if (!content || typeof content !== "object") return "";
   if (content.type === "text" && content.text) return String(content.text).trim();
   if (content.type === "markdown" && content.markdown) return String(content.markdown).trim();
-  // Nested reply/edit wrappers
   if ((content.type === "reply" || content.type === "edit") && content.content) {
     return extractInboundText(content.content);
   }
   return "";
 }
 
-/**
- * Create a Spectrum app instance from validated Punch Spectrum config.
- * @param {ReturnType<import("./config.js").loadSpectrumConfig>} config
- * @param {{ Spectrum?: typeof Spectrum, imessage?: typeof imessage, terminal?: typeof terminal }} [deps]
- */
 export async function createSpectrumApp(config, deps = {}) {
   const SpectrumFn = deps.Spectrum || Spectrum;
   const imessageMod = deps.imessage || imessage;
@@ -81,20 +54,12 @@ export async function createSpectrumApp(config, deps = {}) {
     logLevel: process.env.SPECTRUM_LOG_LEVEL || process.env.LOG_LEVEL,
   });
 
-  // Spectrum's overloads distinguish credentialed vs projectless; Punch builds either at runtime.
-  return SpectrumFn(/** @type {any} */ (options));
+  return SpectrumFn(options);
 }
 
-/**
- * @param {unknown} space
- * @param {unknown} message
- * @param {ReturnType<import("./config.js").loadSpectrumConfig>} config
- */
 export async function handleSpectrumMessage(space, message, config) {
   if (!message || typeof message !== "object") return;
-  const msg = /** @type {{ direction?: string, content?: { type?: string }, sender?: { address?: string, id?: string, service?: string }, platform?: string }} */ (
-    message
-  );
+  const msg = message;
   if (msg.direction === "outbound") return;
 
   const inboundText = extractInboundText(msg.content);
@@ -119,7 +84,7 @@ export async function handleSpectrumMessage(space, message, config) {
     len: inboundText.length,
   });
 
-  const sp = /** @type {{ id?: string, responding?: Function, send?: Function }} */ (space);
+  const sp = space;
   const reply = async (body) => {
     const payload = String(body || "").trim();
     if (!payload) return;
@@ -134,7 +99,6 @@ export async function handleSpectrumMessage(space, message, config) {
       }
       return;
     }
-    // Do not fall back to message.reply — on RCS/SMS it can silently no-op.
     throw new Error("Spectrum space.send is unavailable; cannot deliver outbound message");
   };
 
@@ -176,7 +140,6 @@ export async function handleSpectrumMessage(space, message, config) {
       return;
     }
 
-    // Scope sessions per Punch user so shared spaces cannot reuse another user's Pi session.
     const sessionKey = `spectrum:${userId}:${sp.id || "unknown"}`;
     const speaker =
       (sender && (sender.address || sender.id)) ||
@@ -192,14 +155,13 @@ export async function handleSpectrumMessage(space, message, config) {
 
     if (!result.ok) {
       logSpectrum("agent turn failed", { code: result.code });
-      await reply(/** @type {{ error: string }} */ (result).error);
+      await reply(result.error);
       return;
     }
     logSpectrum("agent turn ok", { len: result.text?.length || 0 });
-    await reply(/** @type {{ text: string }} */ (result).text);
+    await reply(result.text);
   };
 
-  // Typing indicators hang on RCS/SMS; only use responding() on terminal.
   const skipTyping =
     pairingOnly ||
     config.mode === "echo" ||
@@ -216,11 +178,6 @@ export async function handleSpectrumMessage(space, message, config) {
   await sp.responding(run);
 }
 
-/**
- * Run the inbound message loop until the app stops.
- * @param {Awaited<ReturnType<typeof createSpectrumApp>>} app
- * @param {ReturnType<import("./config.js").loadSpectrumConfig>} config
- */
 export async function runSpectrumLoop(app, config) {
   console.log(
     `[spectrum] listening mode=${config.mode} providers=${config.providers.join(",")} ` +

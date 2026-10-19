@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get update && apt-get install -y --no-install-recommends tailscale \
     && rm -rf /var/lib/apt/lists/*
 
-# Punch's Pi runtime. --ignore-scripts per the runtime install docs.
 RUN npm install -g --ignore-scripts @punch-bot/cli@${PI_VERSION} \
     && npm cache clean --force \
     && pi --version
@@ -37,22 +36,15 @@ ENV HOME=/root \
     PI_CHROME_PROFILE=/root/.chrome-profile \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pi/playwright-browsers
 
-# Playwright + Chromium under /opt/pi (not /root — home is a runtime volume mount).
-# docker/sandbox/ holds the sandbox filesystem tree (incl. package.json), copied
-# before the Pi deps install; runtime dirs are created by the entrypoint/supervisor.
 COPY docker/sandbox/ /
 RUN cd /opt/pi && npm ci --omit=dev --no-audit --no-fund \
     && npx playwright install chromium-headless-shell \
     && npm cache clean --force \
     && rm -rf /root/.npm
 
-# Docker copies this default into an empty /data volume on first use.
-# Recreations mount the existing volume, preserving the user's settings.json.
 COPY docker/sandbox/opt/picfg/seed-settings.json /data/pi/agent/settings.json
 
-# pigeon-peer.js stays single-source in src/ (shared with the bot).
 COPY src/pigeon-peer.js /usr/local/lib/pigeon-peer.js
-# API keys for Pi come from supervisor /env and /apikey (provider env vars).
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
 
 WORKDIR /work

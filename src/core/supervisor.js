@@ -1,5 +1,3 @@
-// Sandbox reachability helper shared by chat, commands, and gateway modules.
-
 import { apiUrlFor } from "../agent.js";
 import { supervisorAuth } from "./config.js";
 

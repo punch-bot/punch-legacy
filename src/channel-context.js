@@ -5,8 +5,6 @@ export const CHANNEL_CONTEXT_LIMIT = 15;
 export const CONTEXT_CONTENT_CHARS = 500;
 const MAX_REFERENCED_CONTEXT = 5;
 
-// A reply or a pasted Discord message link explicitly brings that message
-// into the user's context, even when another person wrote it.
 export function referencedMessageIds(message) {
   const ids = new Set();
   if (!message) return ids;
@@ -58,7 +56,7 @@ export function mapContextMessage(message, currentSandboxName = null, timeZone =
     ? raw.match(/-#\s*from sandbox:(\S+)/i)?.[1] || null
     : null;
   if (sandbox && currentSandboxName && sandbox.toLowerCase() === currentSandboxName.toLowerCase()) {
-    return null; // The user's Pi session already contains this sandbox's output.
+    return null;
   }
   const attachments = [...(message.attachments?.values?.() || [])].slice(0, 3)
     .map((attachment) => attachment.name || attachment.filename || "file");
@@ -115,8 +113,6 @@ export async function fetchChannelContext(channel, message, {
 } = {}) {
   if (!channel) return [];
   try {
-    // Filter before taking the newest 15 eligible messages. A busy shared
-    // channel may have few of this user's messages among the last 15.
     const fetched = await channel.messages.fetch({ limit: CHANNEL_CONTEXT_FETCH_LIMIT, before: message?.id });
     const referenced = referencedMessageIds(message);
     const extraIds = [...referenced].filter((id) => !fetched.has(id)).slice(0, MAX_REFERENCED_CONTEXT);

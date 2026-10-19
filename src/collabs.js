@@ -85,7 +85,6 @@ export async function create({ owner, reviewer, workspace }) {
     hasHead = false;
   }
   if (!hasHead) {
-    // Fresh prompt-created workspaces need an initial commit before Git can clone them.
     await sandbox.gitInSandbox(owner, ["-C", source, "config", "user.name", `Punch ${owner}`]);
     await sandbox.gitInSandbox(owner, ["-C", source, "config", "user.email", `${owner}@punch.local`]);
     await sandbox.gitInSandbox(owner, ["-C", source, "add", "--all"]);

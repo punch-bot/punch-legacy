@@ -1,6 +1,3 @@
-// MessageReactionAdd listener: pigeon cancellation (🛑) + reaction-summon
-// chat triggering.
-
 import { Events } from "discord.js";
 import * as store from "../memory.js";
 import * as settings from "../settings.js";
@@ -93,8 +90,6 @@ function registerReactionAdd(client) {
 
       console.log(`[react-summon] uid=${user.id} msg=${targetMessage.id}`);
 
-      // Thread mode: the reaction summon opens a Punch-owned thread on the
-      // reacted-to message and the turn is redirected into it.
       let turnMessage = targetMessage;
       if (
         !isDM &&

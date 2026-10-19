@@ -1,6 +1,3 @@
-// Bot HTTP API (:4098). Workers progress/complete push, routine CRUD,
-// collab endpoints, state endpoints, and pigeon/notify delivery.
-
 import { createServer } from "node:http";
 import * as routines from "../routines.js";
 import * as collabs from "../collabs.js";
@@ -124,7 +121,6 @@ const botHttpServer = createServer(async (req, res) => {
     }
     registry.workerProgressSent.delete(`${userId}:${worker.id}`);
     try {
-      // Workers started by the removed multitask mode still post back to their channel.
       const isSubtask = worker.source === "multitask" || worker.channelId;
       const label = isSubtask ? "subtask" : "worker";
       const icon = worker.status === "succeeded" ? "✅" : worker.status === "stopped" ? "🛑" : "⚠️";
@@ -314,7 +310,6 @@ const botHttpServer = createServer(async (req, res) => {
     }
   }
 
-  // State API endpoints
   if (url.pathname.startsWith("/state/")) {
     try {
       const userId = req.sandboxIdentity.userId;

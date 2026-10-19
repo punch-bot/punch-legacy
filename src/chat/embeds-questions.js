@@ -1,11 +1,3 @@
-// Sandbox-generated Discord embeds & interactive questions.
-// The model emits <embed>{json}</embed> and <question>...</question> tags. The bot
-// strips them, renders Discord embeds, and (for questions) wires component clicks
-// back into the same channel session as a new user turn.
-//
-// Interaction *handlers* for the question components live in commands/questions.js;
-// this module only extracts + renders.
-
 import {
   EmbedBuilder,
   ActionRowBuilder,

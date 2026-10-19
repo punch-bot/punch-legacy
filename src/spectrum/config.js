@@ -1,9 +1,3 @@
-/**
- * Spectrum (Photon) configuration for the Punch entrypoint.
- * Uses official env names from spectrum-ts: SPECTRUM_PROJECT_ID / SPECTRUM_PROJECT_SECRET.
- * Also accepts PROJECT_ID / PROJECT_SECRET as optional aliases (docs show both forms).
- */
-
 export const ALLOWED_PROVIDERS = Object.freeze(["imessage", "terminal"]);
 export const ALLOWED_MODES = Object.freeze(["agent", "echo"]);
 
@@ -22,11 +16,6 @@ function nonempty(value) {
   return s || "";
 }
 
-/**
- * Parse SPECTRUM_PROVIDERS (comma-separated). Default: imessage.
- * @param {string} [raw]
- * @returns {string[]}
- */
 export function parseProviders(raw) {
   const text = nonempty(raw) || "imessage";
   const names = text
@@ -47,11 +36,6 @@ export function parseProviders(raw) {
   return [...new Set(names)];
 }
 
-/**
- * Parse SPECTRUM_USER_MAP JSON object. Values must be Punch sandbox user IDs (Discord snowflakes).
- * @param {string} [raw]
- * @returns {Record<string, string>}
- */
 export function parseUserMap(raw) {
   const text = nonempty(raw);
   if (!text) return {};
@@ -66,7 +50,6 @@ export function parseUserMap(raw) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SpectrumConfigError("SPECTRUM_USER_MAP must be a JSON object of address → Punch userId.");
   }
-  /** @type {Record<string, string>} */
   const out = {};
   for (const [key, value] of Object.entries(parsed)) {
     const k = nonempty(key);
@@ -77,11 +60,6 @@ export function parseUserMap(raw) {
   return out;
 }
 
-/**
- * Load and validate Spectrum config from an env-like object.
- * Never returns or logs secret values.
- * @param {NodeJS.ProcessEnv | Record<string, string | undefined>} [env]
- */
 export function loadSpectrumConfig(env = process.env) {
   const modeRaw = nonempty(env.SPECTRUM_MODE) || "agent";
   const mode = modeRaw.toLowerCase();
@@ -117,9 +95,6 @@ export function loadSpectrumConfig(env = process.env) {
   }
 
   if (mode === "agent") {
-    // iMessage: unknown senders get a pairing code (Discord /pair). Optional SPECTRUM_USER_MAP
-    // still works as a static allowlist. Never fall back to a global default for iMessage.
-    // Terminal-only: default user or map/pairs required for agent turns.
     if (hasTerminal && !hasImessage && !defaultUserId && mapSize === 0) {
       throw new SpectrumConfigError(
         "Agent mode with the terminal provider requires SPECTRUM_DEFAULT_USER_ID or SPECTRUM_USER_MAP.",
@@ -130,7 +105,6 @@ export function loadSpectrumConfig(env = process.env) {
   return {
     mode,
     providers,
-    /** Present when imessage is enabled; never log this object’s secret field. */
     projectId: projectId || undefined,
     projectSecret: projectSecret || undefined,
     defaultUserId: defaultUserId || undefined,
@@ -139,11 +113,6 @@ export function loadSpectrumConfig(env = process.env) {
   };
 }
 
-/**
- * Format a startup error for stderr without leaking secrets.
- * Only SpectrumConfigError messages are considered pre-vetted/safe.
- * @param {unknown} err
- */
 export function formatConfigError(err) {
   if (err instanceof SpectrumConfigError) return err.message;
   return SAFE_STARTUP_ERROR;

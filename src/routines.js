@@ -94,8 +94,6 @@ function normalizeActiveHours(value) {
 
 routines = routines.map(normalizeRoutine).filter(Boolean);
 for (const routine of routines) {
-  // Never replay unknown in-flight side effects after a bot restart. Execution may
-  // have completed before persistence; preserve at-most-once behavior.
   if (routine.state === "running") {
     routine.state = "failed";
     routine.enabled = false;
@@ -120,9 +118,6 @@ function chronoReference(refDate = new Date(), timeZone = null) {
   const normalized = normalizeTimeZone(timeZone);
   return {
     instant,
-    // chrono-node accepts numeric UTC offsets, not IANA names. This offset is
-    // only used to resolve relative phrases; parseTime re-resolves the target
-    // wall clock with the offset that applies on that local date (DST-safe).
     timezone: getTimeZoneOffsetMinutes(normalized, instant),
   };
 }
@@ -139,7 +134,6 @@ export function parseTime(when, refDate = new Date(), timeZone = null) {
     const results = chrono.parse(trimmed, chronoReference(refDate, zone), { forwardDate: true });
     const start = results[0]?.start;
     if (start) {
-      // Explicit Z / numeric offsets are absolute; do not reinterpret in the user zone.
       if (start.isCertain("timezoneOffset")) {
         return start.date().getTime();
       }
@@ -209,7 +203,6 @@ function inActiveHours(activeHours, at) {
 
 function nextActiveTime(activeHours, from) {
   if (!activeHours || inActiveHours(activeHours, from)) return from;
-  // Minute stepping avoids host timezone/DST math errors; bounded to two days.
   let candidate = from - (from % 60_000) + 60_000;
   const limit = candidate + 48 * 3_600_000;
   while (candidate <= limit) {
@@ -237,8 +230,6 @@ export function computeNextRun(schedule, afterMs = Date.now(), timezone = null, 
 export function addRoutine({ userId, channelId, guildId, type, payload, schedule, timezone = null, activeHours = null, isolatedSession = false }) {
   if (!new Set(["message", "llm", "heartbeat"]).has(type)) throw new Error("Invalid routine type");
   const normalizedHours = normalizeActiveHours(activeHours);
-  // Prefer explicit timezone, then active-hours zone, then UTC for cron schedules so
-  // "9am" means the user's 9am rather than the bot host's local clock.
   const normalizedTimezone = validTimezone(timezone)
     ? timezone
     : normalizedHours?.timezone || (schedule?.kind === "cron" ? DEFAULT_TIME_ZONE : null);
@@ -331,7 +322,6 @@ function failRoutine(routine, execution, error) {
   saveRoutines();
 }
 
-// Compatibility for legacy caller. Durable scheduler uses markStarted/completeRoutine.
 export function markFired(routine) {
   const current = getRoutine(routine.id);
   if (!current) return;

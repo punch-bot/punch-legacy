@@ -2,8 +2,6 @@ import type { ExtensionAPI } from "@punch-bot/cli";
 import { readFile } from "node:fs/promises";
 import { Type } from "typebox";
 
-// Deployment bridge to the bot-owned store. Project memory stays local and is
-// read only on demand, alongside remote recall in the same tool invocation.
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "recall_memory",

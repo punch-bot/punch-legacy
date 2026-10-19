@@ -1,6 +1,3 @@
-// Strip tags even if a memory operation fails, so an annotation cannot discard
-// an otherwise successful reply. Report only writes that actually persisted.
-
 import * as store from "../memory.js";
 
 const REMEMBER_RE =
@@ -19,7 +16,6 @@ export function persistMemoryTags(textIn, speakerId, channelId) {
     if (!fact) continue;
     try {
       if (scope === "channel") {
-        // No channel context (e.g. heartbeat DM) — channel facts have no home.
         if (!channelId) continue;
         store.remember("channel", channelId, fact);
         saved += 1;

@@ -1,8 +1,3 @@
-// Routine execution: heartbeat / message / llm automation firing.
-// Routines scheduler calls fireRoutine; this module sends results to the user's
-// DM or the scheduled channel, persisting memory/attachments/embeds/questions
-// from the agent output exactly like a normal chat turn.
-
 import * as store from "../memory.js";
 import * as state from "../state.js";
 import * as statistics from "../statistics.js";
@@ -24,7 +19,6 @@ import {
 import { withUserRunLock, labelLineFor } from "../chat/queue.js";
 
 async function fireRoutine(routine) {
-  // Heartbeat routines DM the user directly — no channel needed
   if (routine.type === "heartbeat") {
     const uid = routine.userId;
     console.log(`[heartbeat] firing routine ${routine.id} uid=${uid}`);
@@ -120,7 +114,6 @@ async function fireRoutine(routine) {
     return;
   }
 
-  // message / llm routines require a channel
   let ch;
   try {
     ch = await registry.client.channels.fetch(routine.channelId);
@@ -128,7 +121,6 @@ async function fireRoutine(routine) {
     ch = null;
   }
   if (!ch?.isTextBased()) {
-    // Channel deleted or inaccessible — try DM as fallback
     try {
       const dm = await registry.client.users.createDM(routine.userId);
       await dm.send({
@@ -204,8 +196,6 @@ async function fireRoutine(routine) {
   if (embedErrors.length) notes.push(embedErrors.join("; "));
   if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
 
-  // Attribution label at the very bottom. NOTE: routines send via chunk()
-  // directly, NOT through handleChat — keep it that way or labels double up.
   const label = labelLineFor(uid);
   if (label) out += label;
 

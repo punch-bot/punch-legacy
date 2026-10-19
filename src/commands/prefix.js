@@ -1,7 +1,3 @@
-// Prefix ("!") command handling: !status, !help, !remember, !exec, !tasks, !remind,
-// !routine, !logs, !setup, and friends. Wire-in: MessageCreate calls handleCommand
-// when a prefixed command is recognized; returns true when handled.
-
 import {
   EmbedBuilder,
   ActionRowBuilder,
@@ -99,8 +95,6 @@ async function sendLogReply(target, userId, { source = "all", lines = 30 } = {})
   }
 }
 
-// Memory reads/writes raise MEMORY_UNAVAILABLE while the store is being repaired.
-// Commands must answer the user instead of throwing out of the message handler.
 async function withMemoryStore(message, fn) {
   try {
     return { ok: true, value: await fn() };
@@ -198,7 +192,6 @@ async function handleCommand(message, cmd, rest) {
     }
 
     case "stop": {
-      // Cancel in-flight turn and clear the pending FIFO queue (do not drain).
       const queue = registry.userQueues.get(uid);
       if (!queue || queue.length === 0) {
         await reply(message, "No active or queued tasks.");
@@ -224,7 +217,7 @@ async function handleCommand(message, cmd, rest) {
         task.resolve();
       }
 
-      queue.splice(1); // leave only in-flight; pending cleared (do not drain)
+      queue.splice(1);
       console.log(`[queue] uid=${uid} stop cleared pending; aborting in-flight (was ${count})`);
       await reply(message, `🛑 Stopped all tasks (${count} request${count > 1 ? "s" : ""} cancelled).`);
       return true;

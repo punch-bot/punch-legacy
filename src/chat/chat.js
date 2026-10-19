@@ -1,6 +1,3 @@
-// One full chat turn: sandbox check, STT, attachments, Pi run, output settling,
-// memory capture, question/embed extraction, lifecycle reacts, pigeon notify.
-
 import * as store from "../memory.js";
 import * as sandbox from "../sandbox-manager.js";
 import * as statistics from "../statistics.js";
@@ -68,7 +65,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const turn = { startedAt: Date.now(), phase: "starting", detail: "checking sandbox", channelId: message.channelId, steeredTexts: [] };
   registry.activeTurns.set(uid, turn);
 
-  // Ensure this user has their own sandbox workspace
   const sandboxUrl = await ensureUserSandbox(uid);
   if (!sandboxUrl) {
     const mapped = !!apiUrlFor(uid);
@@ -84,7 +80,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     return;
   }
 
-  // Discord voice memos → transcript, then treat as normal chat text.
   if (isVoiceMessage(message)) {
     turn.phase = "transcribing";
     turn.detail = "transcribing voice memo";
@@ -123,8 +118,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
   const cid = message.channelId;
   const memoryUserText = text;
 
-  // Gather message attachments (triggering message + any replied-to message)
-  // and prepare attachments so the model can read them in the sandbox.
   const skippedAttach = [];
   let agentAttachments = await downloadMessageAttachments(message);
   skippedAttach.push(...agentAttachments.skipped);
@@ -142,9 +135,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
   }
 
-  // Persist each attachment into the sandbox workspace so the model can read it
-  // with its file tools (text for docs/SVG, vision for images). Inline `file`
-  // inline file parts are rejected by the gateway, so we save to disk and reference the path.
   const workspaceFiles = [];
   for (const att of agentAttachments) {
     if (!att.data) continue;
@@ -195,8 +185,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const sbName = opts.sandboxName || sandbox.loadUsers().find((u) => u.userId === uid)?.name;
     preambleParts.push(pigeonTurnPreamble(opts.pigeonFrom, opts.pigeonHop ?? 0, sbName));
   }
-  // The focused reply block already carries the full referenced message.
-  // Omit that same message from ambient context so it is not repeated.
   const ambientContext = opts.repliedTo && message.reference?.messageId
     ? contextMessages.filter((ctx) => ctx.id !== message.reference.messageId)
     : contextMessages;
@@ -271,9 +259,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       console.log(`[chat] uid=${uid} cid=${cid} session=${currentSession || "new"} -> pi`);
       let result;
       try {
-        // Only while this chat holds the lock and runs Pi is the gateway's
-        // active session this chat's rather than a routine's or heartbeat's,
-        // so only then may messages steer it.
         turn.steerable = true;
         result = await runAgent(prompt, currentSession, onProgress, signal, uid, agentAttachments, (sid) => {
           turn.sessionId = sid;
@@ -369,8 +354,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0;
     if (hasResult) {
       if (progressRenderer) {
-        // Keep the answer and activity count in the original status message.
-        // Discord's content limit still requires overflow replies for long answers.
         const [primary = "", ...overflow] = chunk(out, 1_650);
         await finalizeProgress(res.activity, activityStatus, primary, { files: sendable, embeds });
         if (overflow.length) await settle(message, overflow.join("") + label);
@@ -445,9 +428,6 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       store.clearSession(cid);
       note = " (hung turn aborted + Pi restart requested — try again)";
     }
-    // A previous session stored inline `file` parts (zip/jpg/etc.) that the
-    // model now rejects. Clear the poisoned session so the next turn starts
-    // fresh — we no longer send file parts (files live in /work/attachments).
     if (/file part media type|functionality not supported/i.test(err?.message || "")) {
       store.clearSession(cid);
       note = " (cleared a session with unsupported file parts — try again)";

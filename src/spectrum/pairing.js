@@ -1,8 +1,3 @@
-/**
- * Durable iMessage ↔ Punch user pairing.
- * Unknown numbers get a 9-digit code; Discord `/pair <code>` binds them.
- */
-
 import {
   chmodSync,
   closeSync,
@@ -61,10 +56,7 @@ function loadState() {
 }
 
 function sleepMs(ms) {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    // busy-wait for short cross-process lock retries
-  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function acquirePairingLock() {
@@ -75,9 +67,7 @@ function acquirePairingLock() {
       const fd = openSync(LOCK_FILE, "wx");
       try {
         writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
-      } catch {
-        // lock file already open for write
-      }
+      } catch {}
       return fd;
     } catch (err) {
       if (err?.code !== "EEXIST") throw err;
@@ -100,14 +90,10 @@ function acquirePairingLock() {
 function releasePairingLock(fd) {
   try {
     if (typeof fd === "number") closeSync(fd);
-  } catch {
-    // ignore
-  }
+  } catch {}
   try {
     if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 function withPairingLock(fn) {
@@ -124,9 +110,7 @@ function ensurePairStorePermissions() {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     chmodSync(dir, 0o700);
-  } catch {
-    // best-effort on platforms that ignore mode
-  }
+  } catch {}
 }
 
 function saveState(state) {
@@ -137,15 +121,11 @@ function saveState(state) {
     renameSync(temp, PAIR_FILE);
     try {
       chmodSync(PAIR_FILE, 0o600);
-    } catch {
-      // best-effort
-    }
+    } catch {}
   } catch (error) {
     try {
       if (existsSync(temp)) unlinkSync(temp);
-    } catch {
-      // keep original error
-    }
+    } catch {}
     throw error;
   }
 }
@@ -161,13 +141,8 @@ function pruneExpired(state, now = Date.now()) {
   return changed;
 }
 
-/**
- * Address → Punch userId map from completed pairings.
- * @returns {Record<string, string>}
- */
 export function getPairedUserMap() {
   const state = loadState();
-  /** @type {Record<string, string>} */
   const out = {};
   for (const [address, userId] of Object.entries(state.pairs || {})) {
     const a = normalizeAddressKey(address) || String(address).trim();
@@ -177,10 +152,6 @@ export function getPairedUserMap() {
   return out;
 }
 
-/**
- * Merge env SPECTRUM_USER_MAP with durable pairings (env wins on conflict).
- * @param {Record<string, string>} [envMap]
- */
 export function mergeUserMaps(envMap = {}) {
   return { ...getPairedUserMap(), ...(envMap && typeof envMap === "object" ? envMap : {}) };
 }
@@ -202,12 +173,6 @@ function generateUniqueCode(state) {
   throw new Error("Could not allocate a pairing code");
 }
 
-/**
- * Issue or refresh a pairing code for an unknown Spectrum sender address.
- * @param {string} address
- * @param {{ now?: number, ttlMs?: number }} [opts]
- * @returns {{ code: string, address: string, created: boolean, message: string }}
- */
 export function issuePairingCode(address, opts = {}) {
   const raw = String(address || "").trim();
   const addressKey = normalizeAddressKey(raw) || raw;
@@ -247,26 +212,15 @@ export function issuePairingCode(address, opts = {}) {
   });
 }
 
-/**
- * @param {string} code
- */
 export function formatPairingMessage(code) {
   return `Hey, i don't know who you are! Run /pair in discord together with your pairing code: ${code}`;
 }
 
-/**
- * @param {string} discordUsername
- */
 export function formatPairingCompleteMessage(discordUsername) {
   const who = String(discordUsername || "").trim() || "your Discord account";
   return `Paired to ${who}! Send a message again to text your punch!`;
 }
 
-/**
- * Addresses paired to a Punch user id.
- * @param {string} userId
- * @returns {string[]}
- */
 export function listPairedAddressesForUser(userId) {
   const uid = String(userId || "").trim();
   if (!uid) return [];
@@ -276,12 +230,6 @@ export function listPairedAddressesForUser(userId) {
     .map(([address]) => address);
 }
 
-/**
- * Remove durable pairings for a Discord user.
- * @param {string} userId
- * @param {string | null | undefined} [address] Optional specific phone/email to unpair
- * @returns {{ ok: true, addresses: string[] } | { ok: false, error: string }}
- */
 export function unpairUser(userId, address = null) {
   const uid = String(userId || "").trim();
   if (!uid) return { ok: false, error: "Missing Discord user id." };
@@ -292,7 +240,6 @@ export function unpairUser(userId, address = null) {
 
   return withPairingLock(() => {
     const state = loadState();
-    /** @type {string[]} */
     const removed = [];
 
     for (const [storedAddress, pairedUid] of Object.entries(state.pairs || {})) {
@@ -315,13 +262,6 @@ export function unpairUser(userId, address = null) {
   });
 }
 
-/**
- * Complete pairing: bind pending code's address to a Discord/Punch userId.
- * @param {string} code
- * @param {string} userId
- * @param {{ now?: number }} [opts]
- * @returns {{ ok: true, address: string, userId: string } | { ok: false, error: string }}
- */
 export function completePairing(code, userId, opts = {}) {
   const normalizedCode = String(code || "").trim().replace(/\s+/g, "");
   const uid = String(userId || "").trim();
@@ -344,7 +284,6 @@ export function completePairing(code, userId, opts = {}) {
     const address = normalizeAddressKey(entry.address) || String(entry.address).trim();
     state.pairs[address] = uid;
     delete state.pending[normalizedCode];
-    // Drop any other pending codes for the same address.
     for (const [otherCode, other] of Object.entries(state.pending)) {
       const key = normalizeAddressKey(other?.address) || String(other?.address || "").trim();
       if (key === address) delete state.pending[otherCode];
@@ -354,10 +293,6 @@ export function completePairing(code, userId, opts = {}) {
   });
 }
 
-/**
- * Look up Punch userId for an address from durable pairs only.
- * @param {string} address
- */
 export function pairedUserIdForAddress(address) {
   const key = normalizeAddressKey(address) || String(address || "").trim();
   if (!key) return null;
@@ -365,18 +300,13 @@ export function pairedUserIdForAddress(address) {
   return map[key] || null;
 }
 
-/** Test helper */
 export function _resetPairingStoreForTests() {
   try {
     if (existsSync(PAIR_FILE)) unlinkSync(PAIR_FILE);
-  } catch {
-    // ignore
-  }
+  } catch {}
   try {
     if (existsSync(LOCK_FILE)) unlinkSync(LOCK_FILE);
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 export const PAIRING_CODE_TTL_MS = CODE_TTL_MS;

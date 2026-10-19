@@ -1,4 +1,3 @@
-// Model / API-key / provider routes for the sandbox supervisor.
 import { checkModel, formatModelCheckError, splitModelSlug } from "/usr/local/lib/pi-model-check.mjs";
 import { normalizeThinkingLevel } from "/usr/local/lib/pi-thinking-level.mjs";
 import {
@@ -28,11 +27,8 @@ function sanitizeId(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
 }
 
-// The gateway may be mid-restart (a key or model change restarts it), so
-// retry briefly before giving up.
 const PI_MODELS_WAIT_MS = 15000;
 
-/** Pi's available models ({ provider, id, name }[]), or null if Pi can't be reached. */
 async function fetchPiModels() {
   const deadline = Date.now() + PI_MODELS_WAIT_MS;
   for (;;) {
@@ -58,7 +54,6 @@ function titlecase(s) {
     .join(" ");
 }
 
-/** Model, API-key and custom-provider routes. Returns true if handled. */
 export function handleProviderRoutes(req, res, url) {
   const models = loadJSON(MODELS_FILE);
 
@@ -68,8 +63,6 @@ export function handleProviderRoutes(req, res, url) {
     return true;
   }
 
-  // Reasoning level applied to every turn's model (see pi-thinking-level.mjs).
-  // null / "default" clears it. No forceRestart: the gateway applies it per turn.
   if (req.method === "POST" && url.pathname === "/model/thinking") {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -97,8 +90,6 @@ export function handleProviderRoutes(req, res, url) {
     return true;
   }
 
-  // Only exact ids Pi lists are saved. A near miss (claude-opus-5-5 vs 5.5)
-  // gets a 400 with hints, never a substitute model.
   if (req.method === "POST" && url.pathname === "/model") {
     let body = "";
     req.on("data", (c) => (body += c));
@@ -118,8 +109,6 @@ export function handleProviderRoutes(req, res, url) {
           return;
         }
         const normalized = normalizeModel(model);
-        // A custom provider is only listed by Pi once it has models, so name
-        // the real fix before Pi's generic "set its key" error.
         const slug = splitModelSlug(normalized);
         const custom = slug && Object.hasOwn(models.providers || {}, slug.provider) ? models.providers[slug.provider] : null;
         if (custom && !(custom.models || []).some((m) => m.id === slug.modelId)) {
@@ -165,12 +154,9 @@ export function handleProviderRoutes(req, res, url) {
     const env = loadJSON(ENV_FILE);
     const auth = loadJSON(AUTH_FILE);
     const configured = [];
-    // Prefer exact provider ids from auth.json (custom ids may contain dashes,
-    // which an env-var-derived name cannot recover).
     for (const [provider, entry] of Object.entries(auth)) {
       if (entry?.type === "api_key" && entry?.key) configured.push(provider);
     }
-    // also include any _API_KEY env vars for custom providers not tracked in auth
     const authEnvVars = new Set(
       configured.map((p) => `${p.toUpperCase().replace(/-/g, "_")}_API_KEY`),
     );
@@ -215,8 +201,6 @@ export function handleProviderRoutes(req, res, url) {
         saveJSON(ENV_FILE, env);
         const trimmedKey = key ? String(key).trim() : null;
         syncAuthProvider(provider, trimmedKey);
-        // Keep sibling providers sharing this env var in sync (e.g. opencode
-        // and opencode-go both use OPENCODE_API_KEY).
         for (const [pid, ev] of Object.entries(PROVIDER_ENV_MAP)) {
           if (ev === envVar && pid !== id) syncAuthProvider(pid, trimmedKey);
         }

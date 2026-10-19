@@ -1,7 +1,3 @@
-// Thread- and channel-scoped context isolation. Pure helpers (no Discord
-// client needed) plus the fetch functions used to build turn context.
-// Channel-mode fetching and message mapping live in ../channel-context.js.
-
 import * as store from "../memory.js";
 import { sandboxNameForUser } from "../agent.js";
 import { fetchChannelContext, mapContextMessage } from "../channel-context.js";
@@ -10,11 +6,6 @@ import { PREFIX } from "../core/config.js";
 import { registry } from "../core/registry.js";
 import { setSecret, getSecrets } from "../agent.js";
 
-// messages: Array<{ id: string, referenceMessageId: string | null }>
-// rootId: string
-// Returns a Set<id> of every message whose reply chain (walking
-// message.reference upward) reaches rootId. rootId is always included, even if
-// it isn't present in `messages`.
 export function filterThreadSubtree(messages, rootId) {
   const parentOf = new Map();
   for (const m of messages) {
@@ -38,9 +29,6 @@ export function filterThreadSubtree(messages, rootId) {
   return out;
 }
 
-// Walk a message's reply chain upward to find the root of its thread.
-// Caps at 12 hops; fetches each parent individually.
-// v2: batch these individual fetches into one bulk fetch if it ever feels slow.
 async function resolveRoot(channel, startId) {
   let cur = await channel.messages.fetch(startId).catch(() => null);
   if (!cur) return null;
@@ -55,12 +43,6 @@ async function resolveRoot(channel, startId) {
   return cur;
 }
 
-// Thread-scoped context: ingest only the reply subtree rooted at the summoning
-// message's root. The subtree is the summoning user's own reply chain, so it
-// may include the neighbours it explicitly engaged with (other humans and other
-// punches' output, attributed as `[punch:NAME]`), while its OWN prior output is
-// skipped to avoid loops. The ambient residue fallback below is scoped to the
-// summoning user only (own messages + explicit references).
 export async function fetchThreadContext(channel, message, opts = {}) {
   if (!channel) return [];
   const currentSandboxName = sandboxNameForUser(opts.userId) || null;
@@ -84,10 +66,6 @@ export async function fetchThreadContext(channel, message, opts = {}) {
       .filter((m) => m && m.content.length > 0);
     let result = kept;
 
-    // Non-reply ping (root == the summon itself): no thread has formed yet, so
-    // add a small residue of recent messages for context. Like channel mode,
-    // the residue is scoped to the summoning user (own messages + explicit
-    // references) so other users' jobs never leak in.
     if (root.id === message.id && result.length === 0) {
       const residue = await fetchChannelContext(channel, message, {
         currentSandboxName, userId: opts.userId, timeZone, limit: RESIDUE_LIMIT,
@@ -95,10 +73,6 @@ export async function fetchThreadContext(channel, message, opts = {}) {
       result = result.concat(residue);
     }
 
-    // Cross-ping escape hatch: a Discord message link in the summon pulls that
-    // other thread's messages into context too (bot output attributed as
-    // [punch:NAME], outputs stay distinct).
-    // v2: also scan message.reference for linked messages, and support multiple links.
     const linkMatch = message.content.match(/discord\.com\/channels\/\d+\/(\d+)\/(\d+)/);
     if (linkMatch) {
       const linkedChannelId = linkMatch[1];
@@ -126,8 +100,6 @@ export async function fetchThreadContext(channel, message, opts = {}) {
       }
     }
 
-    // A linked subtree can overlap the active one. Keep each message once and
-    // restore chronological order before limiting the combined context.
     return [...new Map(result.map((entry) => [entry.id, entry])).values()]
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
       .slice(-THREAD_WINDOW);
@@ -138,10 +110,6 @@ export async function fetchThreadContext(channel, message, opts = {}) {
 }
 
 export function progressSettingsFor(message) {
-  // Lifecycle reactions (👀 → ✅/🛑/⚠️) were removed — the bot only reacts via
-  // the model's <react> tags now. Progress is always the live status message,
-  // so `reactionProgressEnabled` / `reactionProgressMode` are kept as inert
-  // config for compatibility.
   return { useThinking: true };
 }
 

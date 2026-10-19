@@ -61,7 +61,6 @@ export function recordActivity(entry) {
     routineId: entry.routineId || null,
     cost: Number(entry.cost) || 0,
     tokens: normalizeTokens(entry.tokens),
-    // User messages this turn answered: the summon plus any steered into it.
     messages: Math.max(1, Number(entry.messages) || 1),
   };
   state.activities.push(record);

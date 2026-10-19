@@ -1,11 +1,5 @@
-/**
- * Punch MCP registry (/data/mcp.json) and normalized mcpServers conversion.
- * Registry keeps `local`/`remote` entries; adapter wants mcpServers.
- */
-
 import { Buffer } from "node:buffer";
 
-/** Legacy env var normalization (collides on hyphen vs underscore). Kept for migration only. */
 export function legacyMcpApiKeyEnvVar(serverName) {
   const safe = String(serverName || "")
     .toUpperCase()
@@ -15,7 +9,6 @@ export function legacyMcpApiKeyEnvVar(serverName) {
   return `MCP_${safe || "SERVER"}_API_KEY`;
 }
 
-/** Collision-free env var for a stored MCP API key (lossless base64url of server name). */
 export function mcpApiKeyEnvVar(serverName) {
   const raw = String(serverName || "").trim();
   if (!raw) return "MCP_SERVER_API_KEY";
@@ -23,7 +16,6 @@ export function mcpApiKeyEnvVar(serverName) {
   return `MCP_${encoded}_API_KEY`;
 }
 
-/** All env var names that may hold a key for this server (new + legacy). */
 export function mcpApiKeyEnvVarCandidates(serverName) {
   const candidates = [mcpApiKeyEnvVar(serverName)];
   const legacy = legacyMcpApiKeyEnvVar(serverName);
@@ -31,7 +23,6 @@ export function mcpApiKeyEnvVarCandidates(serverName) {
   return candidates;
 }
 
-/** Env vars safe to delete for one server (skips ambiguous shared legacy names). */
 export function mcpApiKeyEnvVarsToClear(serverName, registry) {
   const toClear = [mcpApiKeyEnvVar(serverName)];
   const legacyVar = legacyMcpApiKeyEnvVar(serverName);
@@ -43,7 +34,6 @@ export function mcpApiKeyEnvVarsToClear(serverName, registry) {
   return toClear;
 }
 
-/** Split a Discord space-separated command string into argv (supports simple quotes). */
 export function splitCommandString(input) {
   const s = String(input || "").trim();
   if (!s) return [];
@@ -119,7 +109,6 @@ export function usesMcpApiKeyAuth(entry) {
   return usesApiKeyAuth(entry);
 }
 
-/** Map legacy env var names to registry server names that share them. */
 export function legacyMcpApiKeyOwners(registry) {
   const legacyOwners = {};
   if (!registry || typeof registry !== "object" || Array.isArray(registry)) return legacyOwners;
@@ -133,7 +122,6 @@ export function legacyMcpApiKeyOwners(registry) {
   return legacyOwners;
 }
 
-/** Migrate legacy MCP key env vars to collision-free names. */
 export function migrateMcpApiKeyEnvVars(registry, env) {
   const out = { ...env };
   let changed = false;
@@ -155,7 +143,6 @@ export function migrateMcpApiKeyEnvVars(registry, env) {
   return { env: out, changed };
 }
 
-/** Redact MCP API key values from a public env view. */
 export function redactMcpKeysFromEnvView(env) {
   const view = { ...env };
   for (const [k, v] of Object.entries(view)) {
@@ -177,7 +164,6 @@ export function isMcpApiKeyConfigured(env, serverName, registry) {
   return !!env[legacyVar];
 }
 
-/** Public view of a registry entry (no secret headers or inline keys). */
 export function sanitizeMcpEntryForDisplay(entry) {
   if (!entry || typeof entry !== "object") return entry;
   const out = { ...entry };
@@ -192,10 +178,6 @@ export function sanitizeMcpEntryForDisplay(entry) {
   return out;
 }
 
-/**
- * Strict validation for /mcp/add. Throws on invalid shapes.
- * Returns a normalized Punch registry entry ready to persist.
- */
 export function assertPunchEntry(entry) {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
     throw new Error("MCP entry must be an object");
@@ -234,7 +216,6 @@ export function assertPunchEntry(entry) {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       throw new Error("Remote MCP url must use http:// or https://");
     }
-    // Preserve explicitly supplied headers (including empty object) for validation.
     const hasHeadersField = Object.prototype.hasOwnProperty.call(entry, "headers");
     const headers = hasHeadersField
       ? asStringRecord(entry.headers, "headers")
@@ -296,12 +277,6 @@ function stripCredentialHeaders(headers) {
   return out;
 }
 
-/**
- * Convert one Punch registry entry to a normalized MCP server entry.
- * @param {object} entry
- * @param {string} [serverName] registry key (required for api_key auth wiring)
- * @returns {object|null} null if entry is invalid
- */
 export function punchEntryToAdapter(entry, serverName) {
   try {
     const normalized = assertPunchEntry(entry);
@@ -311,7 +286,6 @@ export function punchEntryToAdapter(entry, serverName) {
         url: normalized.url,
       };
       if (!usesApiKeyAuth(normalized)) {
-        // Punch Discord sandboxes have no interactive OAuth UI yet.
         out.auth = false;
       }
       if (normalized.headers) out.headers = normalized.headers;
@@ -337,10 +311,6 @@ export function punchEntryToAdapter(entry, serverName) {
   }
 }
 
-/**
- * @param {Record<string, object>} registry Punch /data/mcp.json map
- * @returns {Record<string, object>} adapter mcpServers map
- */
 export function punchRegistryToMcpServers(registry) {
   const mcpServers = {};
   if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
@@ -351,19 +321,15 @@ export function punchRegistryToMcpServers(registry) {
     try {
       const adapted = punchEntryToAdapter(entry, name);
       if (adapted) mcpServers[name] = adapted;
-    } catch {
-      // Skip malformed entries so one bad server does not block the rest.
-    }
+    } catch {}
   }
   return mcpServers;
 }
 
-/** Adapter-shaped root config written to /data/pi/agent/mcp.json for ops/debug. */
 export function punchRegistryToAdapterConfig(registry) {
   return {
     mcpServers: punchRegistryToMcpServers(registry),
     settings: {
-      // Headless Discord sandbox: never attempt browser OAuth auto-flow.
       autoAuth: false,
       hostConfigDiscovery: "off",
     },

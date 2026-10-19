@@ -1,10 +1,3 @@
-// @ts-nocheck
-/**
- * Shared Punch agent turn helper for non-Discord entrypoints (Spectrum).
- * Keeps Discord handleChat intact; this is the minimal assemble → runAgent path.
- * Punch core (agent/memory) is plain JS without complete JSDoc; skip checkJs here.
- */
-
 import {
   runAgent,
   reloadSandboxMap,
@@ -29,10 +22,6 @@ const DISCORD_TAG_RE =
 const DISCORD_SELF_CLOSING_RE =
   /<(?:react|forget)\b[^>]*\/?>/gi;
 
-/**
- * Strip Discord-oriented markup Punch models sometimes emit.
- * @param {string} text
- */
 export function stripDiscordMarkup(text) {
   return String(text || "")
     .replace(DISCORD_TAG_RE, "")
@@ -50,17 +39,6 @@ function spectrumTurnInstructions() {
   );
 }
 
-/**
- * @param {{
- *   userId: string,
- *   sessionKey: string,
- *   text: string,
- *   speaker?: string,
- *   signal?: AbortSignal | null,
- *   onProgress?: ((ev: unknown) => void) | null,
- * }} args
- * @returns {Promise<{ ok: true, text: string, sessionId: string | null, usage?: unknown } | { ok: false, error: string, code: string }>}
- */
 export async function runPunchTurn({
   userId,
   sessionKey,
@@ -87,8 +65,6 @@ export async function runPunchTurn({
     return { ok: false, code: "no_sandbox", error: NO_SANDBOX_MSG };
   }
 
-  // Spectrum sessions must be scoped to the Punch userId so a shared space cannot
-  // reuse another user's Pi session id against a different sandbox.
   if (key.startsWith("spectrum:") && !key.startsWith(`spectrum:${uid}:`)) {
     return {
       ok: false,
@@ -123,7 +99,7 @@ export async function runPunchTurn({
     result = await runAgent(prompt, currentSession, onProgress, signal, uid, []);
   } catch (err) {
     const message = err && typeof err === "object" && "message" in err
-      ? String(/** @type {{ message: unknown }} */ (err).message)
+      ? String(err.message)
       : String(err);
     return { ok: false, code: "agent_error", error: message };
   } finally {

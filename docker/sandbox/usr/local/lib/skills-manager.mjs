@@ -34,7 +34,6 @@ function binaryExists(binary) {
 function pathFor(root, name) { if (!NAME.test(name)) throw new Error("Invalid skill name"); return join(root.directory, name, "SKILL.md"); }
 function enabledState() { return readJson(ENABLED_FILE, {}); }
 
-/** Register extra roots and translate Punch toggles to Pi's native skill exclusions. */
 export function syncPiSkillSettings({
   work = process.env.PI_REMOTE_DIR || "/work",
   agentDir = process.env.PI_CODING_AGENT_DIR || "/data/pi/agent",
@@ -52,7 +51,6 @@ export function syncPiSkillSettings({
     [join(agentDir, "settings.json"), roots],
     [join(work, ".pi", "settings.json"), roots.filter((root) => root.source === "workspace")],
   ]) {
-    // Read strictly so a malformed settings file cannot be overwritten.
     const settings = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
     const existing = settings.skills || [];
     const skills = existing.filter((entry) => !managed.has(entry));

@@ -1,6 +1,3 @@
-// /models menu: a model dropdown and a reasoning-level dropdown. The menu
-// stays usable for repeated picks until it expires; the expiry is part of each
-// custom id, so a stale click is caught even after a bot restart.
 import { ActionRowBuilder, StringSelectMenuBuilder } from "discord.js";
 
 import { MODEL_LIST, THINKING_LEVEL_LIST } from "../core/config.js";
@@ -15,7 +12,6 @@ export function modelsMenuCustomId(base, expiresAt) {
   return `${base}:${expiresAt}`;
 }
 
-/** `{ base, expiresAt }`; ids without an expiry (older menus) get 0, i.e. expired. */
 export function parseModelsMenuCustomId(customId) {
   const [base, ts] = String(customId).split(":");
   const expiresAt = Number(ts);
@@ -30,7 +26,6 @@ export function thinkingLevelLabel(level) {
   return (THINKING_LEVEL_LIST.find((l) => l.value === (level || "default")) || { label: level }).label;
 }
 
-/** Message payload for the menu; after expiry, only the notice and the expiry note. */
 export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "", now = Date.now() }) {
   if (modelsMenuExpired(expiresAt, now)) {
     return { content: [notice, MODELS_MENU_EXPIRED].filter(Boolean).join("\n"), components: [] };

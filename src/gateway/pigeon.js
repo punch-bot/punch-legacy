@@ -1,6 +1,3 @@
-// Agent pigeon delivery and permission handling. Wire-in: interaction handlers
-// use these to route approved agent pigeons into the recipient's chat queue.
-
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import * as store from "../memory.js";
 import * as sandbox from "../sandbox-manager.js";
