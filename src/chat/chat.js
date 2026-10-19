@@ -54,6 +54,7 @@ import {
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
 import { extractEmbeds, extractQuestions, sendQuestion } from "./embeds-questions.js";
+import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
 import { labelLineFor, withUserRunLock } from "./queue.js";
@@ -326,6 +327,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       }
     }
 
+    out = escapeStrayMarkdown(out);
     const notes = [];
     if (saved) notes.push(`remembered ${saved}`);
     if (capturedMemory.factsAdded) notes.push(`auto-remembered ${capturedMemory.factsAdded}`);
@@ -338,7 +340,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
     if (embedErrors.length) notes.push(embedErrors.join("; "));
-    if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
+    if (notes.length) out += (out ? "\n\n" : "") + notesFooter(notes);
 
     const sendable = filesToSend.filter((f) => !f.oversize);
     if (sendable.length > 1) console.log(`[attach-debug] WARNING: ${sendable.length} files in sendable: ${sendable.map((f) => `${f.name}(${f.attachment?.length})`).join(", ")}`);
@@ -356,7 +358,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       if (progressRenderer) {
         const [primary = "", ...overflow] = chunk(out, 1_650);
         await finalizeProgress(res.activity, activityStatus, primary, { files: sendable, embeds });
-        if (overflow.length) await settle(message, overflow.join("") + label);
+        for (const [i, part] of overflow.entries()) {
+          await settle(message, i === overflow.length - 1 ? part + label : part);
+        }
       } else {
         await settle(message, out + label, sendable, { embeds });
       }

@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import * as store from "../memory.js";
 import { DOCTOR_REPAIR_TTL_MS, REACTION_DEDUP_MS } from "./config.js";
 import { registry } from "./registry.js";
+import { splitMarkdown } from "../discord-markdown.js";
 
 export function createClient() {
   return new Client({
@@ -93,16 +94,7 @@ export function reactionDedupKey(userId, messageId) {
 }
 
 export function chunk(text, size = 1900) {
-  const out = [];
-  let s = text;
-  while (s.length > size) {
-    let cut = s.lastIndexOf("\n", size);
-    if (cut < size * 0.5) cut = size;
-    out.push(s.slice(0, cut));
-    s = s.slice(cut);
-  }
-  if (s.length) out.push(s);
-  return out;
+  return splitMarkdown(text, size);
 }
 
 export async function reply(message, text) {

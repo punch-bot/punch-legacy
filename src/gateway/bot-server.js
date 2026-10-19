@@ -6,6 +6,8 @@ import * as statistics from "../statistics.js";
 import * as sandbox from "../sandbox-manager.js";
 import { BOT_HTTP_PORT } from "../core/config.js";
 import { registry } from "../core/registry.js";
+import { chunk } from "../core/discord.js";
+import { escapeStrayMarkdown } from "../discord-markdown.js";
 import { verifyRoutineUser } from "../chat/routines-fire.js";
 import { userTimeZone } from "../commands/prefix.js";
 import { sandboxNameForUser } from "../agent.js";
@@ -28,14 +30,16 @@ async function deliverWorkerToChannel(worker, content) {
   if (!worker?.channelId) return false;
   try {
     const channel = await registry.client.channels.fetch(worker.channelId);
-    const payload = { content, allowedMentions: { parse: [] } };
-    if (worker.messageId) {
-      await channel.send({
-        ...payload,
-        reply: { messageReference: worker.messageId, failIfNotExists: false },
-      });
-    } else {
-      await channel.send(payload);
+    for (const part of chunk(content)) {
+      const payload = { content: part, allowedMentions: { parse: [] } };
+      if (worker.messageId) {
+        await channel.send({
+          ...payload,
+          reply: { messageReference: worker.messageId, failIfNotExists: false },
+        });
+      } else {
+        await channel.send(payload);
+      }
     }
     return true;
   } catch (err) {
@@ -125,11 +129,11 @@ const botHttpServer = createServer(async (req, res) => {
       const label = isSubtask ? "subtask" : "worker";
       const icon = worker.status === "succeeded" ? "✅" : worker.status === "stopped" ? "🛑" : "⚠️";
       const detail = worker.status === "succeeded" ? (worker.result || "_(no output)_") : (worker.error || worker.result || "Worker stopped without output.");
-      const content = `${icon} **${worker.kind} ${label} complete** \`${String(worker.id).slice(0, 8)}\` (${worker.status})\n${detail.slice(-1_700)}`;
+      const content = `${icon} **${worker.kind} ${label} complete** \`${String(worker.id).slice(0, 8)}\` (${worker.status})\n${escapeStrayMarkdown(detail.slice(-1_700))}`;
       const delivered = await deliverWorkerToChannel(worker, content);
       if (!delivered) {
         const dm = await registry.client.users.createDM(userId);
-        await dm.send(content);
+        for (const part of chunk(content)) await dm.send({ content: part, allowedMentions: { parse: [] } });
       }
       res.writeHead(200, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ success: true }));
