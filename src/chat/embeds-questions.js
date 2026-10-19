@@ -11,16 +11,21 @@ import {
   LabelBuilder,
 } from "discord.js";
 import { registry } from "../core/registry.js";
+import { escapeStrayMarkdown, splitMarkdown } from "../discord-markdown.js";
 
 const EMBED_RE = /<embed\s*>([\s\S]*?)<\/embed>/gi;
 const QUESTION_RE = /<question\b([^>]*)>([\s\S]*?)<\/question>/gi;
 const QUESTION_OPTION_RE = /^\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$/;
 
+function embedMarkdown(text, limit) {
+  return splitMarkdown(escapeStrayMarkdown(String(text)), limit)[0] || "";
+}
+
 function buildEmbedFromJson(j) {
   if (!j || typeof j !== "object") return null;
   const e = new EmbedBuilder();
   if (j.title) e.setTitle(String(j.title).slice(0, 256));
-  if (j.description) e.setDescription(String(j.description).slice(0, 4096));
+  if (j.description) e.setDescription(embedMarkdown(j.description, 4096));
   if (j.url) e.setURL(String(j.url));
   if (j.color !== undefined) {
     const c = Number(j.color);
@@ -42,7 +47,7 @@ function buildEmbedFromJson(j) {
   if (Array.isArray(j.fields)) {
     for (const f of j.fields.slice(0, 25)) {
       if (f && f.name != null && f.value != null) {
-        e.addFields({ name: String(f.name).slice(0, 256), value: String(f.value).slice(0, 1024), inline: !!f.inline });
+        e.addFields({ name: embedMarkdown(f.name, 256), value: embedMarkdown(f.value, 1024), inline: !!f.inline });
       }
     }
   }
@@ -175,7 +180,7 @@ export function registerQuestionState(messageId, state) {
 export async function sendQuestion(channel, q, fromUserId) {
   const embed = new EmbedBuilder();
   if (q.title) embed.setTitle(q.title.slice(0, 256));
-  if (q.description) embed.setDescription(q.description.slice(0, 4096));
+  if (q.description) embed.setDescription(embedMarkdown(q.description, 4096));
   embed.setColor(0x5865f2);
   const qmsg = await channel.send({
     embeds: [embed],

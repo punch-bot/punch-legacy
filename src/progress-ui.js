@@ -1,3 +1,5 @@
+import { escapeStrayMarkdown, splitMarkdown } from "./discord-markdown.js";
+
 const LIVE_CURRENT_LIMIT = 180;
 const ACTION_LIMIT = 140;
 const FIELD_LIMITS = Object.freeze({ goal: 200, finding: 300, next: 200 });
@@ -266,13 +268,13 @@ export function formatProgressDuration(value) {
 
 export function renderProgressLive(state, now = Date.now()) {
   const icon = STATUS_ICONS[state.status] || STATUS_ICONS.running;
-  const current = sanitizeProgressText(state.current, LIVE_CURRENT_LIMIT) || "Working on the request";
+  const current = escapeStrayMarkdown(sanitizeProgressText(state.current, LIVE_CURRENT_LIMIT)) || "Working on the request";
   const lines = [
     `${icon} ${current} · ${formatProgressDuration(elapsedMsFor(state, now))} · ${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"}`,
   ];
-  if (state.goal) lines.push(`**Goal:** ${sanitizeProgressText(state.goal, FIELD_LIMITS.goal)}`);
-  if (state.finding) lines.push(`**Finding:** ${sanitizeProgressText(state.finding, FIELD_LIMITS.finding)}`);
-  if (state.next) lines.push(`**Next:** ${sanitizeProgressText(state.next, FIELD_LIMITS.next)}`);
+  if (state.goal) lines.push(`**Goal:** ${escapeStrayMarkdown(sanitizeProgressText(state.goal, FIELD_LIMITS.goal))}`);
+  if (state.finding) lines.push(`**Finding:** ${escapeStrayMarkdown(sanitizeProgressText(state.finding, FIELD_LIMITS.finding))}`);
+  if (state.next) lines.push(`**Next:** ${escapeStrayMarkdown(sanitizeProgressText(state.next, FIELD_LIMITS.next))}`);
   return lines.join("\n").slice(0, MAX_DISCORD_CONTENT);
 }
 
@@ -301,7 +303,7 @@ export function renderProgressRecap(state, result = "") {
   const actions = state.actions.slice(0, MAX_RECAP_ACTIONS);
   if (actions.length) {
     appendWithin(lines, "**Actions**");
-    for (const action of actions) appendWithin(lines, `- ${sanitizeProgressText(action, ACTION_LIMIT)}`);
+    for (const action of actions) appendWithin(lines, `- ${escapeStrayMarkdown(sanitizeProgressText(action, ACTION_LIMIT))}`);
   }
 
   const milestones = state.milestones.slice(0, MAX_RECAP_MILESTONES);
@@ -311,7 +313,7 @@ export function renderProgressRecap(state, result = "") {
       for (const field of Object.keys(FIELD_LIMITS)) {
         if (milestone[field]) {
           const labelText = field[0].toUpperCase() + field.slice(1);
-          appendWithin(lines, `- **${labelText}:** ${sanitizeProgressText(milestone[field], 160)}`);
+          appendWithin(lines, `- **${labelText}:** ${escapeStrayMarkdown(sanitizeProgressText(milestone[field], 160))}`);
         }
       }
     }
@@ -416,7 +418,8 @@ export function createProgressRenderer({
         const recap = renderProgressRecap(state, result);
         const suffix = String(finalSuffix || "");
         const recapLimit = Math.max(0, MAX_DISCORD_CONTENT - suffix.length);
-        const content = recap.slice(0, recapLimit).trimEnd() + suffix;
+        const [primary = ""] = recapLimit ? splitMarkdown(recap, recapLimit) : [];
+        const content = primary.trimEnd() + suffix;
         finalRequest = { options: { ...options, content }, resolve };
         pump();
       });

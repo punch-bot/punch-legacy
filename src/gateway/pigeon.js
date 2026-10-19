@@ -6,17 +6,17 @@ import { sandboxNameForUser } from "../agent.js";
 import { assessAgentPigeon } from "../pigeon-supervisor.js";
 import { ensureUserSandbox } from "../core/supervisor.js";
 import { registry } from "../core/registry.js";
-import { safeReact } from "../core/discord.js";
+import { chunk, safeReact } from "../core/discord.js";
+import { escapeStrayMarkdown } from "../discord-markdown.js";
 import { enqueueChat } from "../chat/queue.js";
 
 export async function notifyPigeonDM(recipientId, from, text) {
   try {
     const user = await registry.client.users.fetch(recipientId);
     const dm = await user.createDM();
-    await dm.send({
-      content: `📬 **Pigeon message from ${from}**\n\n${text}`,
-      allowedMentions: { parse: [] },
-    });
+    for (const content of chunk(`📬 **Pigeon message from ${from}**\n\n${escapeStrayMarkdown(text)}`)) {
+      await dm.send({ content, allowedMentions: { parse: [] } });
+    }
     console.log(`[pigeon] notified ${recipientId} (${from}): ${text.slice(0, 80)}`);
   } catch (err) {
     console.error(`[pigeon] failed to DM ${recipientId}:`, err.message);
@@ -70,10 +70,13 @@ export async function runApprovedAgentPigeon(pending, pendingId = null) {
     const user = await registry.client.users.fetch(recipientId);
     const dm = await user.createDM();
     const bufferSec = pigeonGate.clampBufferSeconds(userSettings.pigeonBufferSeconds);
+    const formattedText = escapeStrayMarkdown(text);
     const intro = bufferSec
-      ? `📬 **Agent pigeon from ${from}** — runs in **${bufferSec}s**. React 🛑 to cancel.\n\n${text}`
-      : `📬 **Agent pigeon from ${from}**\n\n${text}`;
-    const triggerMsg = await dm.send(intro);
+      ? `📬 **Agent pigeon from ${from}** — runs in **${bufferSec}s**. React 🛑 to cancel.\n\n${formattedText}`
+      : `📬 **Agent pigeon from ${from}**\n\n${formattedText}`;
+    const [primary, ...overflow] = chunk(intro);
+    const triggerMsg = await dm.send({ content: primary, allowedMentions: { parse: [] } });
+    for (const content of overflow) await dm.send({ content, allowedMentions: { parse: [] } });
     const sandboxName = sandbox.loadUsers().find((u) => u.userId === recipientId)?.name;
 
     if (bufferSec > 0) {

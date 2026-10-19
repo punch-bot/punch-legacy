@@ -4,6 +4,7 @@ import * as statistics from "../statistics.js";
 import { runAgent, getFile } from "../agent.js";
 import { registry } from "../core/registry.js";
 import { chunk } from "../core/discord.js";
+import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { ensureUserSandbox } from "../core/supervisor.js";
 import { persistMemoryTags } from "../chat/memory-tags.js";
 import {
@@ -63,7 +64,7 @@ async function fireRoutine(routine) {
       let out = textAfterAttachments || "";
       const { clean: textAfterEmbeds, embeds, errors: embedErrors } = extractEmbeds(out);
       const { clean: textAfterQuestions, questions } = extractQuestions(textAfterEmbeds);
-      out = textAfterQuestions || "";
+      out = escapeStrayMarkdown(textAfterQuestions || "");
 
       const notes = [];
       if (saved) notes.push(`remembered ${saved}`);
@@ -71,7 +72,7 @@ async function fireRoutine(routine) {
       if (failed) notes.push(`memory update failed (${failed})`);
       if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
       if (embedErrors.length) notes.push(embedErrors.join("; "));
-      if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
+      if (notes.length) out += (out ? "\n\n" : "") + notesFooter(notes);
 
       const sendable = filesToSend.filter((f) => !f.oversize);
       if (!out && sendable.length === 0 && embeds.length === 0 && questions.length === 0) {
@@ -186,7 +187,7 @@ async function fireRoutine(routine) {
   let out = textAfterAttachments || "";
   const { clean: textAfterEmbeds, embeds, errors: embedErrors } = extractEmbeds(out);
   const { clean: textAfterQuestions, questions } = extractQuestions(textAfterEmbeds);
-  out = textAfterQuestions || "";
+  out = escapeStrayMarkdown(textAfterQuestions || "");
 
   const notes = [];
   if (saved) notes.push(`remembered ${saved}`);
@@ -194,7 +195,7 @@ async function fireRoutine(routine) {
   if (failed) notes.push(`memory update failed (${failed})`);
   if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
   if (embedErrors.length) notes.push(embedErrors.join("; "));
-  if (notes.length) out += (out ? "\n\n" : "") + `_🧠 ${notes.join(", ")}_`;
+  if (notes.length) out += (out ? "\n\n" : "") + notesFooter(notes);
 
   const label = labelLineFor(uid);
   if (label) out += label;
