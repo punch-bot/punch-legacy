@@ -271,16 +271,28 @@ function safeHardCut(text, from, to) {
   return cut > from ? cut : to;
 }
 
-function plainChunks(text, size) {
+function plainChunks(text, size, protectLineStart = true) {
   const out = [];
   let pos = 0;
-  while (text.length - pos > size) {
-    let cut = text.lastIndexOf("\n", pos + size);
-    if (cut < pos + size * 0.5) cut = safeHardCut(text, pos, pos + size);
-    out.push(text.slice(pos, cut));
+  let midLine = false;
+  while (pos < text.length) {
+    let cut = Math.min(pos + size, text.length);
+    if (cut < text.length) {
+      const newline = pos + text.slice(pos, cut + 1).lastIndexOf("\n");
+      cut = newline >= pos + size * 0.5 ? newline : safeHardCut(text, pos, cut);
+    }
+    let part = text.slice(pos, cut);
+    if (protectLineStart && midLine) {
+      part = asMidLine(part);
+      if (part.length > size) {
+        cut = safeHardCut(text, pos, cut - 1);
+        part = asMidLine(text.slice(pos, cut));
+      }
+    }
+    out.push(part);
+    midLine = text[cut - 1] !== "\n";
     pos = cut;
   }
-  if (pos < text.length) out.push(text.slice(pos));
   return out;
 }
 
@@ -426,7 +438,7 @@ function asMidLine(text) {
   return text.slice(0, at) + "\\" + text.slice(at);
 }
 
-export function splitMarkdown(text, size = 1900) {
+function splitBoundedMarkdown(text, size, { fill = false, firstOnly = false } = {}) {
   if (!text) return [];
   const out = [];
   let rest = text;
@@ -447,7 +459,8 @@ export function splitMarkdown(text, size = 1900) {
     if (cut < 0) cut = latest(ends.filter((e) => e >= size / 2));
 
     const spanning = top.find((n) => n.start < size && n.end > size);
-    if (cut < 0 && spanning?.start > 0 && spanning.end - spanning.start <= size) cut = spanning.start;
+    if (fill && spanning) cut = -1;
+    if (!fill && cut < 0 && spanning?.start > 0 && spanning.end - spanning.start <= size) cut = spanning.start;
     if (cut < 0 && spanning?.type === "codeBlock") {
       const lang = spanning.capture[0].match(/^```[a-z0-9_+\-.#]*\n/i);
       const open = lang ? lang[0] : "```\n";
@@ -458,6 +471,7 @@ export function splitMarkdown(text, size = 1900) {
       if (lineCut > bodyStart) {
         const resume = rest[lineCut] === "\n" ? lineCut + 1 : lineCut;
         out.push(rest.slice(0, lineCut) + close);
+        if (firstOnly) return out.filter((part) => part.trim());
         rest = open + rest.slice(resume);
         continue;
       }
@@ -466,6 +480,7 @@ export function splitMarkdown(text, size = 1900) {
       const split = splitContainer(rest, spanning, size);
       if (split) {
         out.push(split[0]);
+        if (firstOnly) return out.filter((part) => part.trim());
         rest = split[1];
         continue;
       }
@@ -476,12 +491,89 @@ export function splitMarkdown(text, size = 1900) {
       const node = top.find((n) => n.start < cut && n.end > cut);
       const tailEnd = node ? node.end : cut;
       out.push(rest.slice(0, cut));
+      if (firstOnly) return out.filter((part) => part.trim());
       rest = escapeStrayMarkdown(rest.slice(cut, tailEnd)) + rest.slice(tailEnd);
       continue;
     }
     out.push(rest.slice(0, cut));
+    if (firstOnly) return out.filter((part) => part.trim());
     rest = rest[cut - 1] === "\n" ? rest.slice(cut) : asMidLine(rest.slice(cut));
   }
   if (rest) out.push(rest);
   return out.filter((part) => part.trim());
+}
+
+const MAX_SPLIT_WINDOW = 16_384;
+
+function* markdownChunks(text, size, depth = 0) {
+  if (!text) return;
+  if (text.length <= size) {
+    if (text.trim()) yield text;
+    return;
+  }
+  if (text.length <= MAX_SPLIT_WINDOW) {
+    yield* splitBoundedMarkdown(text, size);
+    return;
+  }
+  let top;
+  try {
+    if (depth > 50) throw new Error("markdown splitting nesting limit");
+    top = analyze(text, { exact: true }).top;
+  } catch (err) {
+    console.warn("[markdown] splitting as plain text:", err.message);
+    yield* plainChunks(text, size).filter((part) => part.trim());
+    return;
+  }
+  let batch = "";
+  let batchStart = 0;
+  const splitBatch = () => splitBoundedMarkdown(
+    batchStart > 0 && text[batchStart - 1] !== "\n" ? asMidLine(batch) : batch,
+    size,
+  );
+  for (const node of top) {
+    const raw = text.slice(node.start, node.end);
+    if (batch && batch.length + raw.length > MAX_SPLIT_WINDOW) {
+      yield* splitBatch();
+      batch = "";
+    }
+    if (raw.length <= MAX_SPLIT_WINDOW) {
+      if (!batch) batchStart = node.start;
+      batch += raw;
+      continue;
+    }
+    if (node.type === "text") {
+      const content = node.start > 0 && text[node.start - 1] !== "\n" ? asMidLine(raw) : raw;
+      yield* plainChunks(content, size).filter((part) => part.trim());
+      continue;
+    }
+    const parts = containerParts(raw, node);
+    const budget = parts ? size - parts.open.length - parts.close.length - (node.type === "inlineCode" ? 2 : 0) : 0;
+    const innerSize = parts?.quote ? Math.floor(budget / 3) : budget;
+    if (!parts || innerSize < 2) {
+      yield* plainChunks(escapeAll(raw), size).filter((part) => part.trim());
+      continue;
+    }
+    const opaque = node.type === "codeBlock" || node.type === "inlineCode";
+    const content = !opaque && !parts.quote && node.start > 0 && text[node.start - 1] !== "\n"
+      ? asMidLine(parts.content)
+      : parts.content;
+    const inner = opaque
+      ? plainChunks(content, innerSize, false)
+      : markdownChunks(content, innerSize, depth + 1);
+    for (const piece of inner) {
+      let body = opaque ? piece : piece.trim();
+      if (!body) continue;
+      if (node.type === "inlineCode" && (body.startsWith("`") || body.endsWith("`"))) body = " " + body + " ";
+      yield parts.open + (parts.quote ? body.replace(/\n/g, "\n> ") : body) + parts.close;
+    }
+  }
+  if (batch) yield* splitBatch();
+}
+
+export function splitMarkdown(text, size = 1900) {
+  return [...markdownChunks(text, size)];
+}
+
+export function truncateMarkdown(text, size) {
+  return splitBoundedMarkdown(text, size, { fill: true, firstOnly: true })[0] || "";
 }

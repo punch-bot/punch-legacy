@@ -11,14 +11,14 @@ import {
   LabelBuilder,
 } from "discord.js";
 import { registry } from "../core/registry.js";
-import { escapeStrayMarkdown, splitMarkdown } from "../discord-markdown.js";
+import { escapeStrayMarkdown, truncateMarkdown } from "../discord-markdown.js";
 
 const EMBED_RE = /<embed\s*>([\s\S]*?)<\/embed>/gi;
 const QUESTION_RE = /<question\b([^>]*)>([\s\S]*?)<\/question>/gi;
 const QUESTION_OPTION_RE = /^\s*(?:[-*•]|\d+[.)])\s+(.+?)\s*$/;
 
 function embedMarkdown(text, limit) {
-  return splitMarkdown(escapeStrayMarkdown(String(text)), limit)[0] || "";
+  return truncateMarkdown(escapeStrayMarkdown(String(text)), limit);
 }
 
 function buildEmbedFromJson(j) {

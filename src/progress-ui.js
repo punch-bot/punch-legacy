@@ -1,4 +1,4 @@
-import { escapeStrayMarkdown, splitMarkdown } from "./discord-markdown.js";
+import { escapeStrayMarkdown, truncateMarkdown } from "./discord-markdown.js";
 
 const LIVE_CURRENT_LIMIT = 180;
 const ACTION_LIMIT = 140;
@@ -418,7 +418,7 @@ export function createProgressRenderer({
         const recap = renderProgressRecap(state, result);
         const suffix = String(finalSuffix || "");
         const recapLimit = Math.max(0, MAX_DISCORD_CONTENT - suffix.length);
-        const [primary = ""] = recapLimit ? splitMarkdown(recap, recapLimit) : [];
+        const primary = recapLimit ? truncateMarkdown(recap, recapLimit) : "";
         const content = primary.trimEnd() + suffix;
         finalRequest = { options: { ...options, content }, resolve };
         pump();
