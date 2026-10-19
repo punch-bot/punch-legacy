@@ -9,8 +9,6 @@ export const MAX_ATTACHMENT_BYTES = (Number(process.env.PI_MAX_ATTACHMENT) || 10
 export const COMPRESS_TIMEOUT_MS = Number(process.env.PI_COMPRESS_TIMEOUT) || 300;
 export const BOT_HTTP_PORT = 4098;
 
-// Bot owners as comma-separated Discord user IDs (e.g. "1234567890,0987654321").
-// Only owners may run owner-scoped commands like /sandbox restart-all.
 export const BOT_OWNERS = new Set(
   (process.env.BOT_OWNERS || "")
     .split(",")
@@ -42,8 +40,6 @@ export const MODEL_LIST = [
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 
-// /models reasoning dropdown. "default" clears the override; the rest must
-// match THINKING_LEVELS in docker/sandbox/usr/local/lib/pi-thinking-level.mjs.
 export const THINKING_LEVEL_LIST = [
   { label: "Default", value: "default", description: "Whatever the model uses on its own" },
   { label: "Off", value: "off", description: "No reasoning" },

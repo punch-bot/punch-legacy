@@ -1,6 +1,3 @@
-// Shared mutable state + client reference for the bot process. Indexed
-// modules import this instead of re-creating their own Maps or a client.
-
 export const registry = {
   client: null,
   doctorRepairTokens: new Map(),

@@ -1,14 +1,3 @@
-// Sandbox entrypoint. Runs Punch's pi-gateway (HTTP on :4096
-// over `pi --mode rpc`) and exposes the supervisor API on :4097.
-//
-// Self-extension: when the LLM writes a Pi extension into /work/.pi/extensions/,
-// this supervisor restarts the gateway so new tools register. Pi loads -e
-// extensions at process start.
-//
-// Sessions persist under /data/pi/sessions. Quarantine: after restart we health-
-// probe the gateway; on persistent failure we move the newest extension into
-// .broken/ and reload.
-
 import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,7 +31,6 @@ import { handleTailscaleRoutes } from "./supervisor/tailscale.mjs";
 import { handleWorkerRoutes } from "./supervisor/workers.mjs";
 import { handleBotProxy, handleGeneralRoutes, handlePigeonRelay } from "./supervisor/routes.mjs";
 
-// --- Model selection (saved model wins, else argv[2] or default) ---
 const savedModel = loadModel();
 state.CURRENT_MODEL = normalizeModel(savedModel || process.argv[2] || MODEL_DEFAULT);
 saveModel(state.CURRENT_MODEL);
@@ -50,7 +38,6 @@ state.THINKING_LEVEL = loadThinkingLevel();
 process.env.PI_DEFAULT_MODEL = state.CURRENT_MODEL;
 process.env.PI_MODEL = state.CURRENT_MODEL;
 
-// --- Env / secrets injection ---
 (function injectEnv() {
   const env = loadJSON(ENV_FILE);
   for (const [k, v] of Object.entries(env)) {
@@ -61,7 +48,6 @@ process.env.PI_MODEL = state.CURRENT_MODEL;
   ensurePiModelsJson();
 })();
 
-// Set up the user's work directory from env var
 const SANDBOX_USER_ID = process.env.SANDBOX_USER_ID || "";
 if (SANDBOX_USER_ID) {
   mkdirSync(WORK, { recursive: true });
@@ -69,7 +55,6 @@ if (SANDBOX_USER_ID) {
   log(`serving user: ${SANDBOX_USER_ID}`);
 }
 
-// Sync Punch MCP registry → Pi adapter config before the gateway starts.
 (function generateConfig() {
   mkdirSync("/data/pi", { recursive: true });
   const mcp = loadJSON(MCP_FILE);
@@ -93,7 +78,6 @@ start();
 setupWatchers();
 setupSignalHandlers();
 
-// Reconnect when a key was previously stored in the persistent /data volume.
 (function autoTailscale() {
   let key;
   try {
@@ -111,7 +95,6 @@ setupSignalHandlers();
   }, 2000);
 })();
 
-// --- HTTP API Server ---
 const apiServer = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 

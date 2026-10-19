@@ -1,6 +1,3 @@
-// MessageCreate listener: prefix commands + chat-turn triggering (mentions,
-// DM, voice memos, summon words, replies) with thread/channel context.
-
 import { Events } from "discord.js";
 import * as store from "../memory.js";
 import { sandboxNameForUser } from "../agent.js";
@@ -34,9 +31,6 @@ function registerMessageCreate(client) {
 
     const isDM = !message.guild;
     const mentioned = isBotDirectlyMentioned(message, client.user);
-    // Messages inside a thread Punch created auto-summon — no mention or
-    // summon word needed (that's the whole point of thread mode) — but only
-    // for the user who opened the thread; its session lives in their sandbox.
     const inPunchThread = isPunchThread(message.channel, client);
     const autoSummon = canAutoSummon(message.channel, client, message.author.id);
     const content = message.content.trim();
@@ -86,11 +80,8 @@ function registerMessageCreate(client) {
       text = text.replace(new RegExp(`\\b${escapeRegExp(summonWord)}\\b`, "gi"), "").trim();
     }
 
-    // Collect the message this one is replying to (if any) as focused context
     const repliedTo = await buildRepliedToContext(message);
 
-    // Thread mode: a fresh channel-level summon opens a Punch-owned thread
-    // and the turn is redirected into it.
     let turnMessage = message;
     if (!isDM && !inPunchThread && shouldUseThreadMode(message, message.author.id, text)) {
       try {
@@ -101,10 +92,6 @@ function registerMessageCreate(client) {
       }
     }
 
-    // Collect context: thread-scoped by default, or legacy channel-scoped if the
-    // guild opted into `channel` mode via /settings context. Context always
-    // reads the real message's channel — for a summon that just opened a
-    // thread that's the parent channel (the new thread is still empty).
     const useChannelContext =
       message.guild && store.getGuildSettings(message.guild.id).contextMode === "channel";
     const contextMessages = useChannelContext

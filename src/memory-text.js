@@ -1,4 +1,3 @@
-// Shared by legacy import, SQLite indexing, and memory ranking.
 const STOP_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "how",
   "i", "in", "is", "it", "me", "my", "of", "on", "or", "that", "the", "this", "to",

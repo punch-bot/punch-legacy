@@ -75,7 +75,6 @@ import {
   thinkingLevelLabel,
 } from "./models-menu.js";
 
-// Supervisor model API for /models: GET without a body, POST with one.
 async function modelsSupervisor(uid, path, body) {
   const auth = supervisorAuth();
   const res = await fetch(`${apiUrlFor(uid)}${path}`, body === undefined
@@ -86,7 +85,6 @@ async function modelsSupervisor(uid, path, body) {
   return data;
 }
 
-// The /models menu re-rendered with the sandbox's current model and level.
 async function modelsMenuFor(uid, expiresAt, notice) {
   try {
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
@@ -105,8 +103,6 @@ async function setModelNotice(uid, model) {
   }
 }
 
-// Memory commands answer instead of failing the interaction while the store is
-// unavailable (MEMORY_UNAVAILABLE). Callers treat `undefined` as handled.
 async function memoryReplyGuard(interaction, fn) {
   try {
     return await fn();
@@ -758,7 +754,6 @@ export function registerInteractions(client) {
       const apiUrl = apiUrlFor(uid);
       const auth = supervisorAuth();
       const sub = interaction.options.getSubcommand();
-      // `/provider model add` also reports sub "add"; check the group first.
       const group = interaction.options.getSubcommandGroup();
 
       if (!group && sub === "add") {
@@ -1193,16 +1188,12 @@ export function registerInteractions(client) {
       let progress = 0;
       const iv = setInterval(async () => {
         const elapsed = (Date.now() - start) / 1000;
-        // Ease toward 95% while the server works; jumps to 100% on completion.
-        // Slower ramp so the bar doesn't parking at the top for large sessions.
         const target = Math.min(95, (elapsed / 90) * 95);
         progress = Math.max(progress, target);
         const pct = Math.round(progress);
         await interaction.editReply(`🔄 Compressing conversation…\n${progressBar(pct)} ${pct}%`).catch(() => {});
       }, 1500);
 
-      // Summarizing a long session can take well over the default per-turn HTTP
-      // timeout (PI_TIMEOUT), so give it a dedicated, generous budget.
       const COMPRESS_TIMEOUT_MS = (Number(process.env.PI_COMPRESS_TIMEOUT) || 300) * 1000;
       const ac = new AbortController();
       const to = setTimeout(() => ac.abort(), COMPRESS_TIMEOUT_MS);
@@ -1410,7 +1401,6 @@ export function registerInteractions(client) {
             }
           } else if (type === "local") {
             if (!commandStr?.trim()) throw new Error("Local MCP requires `command`");
-            // Simple argv split (supports "quoted" tokens). Same rules as docker/sandbox/usr/local/lib/mcp-config.mjs.
             const argv = [];
             let cur = "";
             let quote = null;
@@ -1709,7 +1699,6 @@ export function registerInteractions(client) {
 
   });
 
-  // Handle skill removal
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isStringSelectMenu() || interaction.customId !== "skill_remove") return;
     const name = interaction.values[0];
@@ -1731,8 +1720,6 @@ export function registerInteractions(client) {
     }
   });
 
-  // /models dropdowns (model + reasoning level). Each pick updates the menu in
-  // place so it can be used again until it expires.
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isStringSelectMenu()) return;
     const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
@@ -1788,7 +1775,6 @@ export function registerInteractions(client) {
     await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
-  // Custom model modal (opened from the /models menu, which it then updates)
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isModalSubmit()) return;
     const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
@@ -1804,7 +1790,6 @@ export function registerInteractions(client) {
     await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
-  // Handle model edit modal submission
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isModalSubmit() || !interaction.customId.startsWith("model_edit_modal:")) return;
 

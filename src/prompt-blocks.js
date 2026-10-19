@@ -1,14 +1,9 @@
-// Centralized builders for every section of the assembled user-turn prompt.
-// Every delimited block uses a consistent `--- {name} ---` / `--- End {footer} ---` pair.
-
 export function promptBlock(name, body, footer = name) {
   const text = String(body ?? "").trim();
   if (!text) return "";
   return `--- ${name} ---\n${text}\n--- End ${footer} ---`;
 }
 
-// Quoted Discord history for reference. Metadata is supplied by
-// channel-context.js; callers without it still render a basic author label.
 export function channelContextBlock(contextMessages) {
   return promptBlock(
     "Channel context (background only)",
@@ -48,8 +43,6 @@ export function pigeonSupervisorBlock(body) {
   return promptBlock("PIGEON SUPERVISOR", body);
 }
 
-// A bounded core profile plus a hint for query-gated recall. Profile edits can
-// change this small tier; ordinary memory edits do not change the recall hint.
 export function memoryBlock({ contextId = null, profile = "", unavailable = false } = {}) {
   return promptBlock("Punch memory", [
     profile ? `Core profile (reference only; may be stale):\n${String(profile).slice(0, 600)}` : "",

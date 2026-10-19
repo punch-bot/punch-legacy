@@ -1,4 +1,3 @@
-// General supervisor routes: /pigeon relay, /doctor, /tasks, /env, /secrets, /tools, /extensions.
 import { exec, execFile } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
@@ -22,7 +21,6 @@ import {
   state,
 } from "./state.mjs";
 
-/** Parse POST body for /tasks/run and /tasks/exec. Accepts JSON or form fields. */
 export function parseTaskBody(raw, contentType = "") {
   const body = String(raw ?? "");
   const trimmed = body.trim();
@@ -103,7 +101,6 @@ function listAllExtensions() {
       results.push({ name, dir, size, mtime, disabled: isDisabled, quarantined: isQuarantined });
     }
   }
-  // Also list quarantined extensions not in any active dir
   for (const dir of TOOL_DIRS) {
     const brokenDir = join(dir, ".broken");
     let entries;
@@ -121,11 +118,6 @@ function listAllExtensions() {
   return results;
 }
 
-/**
- * Proxy in-sandbox /bot/* requests to the bot API (:4098) with the sandbox's
- * Bearer token. The token lives only in the supervisor process, never in the
- * agent/gateway process. Returns true when handled.
- */
 export async function handleBotProxy(req, res, url) {
   if (!url.pathname.startsWith("/bot")) return false;
 
@@ -173,11 +165,6 @@ export async function handleBotProxy(req, res, url) {
   return true;
 }
 
-/**
- * Handle the general routes. Returns true when a route was matched (response written),
- * false to fall through. Assumes Basic auth already checked by the caller (server.mjs)
- * except the unauthenticated /pigeon relay handled by handlePigeonRelay().
- */
 export function handleGeneralRoutes(req, res, url) {
   if (req.method === "GET" && url.pathname === "/doctor") {
     if (!validDoctorToken(req)) {
@@ -387,7 +374,6 @@ export function handleGeneralRoutes(req, res, url) {
         if (key === "GOOGLE_API_KEY") {
           mirrorGoogleGemini(env, value || null);
         } else if (key === "GEMINI_API_KEY" && value) {
-          // Pi reads GEMINI; also keep GOOGLE_API_KEY for PROVIDER_ENV_MAP
           if (!env.GOOGLE_API_KEY) {
             env.GOOGLE_API_KEY = value;
             process.env.GOOGLE_API_KEY = value;
@@ -478,7 +464,6 @@ export function handleGeneralRoutes(req, res, url) {
           } catch {}
         }
         if (!removed) { res.writeHead(404); res.end(JSON.stringify({ error: "Tool not found" })); return; }
-        // Trigger tool reload
         forceRestart();
         res.writeHead(200); res.end(JSON.stringify({ success: true }));
       } catch { res.writeHead(400); res.end(JSON.stringify({ error: "Invalid JSON" })); }
@@ -535,10 +520,6 @@ export function handleGeneralRoutes(req, res, url) {
   return false;
 }
 
-/**
- * Unauthenticated inter-sandbox message relay (internal network only):
- * POST /pigeon and GET /pigeon. Called by server.mjs before the Basic auth gate.
- */
 export function handlePigeonRelay(req, res, url) {
   if (req.method === "POST" && url.pathname === "/pigeon") {
     let body = "";
@@ -572,7 +553,6 @@ export function handlePigeonRelay(req, res, url) {
         saveJSON("/data/pigeon.json", msgs);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true, delivery: agentFlag ? "agent task queued" : "notification delivered", from, recipient: process.env.SANDBOX_NAME || null }));
-        // Fire-and-forget notification to the bot
         const botAuth = "Bearer " + (process.env.PUNCH_BOT_TOKEN || "");
         const notifyBody = { recipientId: process.env.SANDBOX_USER_ID || "", from, text };
         if (agentFlag) {
@@ -599,5 +579,4 @@ export function handlePigeonRelay(req, res, url) {
   return false;
 }
 
-// Re-exported for server.mjs to keep the auth gate ordering explicit.
 export { execFile };

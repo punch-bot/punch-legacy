@@ -29,5 +29,3 @@ jobs:
            OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
          with:
            model: opencode-go/deepseek-v4.1-flash
-          # share: true
-          # github_token: xxxx

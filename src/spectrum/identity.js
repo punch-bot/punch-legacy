@@ -1,28 +1,13 @@
-/**
- * Map Spectrum senders to Punch sandbox user IDs (same IDs as /sandbox create).
- */
-
-/**
- * Normalize phone-like addresses for map lookup (+digits).
- * @param {string} value
- */
 export function normalizeAddressKey(value) {
   const s = String(value || "").trim();
   if (!s) return "";
   if (s.includes("@")) return s.toLowerCase();
   const digits = s.replace(/[^\d+]/g, "");
   if (!digits) return s.toLowerCase();
-  // Bare digit strings (no +) normalize to E.164-style +digits so map lookups match.
   if (digits.startsWith("+")) return digits;
   return `+${digits}`;
 }
 
-/**
- * Collect candidate keys from a Spectrum message sender / platform fields.
- * @param {{ id?: string, address?: string } | null | undefined} sender
- * @param {{ address?: string } | null | undefined} [extra]
- * @returns {string[]}
- */
 export function senderLookupKeys(sender, extra = null) {
   const raw = [];
   if (sender?.id) raw.push(String(sender.id));
@@ -42,14 +27,6 @@ export function senderLookupKeys(sender, extra = null) {
   return keys;
 }
 
-/**
- * Resolve Punch userId for an inbound Spectrum message.
- * @param {{ id?: string, address?: string } | null | undefined} sender
- * @param {{ defaultUserId?: string, userMap?: Record<string, string> }} config
- * @param {{ address?: string } | null | undefined} [extra]
- * @param {{ allowDefault?: boolean }} [options] - default fallback is opt-in (terminal only)
- * @returns {string | null}
- */
 export function resolvePunchUserId(sender, config, extra = null, options = {}) {
   const map = config.userMap && typeof config.userMap === "object" ? config.userMap : {};
   for (const key of senderLookupKeys(sender, extra)) {
@@ -57,7 +34,6 @@ export function resolvePunchUserId(sender, config, extra = null, options = {}) {
     const normalized = normalizeAddressKey(key);
     if (normalized && map[normalized]) return map[normalized];
   }
-  // Also try map keys against normalized forms of map itself (caller may store +E.164).
   for (const key of senderLookupKeys(sender, extra)) {
     for (const [mapKey, userId] of Object.entries(map)) {
       if (normalizeAddressKey(mapKey) === normalizeAddressKey(key) && userId) {

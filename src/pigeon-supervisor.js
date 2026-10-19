@@ -52,7 +52,7 @@ const OUTBOUND_SECRET_PATTERNS = [
   /ANTHROPIC_API_KEY\s*=\s*\S+/i,
   /OPENAI_API_KEY\s*=\s*\S+/i,
   /\w*SERVER_PASSWORD\s*=\s*\S+/i,
-  /\b[A-Za-z0-9+/]{40,}={0,2}\b/, // long base64-ish blobs
+  /\b[A-Za-z0-9+/]{40,}={0,2}\b/,
 ];
 
 export function scanOutbound(text) {

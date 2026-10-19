@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { preamble } from "./memory.js";
 
-// Only bot-created turn contexts authorize channel/daily recall. A sandbox
-// cannot select another channel by supplying a channelId or userId to the API.
 const contexts = new Map();
 const CONTEXT_TTL_MS = 60 * 60_000;
 

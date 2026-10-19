@@ -3,13 +3,6 @@ import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
 import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
 
-// Talks to the sandbox's Pi gateway (HTTP on :4096 over `pi --mode rpc`).
-// All tool execution (bash/read/write/edit) happens SERVER-SIDE in the sandbox
-// container — the bot never runs a command locally and never holds model credentials.
-//
-// Flow: POST /session (once per channel) -> POST /session/{id}/message per turn.
-// The Punch pi-gateway adapts this HTTP shape onto Pi RPC prompt/abort/compact/events.
-
 const DEFAULT_SERVER = (process.env.PI_SERVER_URL || "").replace(/\/$/, "");
 const DEFAULT_API_URL = (() => {
   try {
@@ -28,9 +21,6 @@ const PASS = process.env.PI_SERVER_PASSWORD || "";
 const DIR_BASE = process.env.PI_REMOTE_DIR || "/work";
 const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT) || 1800) * 1000;
 
-// Map of Discord user IDs to sandbox hostnames.
-// e.g. {"12345":"sandbox-punch:4096","67890":"sandbox-ember:4096"}
-// Seeded from SANDBOX_MAP env var, extended by reloadSandboxMap() for dynamic users.
 let _extraMap = {};
 
 const SANDBOX_MAP = (() => {
@@ -95,10 +85,6 @@ export function getActivityLogs(userId, tail = 30) {
   return buf.slice(-Math.max(1, Math.min(tail, MAX_ACTIVITY_LINES)));
 }
 
-// const BASE_SYSTEM = ""; // The system prompt is loaded from /work/.pi/SYSTEM.md.
-
-// Dynamic-only stacks omit PI_SERVER_URL; every Discord user must be in
-// sandbox_users.json (via /sandbox create). Mapped users never use DEFAULT_SERVER.
 if (!DEFAULT_SERVER && (process.env.PUNCH_REQUIRE_PI_URL === "1")) {
   throw new Error("PI_SERVER_URL is not set but PUNCH_REQUIRE_PI_URL=1; Punch uses dynamic /sandbox create instead");
 }
@@ -147,8 +133,6 @@ async function api(path, body, baseUrl, signal = null) {
         if (err.name === "TimeoutError") {
           throw new Error(`pi server timed out after ${TIMEOUT_MS / 1000}s (${srv})`);
         }
-        // An externally-supplied signal aborting means the caller gave up
-        // (e.g. compress timeout) — don't burn retries, surface it immediately.
         if (err.name === "AbortError" || (signal && signal.aborted)) throw err;
         lastCode = err.cause?.code || err.code || err.message;
         await abortableSleep(2000, signal);
@@ -200,8 +184,6 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
       `[pi] gateway restart (${reason}) uid=${userId}: ${ok ? "ok" : res.status} ${body.message || ""}`.trim(),
     );
     if (ok && baseUrl) {
-      // Wait out the Pi respawn so the next Discord turn doesn't immediately
-      // land on "pi not ready" after a stall/abort.
       for (let i = 0; i < 20; i++) {
         await abortableSleep(500);
         try {
@@ -297,15 +279,11 @@ async function consumeEvents(sid, signal, onEvent, baseUrl, userId, onReady = nu
                 if (userId) appendActivityLog(userId, toolMsg);
               }
             }
-            // Includes authoritative session.progress snapshots. Never inspect
-            // or log text deltas, tool arguments, or tool outputs here.
             onEvent(ev);
           }
         }
      }
-  } catch (err) {
-     // stream aborted or errored — fine, we're done
-  } finally {
+  } catch (err) {} finally {
      ready(false);
   }
 }
@@ -326,13 +304,6 @@ export function progressEventFingerprint(event) {
 
 const KEEPALIVE_PHASES = new Set(["thinking", "writing", "compacting", "retrying", "working", "tool", "milestone"]);
 
-/**
- * Decide whether an SSE event should keep the idle watchdog alive.
- * - Meaningful progress (new fingerprint, tool start/end, text) always resets.
- * - Heartbeats keep the silence timer alive (including working/tool) so the
- *   TOOL_STALE_MS path can fire instead of the silence abort.
- * - Heartbeat-only working/tool still goes stale after TOOL_STALE_MS.
- */
 export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
   if (!event || typeof event !== "object") {
     return { resetMeaningful: false, resetKeepalive: false, fingerprint: lastFingerprint, phase: null };
@@ -457,8 +428,6 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   });
 
   const doPost = (async () => {
-    // The gateway immediately emits server.connected. Waiting for its headers
-    // prevents fast turns from completing before their progress stream exists.
     await sseReady;
     let lastCode;
     for (let attempt = 0; attempt < 8; attempt++) {
@@ -513,9 +482,6 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   }
 }
 
-// Known model context-window sizes (tokens). Falls back to a conservative
-// default when the active model isn't listed. Used only to render a rough
-// "how full is the context" indicator — not for any hard enforcement.
 const CONTEXT_LIMITS = {
   "anthropic/claude-3-5-sonnet": 200000,
   "anthropic/claude-sonnet-4-5": 200000,
@@ -545,10 +511,6 @@ function contextLimitFor(model) {
   return DEFAULT_CONTEXT_LIMIT;
 }
 
-// Compute the approximate CURRENT context size from an assistant message's
-// token usage. `input + cache.read + cache.write` reflects the prompt that was
-// sent for this turn (i.e. how full the window is), which is what a user wants
-// to see — not the lifetime cumulative counter.
 function extractContextUsage(info, model) {
   const t = info?.tokens;
   if (!t) return null;
@@ -570,7 +532,6 @@ function extractContextUsage(info, model) {
   };
 }
 
-// Pi gateway failures, using the gateway's `{ error }` message when it sends one.
 function piApiError(status, body) {
   let msg = body;
   try {
@@ -632,8 +593,6 @@ export async function createSession(userId) {
   return s.id;
 }
 
-// The user's model and reasoning level from the sandbox supervisor, sent with
-// every turn. Falls back to the default model and Pi's default level.
 async function fetchActiveModel(userId, signal = null) {
   const active = { activeProvider: PROVIDER_ID, activeModel: MODEL_ID, thinkingLevel: null };
   const apiUrl = apiUrlFor(userId);
@@ -697,10 +656,6 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const parts = [{ type: "text", text: message }];
-      // NOTE: gateway message `file` parts reject inline data URLs (HTTP 400),
-      // so attachments are delivered out-of-band by the bot (saved into the
-      // sandbox workspace and referenced by path in the prompt text). The
-      // `attachments` argument is intentionally not inlined here.
 
       const msg = await postMessageWithIdle(
         sid,
@@ -763,11 +718,6 @@ export async function getFile(filePath, userId) {
   return { buffer, name: filePath.split("/").pop() || "file" };
 }
 
-// Inject a steering message into the user's in-flight Pi turn via the
-// gateway `steer` RPC (delivered after the current assistant turn finishes
-// its tool calls, before the next LLM call). sessionId "active" resolves to
-// the gateway's currently-running session; !ok means the caller should fall
-// back to the normal queue.
 export async function steerSession(sessionId, text, userId) {
   const srv = serverFor(userId);
   if (!srv) return { ok: false, error: "No sandbox assigned." };

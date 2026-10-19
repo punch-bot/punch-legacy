@@ -1,8 +1,3 @@
-// Discord interaction handlers for question components (qbtn/qsel/qans/qchk/qmodal).
-// Sandbox-rendered questions (sendQuestion in chat/embeds-questions.js) let users
-// answer by clicking; each answer is fed back into the asker's chat session as a
-// new turn referencing the answered question.
-
 import {
   ActionRowBuilder,
   ModalBuilder,
@@ -38,7 +33,6 @@ async function handleQuestionInteraction(interaction) {
     return;
   }
 
-  // Claim the question before awaiting so concurrent clicks can't double-answer.
   if (!registry.questionState.delete(interaction.message.id)) {
     await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
@@ -108,7 +102,6 @@ async function handleQuestionModalSubmit(interaction) {
     return;
   }
 
-  // Claim the question before awaiting so concurrent clicks can't double-answer.
   if (!registry.questionState.delete(msgId)) {
     await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
     return;

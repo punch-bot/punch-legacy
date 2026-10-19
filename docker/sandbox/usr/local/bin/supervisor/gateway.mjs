@@ -1,4 +1,3 @@
-// Pi gateway child-process lifecycle: spawn, health probe, quarantine, reload, watchers.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, statSync, watch } from "node:fs";
@@ -30,9 +29,7 @@ export function toolFiles() {
       const full = join(dir, name);
       try {
         files.push({ dir, name, full, mtime: statSync(full).mtimeMs });
-      } catch {
-        // raced deletion
-      }
+      } catch {}
     }
   }
   return files.sort((a, b) => b.mtime - a.mtime);
@@ -43,9 +40,7 @@ export function toolSetHash() {
   for (const f of toolFiles().sort((a, b) => a.full.localeCompare(b.full))) {
     try {
       h.update(f.full).update("\0").update(readFileSync(f.full));
-    } catch {
-      // raced deletion
-    }
+    } catch {}
   }
   return h.digest("hex");
 }

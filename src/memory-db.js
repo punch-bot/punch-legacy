@@ -24,8 +24,6 @@ function validRecord(record, file) {
   }
 }
 
-// One database per bot DATA_DIR (stack). Scope/owner predicates isolate users and
-// explicitly shared channels. No writable JSON fallback exists after cutover.
 export class MemoryDatabase {
   constructor(dataDir) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -88,8 +86,6 @@ export class MemoryDatabase {
           this.db.prepare("INSERT INTO memory_meta VALUES ('legacy_json_v1', ?)").run(new Date().toISOString());
         }
       });
-      // Written only after COMMIT. If a crash interrupts this step, the next
-      // open sees the committed DB marker and completes this file harmlessly.
       try {
         writeFileSync(cutoverFile, "legacy_json_v1\n", { mode: 0o600, flag: "wx", flush: true });
       } catch (error) {
@@ -139,8 +135,6 @@ export class MemoryDatabase {
   importLegacy(dataDir) {
     const file = join(dataDir, "memory.json");
     const document = readLegacy(file);
-    // Older guards quarantined corrupt files. Their absence must not be
-    // interpreted as an intentionally empty store on the next process start.
     if (document === undefined && readdirSync(dataDir).some((name) => name.startsWith("memory.json.corrupt-"))) {
       throw new Error("[memory] migration refused: restore quarantined memory.json before retrying.");
     }

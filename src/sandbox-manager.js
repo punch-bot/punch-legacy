@@ -79,8 +79,6 @@ export function doctorTokenFor(name) {
   return tokens[name];
 }
 
-/** Per-sandbox bearer token for authenticating to the bot HTTP API (:4098).
- *  Minted like doctor tokens; gives the sandbox exactly its own identity. */
 export function botTokenFor(name) {
   validateSandboxName(name);
   const tokens = loadBotTokens();
@@ -91,7 +89,6 @@ export function botTokenFor(name) {
   return tokens[name];
 }
 
-/** Resolve a bearer token back to its sandbox owner identity, or null. */
 export function resolveBotToken(token) {
   if (!token) return null;
   const tokens = loadBotTokens();
@@ -248,8 +245,6 @@ export function getContainerLogs(name, tail = 50) {
   throw new Error(message);
 }
 
-// Only collaboration code calls this with fixed Git arguments. This avoids
-// exposing a model-controlled shell endpoint between isolated sandboxes.
 export async function gitInSandbox(name, args, { cwd } = {}) {
   validateSandboxName(name);
   if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
@@ -279,9 +274,6 @@ async function removeContainer(name) {
       if (out === "true" || out === "false") targets.push(candidate);
     } catch (err) {
       const message = err.stderr?.trim() || err.message || "";
-      // "No such object/container" means this candidate simply doesn't exist —
-      // keep probing other candidates. Anything else (daemon down, permissions,
-      // malformed name) is a real failure and must surface, not report success.
       if (/No such (object|container)/i.test(message)) continue;
       throw new Error(`Failed to inspect sandbox container ${candidate}: ${message}`);
     }
@@ -306,9 +298,6 @@ export async function buildSandboxImage() {
   }
 }
 
-// Create (or recreate) the container for one sandbox. Named volumes are
-// created if missing but never removed, so user data (/root, /work, /data,
-// /var/lib/tailscale, /collab) survives across recreations.
 async function runSandboxContainer(name) {
   const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
   for (const volumeName of volumeNames) {
@@ -350,11 +339,6 @@ export async function composeUp(name) {
   }
 }
 
-// Restart every registered user's sandbox. Default: `docker restart` their
-// existing containers. With recreate:true, each container is removed and
-// recreated from the current SANDBOX_IMAGE (named volumes preserved). The bot
-// never rebuilds the image itself — that is a manual deploy-time step (builds
-// would use the host /punch source).
 export async function restartAllSandboxes({ recreate = false } = {}) {
   const users = loadUsers();
   if (users.length === 0) return { ok: false, error: "No sandbox users configured. Use /sandbox create first." };
@@ -397,10 +381,6 @@ export async function composeDown(name) {
   }
 }
 
-// All possible container names for a sandbox across conventions: composeUp
-// uses `${STACK}_sandbox-<name>_1`, compose-created sandboxes (compose project
-// `STACK`) use `${STACK}-sandbox-<name>-<n>`. All scoped to THIS stack so the
-// bot never picks up containers owned by another Punch instance on this host.
 function containerCandidates(name) {
   const candidates = [
     `${STACK}_sandbox-${name}_1`,
@@ -410,8 +390,6 @@ function containerCandidates(name) {
   return candidates;
 }
 
-// Resolve the running container name for a sandbox. Returns null if no
-// matching container is currently running.
 export function containerForSandbox(name) {
   if (!isValidSandboxName(name)) return null;
   for (const candidate of containerCandidates(name)) {

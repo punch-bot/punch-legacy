@@ -1,5 +1,3 @@
-// Discord attachment download + sandbox upload + reply settlement helpers.
-
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writeFileSync, rmSync } from "node:fs";
@@ -18,8 +16,6 @@ export function oversizeNote(files) {
   return n ? `skipped ${n} file${n > 1 ? "s" : ""} over ${Math.round(MAX_UPLOAD / 1048576)}MB` : "";
 }
 
-// Download a Discord message's attachments for sandbox delivery.
-// Each returned item is { mime, filename, data } where `data` is base64.
 export async function downloadMessageAttachments(message) {
   const out = [];
   const skipped = [];
@@ -48,10 +44,6 @@ export async function downloadMessageAttachments(message) {
   return { attachments: out, skipped };
 }
 
-// Write a downloaded attachment into the user's sandbox workspace so the agent
-// can read/parse it with its file tools. Gateway message `file` parts do not
-// accept inline data URLs (they 400), so we persist the bytes on disk and point
-// the model at the path instead. Returns the workspace path or null on failure.
 function sanitizeAttachName(n) {
   const base = String(n || "file").replace(/[\/\\]/g, "_").replace(/[^a-zA-Z0-9._-]/g, "_");
   return base.slice(0, 120) || "file";

@@ -1,4 +1,3 @@
-// Punch MCP registry sync and normalized config generation for diagnostics.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import {
   assertPunchEntry,
@@ -12,10 +11,8 @@ import {
 import { forceRestart } from "./gateway.mjs";
 import { ENV_FILE, MCP_FILE, PI_MCP_FILE, log, loadJSON, saveJSON } from "./state.mjs";
 
-/** Object-property names that would poison the registry/prototype if used as MCP names. */
 const RESERVED_NAMES = new Set(["__proto__", "constructor", "prototype"]);
 
-/** Write normalized mcp.json for ops/debug; the runtime reads /data/mcp.json directly. */
 export function syncMcpConfig() {
   mkdirSync("/data/pi/agent", { recursive: true });
   const customMcp = loadJSON(MCP_FILE);
@@ -25,7 +22,6 @@ export function syncMcpConfig() {
   log(`mcp config synced (${names.length} server${names.length === 1 ? "" : "s"}): ${names.join(", ") || "(none)"}`);
 }
 
-/** Save MCP registry and env together; restore prior file contents on failure. */
 export function persistMcpRegistryAndEnv(mcp, env) {
   const prevMcpRaw = existsSync(MCP_FILE) ? readFileSync(MCP_FILE, "utf8") : null;
   const prevEnvRaw = existsSync(ENV_FILE) ? readFileSync(ENV_FILE, "utf8") : null;
@@ -46,7 +42,6 @@ export function clearMcpEnvVars(varNames, env) {
   }
 }
 
-/** Custom MCP server management routes. Returns true if handled. */
 export function handleMcpRoutes(req, res, url) {
   if (req.method === "GET" && url.pathname === "/mcp") {
     const mcp = loadJSON(MCP_FILE);
@@ -155,7 +150,6 @@ export function handleMcpRoutes(req, res, url) {
     return true;
   }
 
-  // API key auth for MCP (OAuth deferred). Keys live in env.json as MCP_<NAME>_API_KEY.
   if (req.method === "POST" && url.pathname === "/mcp/auth") {
     let body = "";
     req.on("data", c => body += c);
@@ -211,7 +205,6 @@ export function handleMcpRoutes(req, res, url) {
     return true;
   }
 
-  // Interactive OAuth for MCP is deferred (no Discord browser OAuth UX yet).
   if (req.method === "POST" && url.pathname === "/mcp/oauth") {
     res.writeHead(501, { "content-type": "application/json" });
     res.end(JSON.stringify({

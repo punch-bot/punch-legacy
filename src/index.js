@@ -1,7 +1,3 @@
-// Punch Nightly bootstrap. Thin entrypoint — all real logic lives in
-// src/core, src/chat, src/commands, src/gateway, and the top-level
-// module files this imports.
-
 import "dotenv/config";
 import { REST, Routes, Events } from "discord.js";
 import * as sandbox from "./sandbox-manager.js";
@@ -23,8 +19,6 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-// Keep the bot available when memory needs repair. A failed import disables
-// memory reads/writes; it never substitutes an empty writable store.
 const memoryStatus = initializeMemory({ strict: false });
 if (!memoryStatus.available) console.error(`${memoryStatus.error} Memory is disabled; inspect /doctor and restore the source/backup before retrying.`);
 
@@ -39,7 +33,6 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`punch online as ${c.user.tag}`);
   reloadSandboxMap();
 
-  // Photon / Spectrum: auto-start when SPECTRUM_* is configured (same process as Discord).
   try {
     const { startSpectrumAlongsideBot } = await import("./spectrum/boot.js");
     registry.spectrumHandle = await startSpectrumAlongsideBot();
@@ -47,7 +40,6 @@ client.once(Events.ClientReady, async (c) => {
       registry.spectrumSignalsBound = true;
       for (const signal of ["SIGINT", "SIGTERM"]) {
         process.on(signal, () => {
-          // Discord owns process lifetime; only sync-stop Spectrum here.
           void shutdownSpectrum(signal);
         });
       }
@@ -59,7 +51,6 @@ client.once(Events.ClientReady, async (c) => {
     );
   }
 
-  // Boot all dynamic sandboxes on startup
   for (const u of sandbox.loadUsers()) {
     const up = await sandbox.composeUp(u.name);
     if (up.ok) {
@@ -72,8 +63,6 @@ client.once(Events.ClientReady, async (c) => {
   const slashCmd = buildSlashCommands();
   try {
     const rest = new REST({ version: "10" }).setToken(TOKEN);
-    // Guild-only registration updates instantly (global can lag ~1h). Clear global
-    // copies so Discord does not show each command twice.
     await rest.put(Routes.applicationCommands(c.user.id), { body: [] });
     for (const g of c.guilds.cache.values()) {
       await rest.put(Routes.applicationGuildCommands(c.user.id, g.id), { body: slashCmd });

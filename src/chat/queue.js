@@ -1,6 +1,3 @@
-// Per-user FIFO chat queue. All runAgent calls for a user are serialized so the
-// shared Pi gateway (chat + routines/heartbeat) never sees concurrent turns.
-
 import { writeFileSync } from "node:fs";
 import { sandboxNameForUser } from "../agent.js";
 import { registry } from "../core/registry.js";
@@ -28,8 +25,6 @@ async function withUserRunLock(uid, fn) {
 async function enqueueChat(message, text, contextMessages = [], opts = {}) {
   const uid = opts.userId ?? message.author.id;
 
-  // A message sent while a turn is running in this channel steers that turn
-  // instead of queueing behind it.
   if (shouldSteerTurn(uid, message, opts)) {
     const steered = await trySteerTurn(message, text, opts);
     if (steered) return;
@@ -62,7 +57,6 @@ async function enqueueChat(message, text, contextMessages = [], opts = {}) {
   console.log(`[queue] uid=${uid} enqueue depth=${depth}`);
 
   if (depth > 1) {
-    // N = how many requests are ahead (in-flight + earlier queued).
     const ahead = depth - 1;
     task.thinking = await message
       .reply({
@@ -72,7 +66,6 @@ async function enqueueChat(message, text, contextMessages = [], opts = {}) {
       .catch(() => null);
   }
 
-  // Ensure a single FIFO drain is running (or will re-check after the current one).
   void processQueue(uid);
 
   await queuedPromise;
@@ -83,8 +76,6 @@ async function processQueue(uid) {
   registry.userQueueDraining.add(uid);
 
   try {
-    // Drain FIFO one turn at a time. Chat holds the queue slot for the full
-    // handleChat; withUserRunLock inside still serializes with routines/heartbeat.
     for (;;) {
       const queue = registry.userQueues.get(uid);
       if (!queue || queue.length === 0) break;
@@ -109,7 +100,6 @@ async function processQueue(uid) {
     }
   } finally {
     registry.userQueueDraining.delete(uid);
-    // Sync section: if something enqueued after the loop emptied, restart drain.
     const queue = registry.userQueues.get(uid);
     if (queue && queue.length > 0) {
       void processQueue(uid);
@@ -127,8 +117,6 @@ function setCurrentUserId(uid) {
   }
 }
 
-// Returns the attribution subtext for a punch reply, e.g. "\n\n-# from sandbox:ember".
-// Applied at the OUTPUT layer so it survives message chunking and pigeon routing.
 function labelLineFor(userId) {
   const name = sandboxNameForUser(userId);
   return name ? `\n\n-# from sandbox:${name}` : "";

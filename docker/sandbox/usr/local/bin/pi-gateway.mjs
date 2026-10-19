@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-// Punch: HTTP adapter on :4096 backed by `pi --mode rpc`.
-// Speaks the session/message/SSE subset the Discord bot already uses.
-// Subset used by the Discord bot: session, message, event SSE, summarize, abort, file.
-
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -80,12 +76,6 @@ function parseModel(m) {
   return { provider: s.slice(0, i), modelId: s.slice(i + 1) };
 }
 
-/**
- * set_model plus the user's reasoning level for a turn.
- * Throws if Pi can't select the model: on failure Pi keeps the session's
- * previous model, and the turn would run on it without telling the user.
- * Reasoning-level failures are only logged.
- */
 async function selectTurnModel(providerID, modelID, thinkingLevel) {
   let model;
   try {
@@ -113,11 +103,6 @@ function readPiSettings(file) {
   }
 }
 
-/**
- * Set `requested` on the active `model` only if Pi lists it for that model;
- * otherwise Pi's default (Pi would clamp to a neighbouring level instead).
- * Runs every turn, so no earlier turn's or session's level lingers.
- */
 async function applyThinkingLevel(requested, model) {
   let supported = null;
   if (normalizeThinkingLevel(requested)) {
@@ -168,7 +153,6 @@ function hashStr(s) {
 }
 
 function extensionArgs() {
-  // Prefer project-local extensions; skip opt copies with the same basename.
   let disabled = {};
   try { disabled = JSON.parse(readFileSync(EXT_DISABLED_FILE, "utf8")); } catch {}
   const args = [];
@@ -190,8 +174,6 @@ function extensionArgs() {
   return args;
 }
 
-// --- Pi RPC child ----------------------------------------------------------
-
 let child = null;
 let stdoutBuf = "";
 let ready = false;
@@ -200,8 +182,6 @@ const pending = new Map();
 const sseClients = new Set();
 const eventWaiters = new Set();
 const reportProgressCalls = new Set();
-// Pi RPC has one active agent. Hold session switching and complete prompt lifecycles
-// in a FIFO so a second Discord turn cannot collide with an in-flight Pi turn.
 let turnChain = Promise.resolve();
 function enqueueTurn(work) {
   const previous = turnChain;
@@ -210,7 +190,6 @@ function enqueueTurn(work) {
   turnChain = previous.catch(() => {}).then(() => gate);
   return previous.catch(() => {}).then(work).finally(release);
 }
-/** @type {Map<string, { id: string, sessionFile: string|null, systemHash: string|null, messages: any[] }>} */
 const sessions = new Map();
 const turnProgress = new Map();
 let activeLogicalId = null;
@@ -268,9 +247,7 @@ function loadSessionMap() {
       });
     }
     if (sessions.size) log(`restored ${sessions.size} session map entr(ies)`);
-  } catch {
-    // first boot or corrupt — start empty
-  }
+  } catch {}
 }
 
 function persistSessionMap() {
@@ -381,7 +358,6 @@ function startPi() {
     child = null;
     clearPiWaiters(new Error("pi exited"));
     if (activeLogicalId) finishTurnProgress(activeLogicalId, "error");
-    // Unknown / bad provider exits immediately — fall back so health/session work.
     if (
       code &&
       code !== 0 &&
@@ -428,7 +404,6 @@ function dispatchPi(msg) {
     if (msg.success === false) {
       p.reject(new Error(msg.error || `${msg.command} failed`));
     } else {
-      // Any successful RPC proves the process is up (Pi may omit the ready frame).
       ready = true;
       p.resolve(msg);
     }
@@ -478,13 +453,10 @@ async function waitReady(ms = 45000) {
     if (child?.stdin?.writable) {
       try {
         await rpc("get_state", {}, 4000);
-        // dispatchPi sets ready on success; belt-and-suspenders:
         ready = true;
         log("pi ready (via get_state)");
         return;
-      } catch {
-        // keep trying until timeout
-      }
+      } catch {}
     }
     await new Promise((r) => setTimeout(r, 150));
   }
@@ -530,7 +502,6 @@ function extractTextFromParts(parts) {
     .join("");
 }
 
-/** Attachments (data URLs) for bot collectTurnMedia. */
 function attachmentsFromToolResult(result) {
   const out = [];
   const content = result?.content;
@@ -545,7 +516,6 @@ function attachmentsFromToolResult(result) {
   return out;
 }
 
-/** Compact private tool output for the final-response fallback; omit image data. */
 function textOutputFromToolResult(result) {
   if (typeof result === "string") return result;
   if (Array.isArray(result?.content)) {
@@ -715,12 +685,6 @@ function broadcastSse(ocEvent) {
   }
 }
 
-/**
- * Wait until agent_settled after a prompt.
- * Caller must register this BEFORE rpc("prompt") so settled cannot be missed.
- * Other lifecycle events are not terminal: Pi can report idle between tool calls.
- * Returns a promise with .cancel(err) to detach early on prompt failure.
- */
 function waitTurn(signal) {
   let cancel = () => {};
   const promise = new Promise((resolveP, rejectP) => {
@@ -749,7 +713,6 @@ function waitTurn(signal) {
       }
     };
 
-    // Attach waiter first — before any await — so events during prompt are caught.
     eventWaiters.add(onEvent);
     if (signal) {
       if (signal.aborted) onAbort();
@@ -771,7 +734,6 @@ function safePath(p) {
   return abs;
 }
 
-/** Register turn waiter, then prompt — avoids missing agent_settled. */
 async function promptAndWait(promptText, signal) {
   if (signal?.aborted) {
     throw Object.assign(new Error("aborted"), { name: "AbortError" });
@@ -780,7 +742,6 @@ async function promptAndWait(promptText, signal) {
   let lastPiEventAt = Date.now();
   const onPiActivity = (msg) => {
     if (!msg?.type) return;
-    // RPC responses and agent lifecycle both prove Pi is alive.
     lastPiEventAt = Date.now();
   };
   eventWaiters.add(onPiActivity);
@@ -800,8 +761,6 @@ async function promptAndWait(promptText, signal) {
       }
     }, 5_000);
   });
-  // One finally for both steps: a failed prompt (e.g. no API key) must clear
-  // the timers too, or turnIdle rejects unhandled later and kills the gateway.
   try {
     try {
       await rpc("prompt", { message: promptText, streamingBehavior: "followUp" }, 60000);
@@ -825,8 +784,6 @@ async function promptAndWait(promptText, signal) {
     eventWaiters.delete(onPiActivity);
   }
 }
-
-// --- HTTP ------------------------------------------------------------------
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -855,7 +812,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // Pi's models with a configured key; the supervisor checks /model against it.
     if (req.method === "GET" && url.pathname === "/models") {
       await waitReady();
       const models = (await rpc("get_available_models", {}, 15000)).data?.models || [];
@@ -950,7 +906,6 @@ const server = createServer(async (req, res) => {
                 parts: text ? [{ type: "text", text }] : [],
               };
             });
-            // Append cached tool parts from this gateway turn for media scrape
             const withTools = mapped.concat(
               s.messages.filter((m) =>
                 (m.parts || []).some((p) => p.type === "tool"),
@@ -971,9 +926,6 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      // Inject a steering message into the in-flight turn. Deliberately
-      // bypasses enqueueTurn — steering only works mid-turn, so a finished
-      // or foreign session is a conflict and the caller queues instead.
       if (req.method === "POST" && action === "steer") {
         const body = await readBody(req).catch(() => ({}));
         const textPart = (body.parts || []).find((p) => p.type === "text");
@@ -1008,7 +960,6 @@ const server = createServer(async (req, res) => {
       if (req.method === "POST" && action === "summarize") {
         const body = await readBody(req).catch(() => ({}));
         await enqueueTurn(async () => {
-          // Recreate mapping after gateway restart (same as message path)
           if (!sessions.has(sid)) {
             sessions.set(sid, {
               id: sid,
@@ -1061,8 +1012,6 @@ const server = createServer(async (req, res) => {
               }
 
               const promptText = buildUserPrompt(session, userText, system);
-              // Drop tool stubs from prior turns so collectTurnMedia only
-              // sees attachments generated by *this* turn.
               session.messages = session.messages.filter(
                 (m) => !(m.parts || []).some((p) => p.type === "tool"),
               );
@@ -1078,7 +1027,6 @@ const server = createServer(async (req, res) => {
               finishTurnProgress(sid, assistant.info.error ? "error" : "completed");
               assistant.info.activity = turnActivity(sid);
               session.messages.push(assistant);
-              // Keep recent tool stubs for post-turn media scrape; bound growth
               trimToolStubs(session);
 
               if (action === "prompt_async") json(res, 200, { ok: true });

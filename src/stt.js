@@ -1,23 +1,14 @@
-/**
- * Speech-to-text for Discord voice memos.
- *
- * Voice memos are transcribed (OpenAI-compatible /audio/transcriptions) and
- * the transcript is treated as the user's chat text.
- */
-
 import { getEnv, apiUrlFor } from "./agent.js";
 
-const IS_VOICE_MESSAGE = 1 << 13; // discord.js MessageFlags.IsVoiceMessage
+const IS_VOICE_MESSAGE = 1 << 13;
 const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 const DEFAULT_OPENAI_MODEL = "whisper-1";
-/** Groq free-tier Whisper; OpenAI-compatible /audio/transcriptions. */
 const DEFAULT_GROQ_MODEL = "whisper-large-v3-turbo";
 const DEFAULT_BASE_URL = DEFAULT_OPENAI_BASE_URL;
 const DEFAULT_MODEL = DEFAULT_OPENAI_MODEL;
 const MAX_VOICE_BYTES = (Number(process.env.STT_MAX_BYTES) || 25) * 1024 * 1024;
 
-/** Safe user-facing copy — never include provider response bodies. */
 export const STT_USER_ERROR_NO_KEY =
   "Voice memos need an STT API key. Free option: set `GROQ_API_KEY` on the bot " +
   "(or `/apikey set groq <key>`). Paid: `STT_API_KEY` / `OPENAI_API_KEY`.";
@@ -26,7 +17,6 @@ export const STT_USER_ERROR_TOO_LARGE = (maxMb) =>
 export const STT_USER_ERROR_GENERIC =
   "Couldn't transcribe that voice memo. Please try again.";
 
-/** Remove a queued/progress Discord message (e.g. after !stop during STT). */
 export async function discardThinkingMessage(msg) {
   if (!msg || typeof msg.delete !== "function") return false;
   await msg.delete().catch(() => {});
@@ -52,9 +42,7 @@ function flagHas(message, bit) {
   if (typeof flags.has === "function") {
     try {
       return !!flags.has(bit);
-    } catch {
-      /* fall through */
-    }
+    } catch {}
   }
   const bits = Number(flags.bitfield ?? flags);
   return Number.isFinite(bits) && (bits & bit) === bit;
@@ -67,22 +55,15 @@ function isAudioAttachment(att) {
   return /\.(ogg|opus|mp3|wav|m4a|webm|flac)$/.test(name);
 }
 
-/** True when this Discord message is (or contains) a voice memo. */
 export function isVoiceMessage(message) {
   if (flagHas(message, IS_VOICE_MESSAGE)) return true;
   return findVoiceAttachments(message).length > 0;
 }
 
-/**
- * Voice-memo attachments on a message.
- * Prefers Discord voice-message metadata (waveform/duration); if the message
- * has the IsVoiceMessage flag, any audio attachment counts.
- */
 export function findVoiceAttachments(message) {
   const items = message?.attachments ? [...message.attachments.values()] : [];
   const flagged = flagHas(message, IS_VOICE_MESSAGE);
   return items.filter((att) => {
-    // Discord voice memos always carry duration/waveform metadata.
     if (att?.waveform != null || att?.duration != null) return true;
     if (flagged && isAudioAttachment(att)) return true;
     return false;
@@ -97,10 +78,6 @@ export function mergeTranscriptIntoText(existingText, transcript) {
   return `${spoken}\n\n${text}`;
 }
 
-/**
- * Whether MessageCreate should accept this turn without an explicit @mention.
- * DMs and mentions always pass; guild voice memos need a reply to Punch (or summon).
- */
 export function shouldAcceptChatTurn({
   isDM = false,
   mentioned = false,
@@ -115,16 +92,6 @@ export function shouldAcceptChatTurn({
   return false;
 }
 
-/**
- * Resolve OpenAI-compatible STT settings (`/audio/transcriptions`).
- *
- * Credential priority (bot env, then sandbox env):
- *   STT_API_KEY → GROQ_API_KEY → OPENAI_API_KEY
- *
- * `GROQ_API_KEY` is the recommended free path (Groq Whisper free tier).
- * Endpoint (`STT_BASE_URL`) is always operator-controlled (bot env only) so
- * sandboxes cannot redirect bot-side HTTP (SSRF / key exfil).
- */
 export function resolveSttConfig({ env = process.env, sandboxEnv = {} } = {}) {
   const botRaw = pickSttCredential(env);
   const sandboxRaw = pickSttCredential(sandboxEnv);
@@ -218,10 +185,6 @@ export async function transcribeAudioBuffer({
   return text;
 }
 
-/**
- * Transcribe the first voice memo on a Discord message.
- * @returns {{ ok: boolean, skipped?: boolean, aborted?: boolean, text?: string|null, error?: string|null, userError?: string|null }}
- */
 export async function transcribeVoiceMessage(message, {
   resolveConfig,
   fetchImpl = fetch,
@@ -299,7 +262,6 @@ export async function transcribeVoiceMessage(message, {
   }
 }
 
-/** Resolve STT config with per-sandbox env merged over bot env. */
 export async function resolveSttConfigForUser(userId) {
   let sandboxEnv = {};
   try {

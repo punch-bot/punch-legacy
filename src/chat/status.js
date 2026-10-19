@@ -1,5 +1,3 @@
-// Status text for the active main turn and running /workers.
-
 import { apiUrlFor } from "../agent.js";
 import { supervisorAuth } from "../core/config.js";
 import { registry } from "../core/registry.js";

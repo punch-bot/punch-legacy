@@ -1,6 +1,3 @@
-// Slash command definitions (static Discord application command JSON).
-// Registered per-guild on ClientReady; see core/boot.js for registration.
-
 import * as settings from "../settings.js";
 
 export function buildSlashCommands() {

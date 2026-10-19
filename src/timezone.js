@@ -11,7 +11,6 @@ export function normalizeTimeZone(value) {
   }
 }
 
-/** Chrono-style UTC offset in minutes (EDT => -240). */
 export function getTimeZoneOffsetMinutes(timeZone, date = new Date()) {
   const normalized = normalizeTimeZone(timeZone);
   const formatter = new Intl.DateTimeFormat("en-US", {
@@ -83,15 +82,6 @@ function wallFieldsMatch(parts, year, month, day, hour, minute, second) {
   );
 }
 
-/**
- * Convert a wall-clock local datetime in an IANA zone to a UTC epoch ms.
- *
- * Policy:
- * - Nonexistent times in a DST spring-forward gap throw.
- * - Ambiguous times in a fall-back overlap resolve to the earlier UTC instant
- *   (still on the pre-transition offset when both exist). Offset deltas are
- *   discovered from the zone (not assumed to be 60 minutes).
- */
 export function zonedWallTimeToUtc(
   { year, month, day, hour = 0, minute = 0, second = 0 },
   timeZone = DEFAULT_TIME_ZONE,
