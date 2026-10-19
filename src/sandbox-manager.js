@@ -139,7 +139,6 @@ function userEnvArgs(name) {
     "--env", `PI_MODEL=${process.env.PI_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
     "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
-    "--env", `PUNCH_BOT_URL=${process.env.PUNCH_BOT_URL || "http://bot:4098"}`,
   ];
 }
 
