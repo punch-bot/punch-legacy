@@ -6,6 +6,12 @@ const FIELD_LIMITS = Object.freeze({ goal: 200, finding: 300, next: 200 });
 const MAX_RECAP_ACTIONS = 5;
 const MAX_RECAP_MILESTONES = 3;
 const MAX_DISCORD_CONTENT = 1900;
+const MAX_TODOS = 50;
+const TODO_TEXT_LIMIT = 200;
+const MAX_VISIBLE_TODOS = 15;
+const TODOS_BEFORE_CURRENT = 3;
+const MAX_EMBED_DESCRIPTION = 4096;
+const PLAN_COLOR = 0x5865f2;
 
 const PHASE_LABELS = Object.freeze({
   starting: "Starting",
@@ -102,6 +108,24 @@ function addAction(actions, value) {
   return [...actions, action].slice(-12);
 }
 
+function count(value, min, max, fallback) {
+  return Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
+function safeTodos(value) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.items)) return null;
+  const items = [];
+  for (const todo of value.items.slice(0, MAX_TODOS)) {
+    const text = sanitizeProgressText(todo?.text, TODO_TEXT_LIMIT);
+    if (text) items.push({ text, done: todo?.done === true });
+  }
+  const visibleDone = items.filter((todo) => todo.done).length;
+  const offset = count(value.offset, 0, Number.MAX_SAFE_INTEGER, 0);
+  const total = count(value.total, offset + items.length, Number.MAX_SAFE_INTEGER, offset + items.length);
+  const done = count(value.done, visibleDone, total - items.length + visibleDone, visibleDone);
+  return { items, offset, done, total };
+}
+
 export function createProgressState(startedAt = Date.now()) {
   return {
     startedAt,
@@ -116,6 +140,7 @@ export function createProgressState(startedAt = Date.now()) {
     next: "",
     actions: [],
     milestones: [],
+    todos: null,
     legacyToolIds: [],
     source: "none",
   };
@@ -136,6 +161,7 @@ function reduceGatewayProgress(state, properties) {
     thinkingMs: Math.max(state.thinkingMs, number(properties.thinkingMs)),
     toolCalls: Math.max(state.toolCalls, Math.floor(number(properties.toolCalls))),
     milestones: addMilestone(state.milestones, milestone),
+    todos: safeTodos(properties.todos) ?? state.todos,
   };
   for (const field of Object.keys(FIELD_LIMITS)) {
     if (milestone[field]) next[field] = milestone[field];
@@ -228,6 +254,7 @@ export function applyProgressActivity(state, activity) {
     toolCalls: Math.floor(number(activity.toolCalls, state.toolCalls)),
     actions,
     milestones,
+    todos: safeTodos(activity.todos) ?? state.todos,
     goal: latest.goal || state.goal,
     finding: latest.finding || state.finding,
     next: latest.next || state.next,
@@ -278,6 +305,57 @@ export function renderProgressLive(state, now = Date.now()) {
   return lines.join("\n").slice(0, MAX_DISCORD_CONTENT);
 }
 
+function todoWindow(todos) {
+  const current = todos.findIndex((todo) => !todo.done);
+  const anchor = current === -1 ? todos.length : current;
+  const start = Math.max(0, Math.min(anchor - TODOS_BEFORE_CURRENT, todos.length - MAX_VISIBLE_TODOS));
+  return { current, start, end: Math.min(todos.length, start + MAX_VISIBLE_TODOS) };
+}
+
+function todoDescription(plan) {
+  const { current, start, end } = todoWindow(plan.items);
+  const earlier = plan.offset + start;
+  const lines = plan.items.slice(start, end).map((todo, offset) => {
+    const icon = todo.done ? "✅" : start + offset === current ? "▶️" : "⬜";
+    return `${icon} ${escapeStrayMarkdown(sanitizeProgressText(todo.text, TODO_TEXT_LIMIT))}`;
+  });
+  const describe = (visible) => {
+    const hidden = plan.total - earlier - visible.length;
+    return [
+      ...(earlier ? [`*${earlier} earlier task${earlier === 1 ? "" : "s"} done*`] : []),
+      ...visible,
+      ...(hidden ? [`*${hidden} more task${hidden === 1 ? "" : "s"}*`] : []),
+    ].join("\n");
+  };
+  let description = describe(lines);
+  while (description.length > MAX_EMBED_DESCRIPTION && lines.length > 1) {
+    lines.pop();
+    description = describe(lines);
+  }
+  return description.slice(0, MAX_EMBED_DESCRIPTION);
+}
+
+export function renderProgressEmbed(state) {
+  const plan = state.todos;
+  if (!plan?.total) return null;
+  return {
+    title: `📋 Plan · ${plan.done}/${plan.total} done`,
+    description: todoDescription(plan),
+    color: PLAN_COLOR,
+  };
+}
+
+function progressEmbeds(state) {
+  const embed = renderProgressEmbed(state);
+  return embed ? [embed] : [];
+}
+
+function recapEmbeds(state, replyEmbeds) {
+  const embeds = Array.isArray(replyEmbeds) ? replyEmbeds : [];
+  if (state.status === "completed" || embeds.length) return embeds;
+  return progressEmbeds(state);
+}
+
 function appendWithin(lines, line) {
   const candidate = [...lines, line].join("\n");
   if (candidate.length <= MAX_DISCORD_CONTENT) lines.push(line);
@@ -289,6 +367,7 @@ export function renderProgressRecap(state, result = "") {
     `🔨 ${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"} used`,
     `💭 ${formatProgressDuration(state.elapsedMs)}`,
   ];
+  if (state.todos?.total) stats.push(`📋 ${state.todos.done}/${state.todos.total} tasks done`);
   const resultText = String(result || "").trim();
 
   if (status === "completed") {
@@ -386,7 +465,7 @@ export function createProgressRenderer({
 
     const editRevision = revision;
     inFlight = true;
-    void performEdit({ content: renderProgressLive(state, time) }).finally(() => {
+    void performEdit({ content: renderProgressLive(state, time), embeds: progressEmbeds(state) }).finally(() => {
       inFlight = false;
       lastEditAt = now();
       renderedRevision = Math.max(renderedRevision, editRevision);
@@ -420,7 +499,8 @@ export function createProgressRenderer({
         const recapLimit = Math.max(0, MAX_DISCORD_CONTENT - suffix.length);
         const primary = recapLimit ? truncateMarkdown(recap, recapLimit) : "";
         const content = primary.trimEnd() + suffix;
-        finalRequest = { options: { ...options, content }, resolve };
+        const embeds = recapEmbeds(state, options.embeds);
+        finalRequest = { options: { ...options, content, embeds }, resolve };
         pump();
       });
       return finalPromise;

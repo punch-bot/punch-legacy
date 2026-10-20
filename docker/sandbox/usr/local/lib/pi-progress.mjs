@@ -1,10 +1,14 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const REPORT_PROGRESS_TOOL = "report_progress";
+const TODO_TOOL = "todo";
 const WORKSPACE = resolve(process.env.PI_REMOTE_DIR || "/work");
 const MAX_ACTIONS = 12;
 const MAX_MILESTONES = 6;
 const MAX_ACTION_LENGTH = 140;
+const MAX_TODOS = 50;
+const MAX_TODO_LENGTH = 200;
+const TODOS_BEFORE_CURRENT = 3;
 const HEARTBEAT_MS = 15_000;
 const PUBLIC_FIELD_LIMITS = Object.freeze({
   goal: 200,
@@ -20,6 +24,7 @@ const TOOL_ACTIONS = Object.freeze({
   grep: "Searching file contents",
   find: "Finding files",
   glob: "Finding files",
+  todo: "Updating the plan",
   webfetch: "Fetching a web page",
   puppeteer_navigate: "Opening a web page",
   puppeteer_screenshot: "Taking a screenshot",
@@ -153,6 +158,29 @@ export function sanitizePublicIntent(args) {
   return intent;
 }
 
+function sanitizeTodos(details) {
+  if (!Array.isArray(details?.todos)) return null;
+  const todos = [];
+  for (const todo of details.todos) {
+    const text = neutralizePublicText(todo?.text, MAX_TODO_LENGTH);
+    if (text) todos.push({ text, done: todo?.done === true });
+  }
+  const current = todos.findIndex((todo) => !todo.done);
+  const anchor = current === -1 ? todos.length : current;
+  const offset = Math.max(0, Math.min(anchor - TODOS_BEFORE_CURRENT, todos.length - MAX_TODOS));
+  return {
+    items: todos.slice(offset, offset + MAX_TODOS),
+    offset,
+    done: todos.filter((todo) => todo.done).length,
+    total: todos.length,
+  };
+}
+
+function todosFromToolEnd(event) {
+  if (toolName(event) !== TODO_TOOL || event?.isError) return null;
+  return sanitizeTodos(event?.result?.details);
+}
+
 export function isReportProgressTool(event) {
   return toolName(event) === REPORT_PROGRESS_TOOL;
 }
@@ -227,6 +255,7 @@ export function createProgressState(startedAt) {
     seenActions: new Set(),
     milestones: [],
     seenMilestones: new Set(),
+    todos: null,
   };
 }
 
@@ -252,6 +281,7 @@ function snapshot(state, now, extra = {}) {
     elapsedMs: Math.max(0, end - state.startedAt),
     thinkingMs: state.thinkingMs + activeThinking,
     toolCalls: state.toolCalls,
+    ...(state.todos ? { todos: state.todos } : {}),
     ...extra,
   };
 }
@@ -364,6 +394,7 @@ export function reduceProgress(state, event, now) {
     const action = id ? state.toolActions.get(`id:${id}`) : null;
     const next = {
       ...state,
+      todos: todosFromToolEnd(event) ?? state.todos,
       phase: "working",
       current: event.isError
         ? `${action || "Tool action"} failed`
@@ -462,6 +493,9 @@ export function activityFromProgress(state, now) {
     current: data.current,
     actions: [...state.actions],
     milestones: state.milestones.map((milestone) => ({ ...milestone })),
+    ...(state.todos
+      ? { todos: { ...state.todos, items: state.todos.items.map((todo) => ({ ...todo })) } }
+      : {}),
   };
 }
 
