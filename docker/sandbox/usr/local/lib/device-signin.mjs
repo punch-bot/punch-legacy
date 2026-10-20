@@ -16,12 +16,20 @@ async function chooseDeviceCode(prompt) {
 export function createDeviceSignin({ login, save, now = Date.now }) {
   let flow = null;
 
+  function expireStaleCode() {
+    if (flow?.status !== "pending" || now() < flow.expiresAt) return;
+    flow.controller.abort();
+    Object.assign(flow, { status: "error", error: "The sign-in code expired." });
+  }
+
   function start() {
+    expireStaleCode();
+    if (flow?.status === "starting") return flow.started;
     if (flow?.status === "pending") return Promise.resolve(view(flow));
     const controller = new AbortController();
     const current = { status: "starting", controller };
     flow = current;
-    return new Promise((resolve) => {
+    current.started = new Promise((resolve) => {
       const settle = (patch) => {
         Object.assign(current, patch);
         resolve(view(current));
@@ -46,11 +54,18 @@ export function createDeviceSignin({ login, save, now = Date.now }) {
           settle({ status: "success" });
         })
         .catch((error) => {
+          if (current.status === "error") return resolve(view(current));
           settle(controller.signal.aborted
             ? { status: "cancelled" }
             : { status: "error", error: error?.message || String(error) });
         });
     });
+    return current.started;
+  }
+
+  function status() {
+    expireStaleCode();
+    return view(flow);
   }
 
   function cancel() {
@@ -58,5 +73,5 @@ export function createDeviceSignin({ login, save, now = Date.now }) {
     flow = null;
   }
 
-  return { start, status: () => view(flow), cancel };
+  return { start, status, cancel };
 }

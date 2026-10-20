@@ -1,28 +1,30 @@
 import { createDeviceSignin } from "/usr/local/lib/device-signin.mjs";
-import { AUTH_FILE, loadJSON, log, saveJSON } from "./state.mjs";
+import { AUTH_FILE, loadJSON, log } from "./state.mjs";
 import { forceRestart } from "./gateway.mjs";
 
 const CODEX_PROVIDER_ID = "openai-codex";
 const CODEX_PROVIDER_MODULE = "/opt/pi/node_modules/@punch-bot/ai/dist/providers/openai-codex.js";
+const PI_AUTH_STORAGE_MODULE = "/opt/pi/node_modules/@punch-bot/cli/dist/core/auth-storage.js";
 
 async function codexLogin(interaction) {
   const { openaiCodexProvider } = await import(CODEX_PROVIDER_MODULE);
   return openaiCodexProvider().auth.oauth.login(interaction);
 }
 
-function saveCodexCredential(credential) {
-  const auth = loadJSON(AUTH_FILE);
-  auth[CODEX_PROVIDER_ID] = credential;
-  saveJSON(AUTH_FILE, auth);
+async function piAuthStorage() {
+  const { AuthStorage } = await import(PI_AUTH_STORAGE_MODULE);
+  return AuthStorage.create(AUTH_FILE);
+}
+
+async function saveCodexCredential(credential) {
+  await (await piAuthStorage()).modify(CODEX_PROVIDER_ID, async () => credential);
   log("chatgpt sign-in saved");
   forceRestart();
 }
 
-function removeCodexCredential() {
-  const auth = loadJSON(AUTH_FILE);
-  if (!auth[CODEX_PROVIDER_ID]) return false;
-  delete auth[CODEX_PROVIDER_ID];
-  saveJSON(AUTH_FILE, auth);
+async function removeCodexCredential() {
+  if (!loadJSON(AUTH_FILE)[CODEX_PROVIDER_ID]) return false;
+  await (await piAuthStorage()).delete(CODEX_PROVIDER_ID);
   log("chatgpt signed out");
   forceRestart();
   return true;
@@ -55,7 +57,12 @@ export function handleChatgptRoutes(req, res, url) {
 
   if (req.method === "DELETE" && url.pathname === "/chatgpt") {
     signin.cancel();
-    reply(res, 200, { success: true, removed: removeCodexCredential() });
+    removeCodexCredential()
+      .then((removed) => reply(res, 200, { success: true, removed }))
+      .catch((error) => {
+        log("chatgpt sign-out:", error.message);
+        reply(res, 500, { error: error.message });
+      });
     return true;
   }
 
