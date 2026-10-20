@@ -85,7 +85,7 @@ function providerCheck({ currentModel, authFile, providerEnvMap }) {
   const provider = String(currentModel || "").split("/")[0] || "unknown";
   const auth = readJson(authFile);
   const envName = providerEnvMap[provider];
-  const configured = Boolean(auth[provider]?.key || (envName && process.env[envName]) || (provider === "google" && process.env.GEMINI_API_KEY));
+  const configured = Boolean(auth[provider]?.key || auth[provider]?.refresh || (envName && process.env[envName]) || (provider === "google" && process.env.GEMINI_API_KEY));
   return result(
     "provider",
     configured ? "pass" : "warn",
@@ -94,7 +94,7 @@ function providerCheck({ currentModel, authFile, providerEnvMap }) {
       ? `${provider} credentials are configured for ${currentModel}.`
       : `${provider} credentials were not found for ${currentModel}.`,
     startedAt,
-    configured ? undefined : "Configure the provider with /apikey or /env.",
+    configured ? undefined : provider === "openai-codex" ? "Sign in with /chatgpt signin." : "Configure the provider with /apikey or /env.",
   );
 }
 

@@ -155,7 +155,7 @@ export function handleProviderRoutes(req, res, url) {
     const auth = loadJSON(AUTH_FILE);
     const configured = [];
     for (const [provider, entry] of Object.entries(auth)) {
-      if (entry?.type === "api_key" && entry?.key) configured.push(provider);
+      if ((entry?.type === "api_key" && entry?.key) || (entry?.type === "oauth" && entry?.refresh)) configured.push(provider);
     }
     const authEnvVars = new Set(
       configured.map((p) => `${p.toUpperCase().replace(/-/g, "_")}_API_KEY`),

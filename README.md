@@ -45,7 +45,7 @@ Spectrum ─▶ [ npm run start:spectrum ] ──HTTP──▶ same sandbox pi-g
 2. Optional iMessage/Spectrum: set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` in `.env` — Spectrum starts with the bot; unknown numbers pair via `/pair` (see [docs/spectrum.md](docs/spectrum.md))
 3. `docker compose up --build -d`
 4. Discord: `/sandbox create <name>`
-5. `/apikey set anthropic <key>` (or another provider) then mention the bot (or text Punch after `/pair`)
+5. `/apikey set anthropic <key>` (or another provider), or `/chatgpt signin` to use a ChatGPT Plus/Pro subscription with a one-time code, then mention the bot (or text Punch after `/pair`)
 
 Host **4098** = bot HTTP API. Sandboxes run a headless Chromium (Playwright) for the built-in browser tools; screenshots attach to Discord automatically.
 

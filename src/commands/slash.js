@@ -119,6 +119,13 @@ export function buildSlashCommands() {
       { type: 3, name: "key", description: "API key (omit to remove the key)" },
     ],
   }, {
+    name: "chatgpt",
+    description: "Use your ChatGPT Plus/Pro subscription as your sandbox's AI provider",
+    options: [
+      { type: 1, name: "signin", description: "Sign in with ChatGPT using a one-time code" },
+      { type: 1, name: "signout", description: "Sign out of ChatGPT in your sandbox" },
+    ],
+  }, {
     name: "trigger",
     description: "Set a personal trigger word so Punch responds when you say it",
     options: [

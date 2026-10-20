@@ -26,6 +26,7 @@ import {
 } from "./supervisor/models.mjs";
 import { handleMcpRoutes, syncMcpConfig } from "./supervisor/mcp.mjs";
 import { handleProviderRoutes } from "./supervisor/providers.mjs";
+import { handleChatgptRoutes } from "./supervisor/chatgpt.mjs";
 import { handleSkillsRoutes } from "./supervisor/skills.mjs";
 import { handleTailscaleRoutes } from "./supervisor/tailscale.mjs";
 import { handleWorkerRoutes } from "./supervisor/workers.mjs";
@@ -111,6 +112,7 @@ const apiServer = createServer(async (req, res) => {
   if (await handleBotProxy(req, res, url)) return;
   if (handleGeneralRoutes(req, res, url)) return;
   if (handleProviderRoutes(req, res, url)) return;
+  if (handleChatgptRoutes(req, res, url)) return;
   if (handleSkillsRoutes(req, res, url)) return;
   if (handleWorkerRoutes(req, res, url)) return;
   if (handleMcpRoutes(req, res, url)) return;
