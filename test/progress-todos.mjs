@@ -27,26 +27,32 @@ test("sandbox keeps the last todo list from successful todo results", () => {
     todos: [{ id: 1, text: "Write tests", done: true }, { id: 2, text: "Ship @everyone", done: false }],
   }), 1);
   state = ok.state;
-  assert.deepEqual(ok.progress[0].todos, [
-    { text: "Write tests", done: true },
-    { text: "Ship \\(at\\)everyone", done: false },
-  ]);
+  assert.deepEqual(ok.progress[0].todos, {
+    items: [
+      { text: "Write tests", done: true },
+      { text: "Ship \\(at\\)everyone", done: false },
+    ],
+    offset: 0,
+    done: 1,
+    total: 2,
+  });
   state = reduceProgress(state, todoEnd("b", {}, true), 2).state;
-  assert.equal(activityFromProgress(state, 3).todos.length, 2);
+  assert.equal(activityFromProgress(state, 3).todos.total, 2);
   assert.equal(activityFromProgress(createSandboxState(0), 1).todos, undefined);
 });
 
 test("bot renders the plan embed live and collapses it on completion", async () => {
-  const todos = Array.from({ length: 40 }, (_, i) => ({ text: `Task ${i + 1}`, done: i < 20 }));
+  const plan = Array.from({ length: 60 }, (_, i) => ({ id: i + 1, text: `Task ${i + 1}`, done: i < 35 }));
+  const { todos } = reduceProgress(createSandboxState(0), todoEnd("a", { todos: plan }), 1).progress[0];
   const state = reduceProgressEvent(createProgressState(0), {
     type: "session.progress",
     properties: { phase: "tool", status: "running", current: "Updating the plan", todos },
   });
   const embed = renderProgressEmbed(state);
-  assert.equal(embed.title, "📋 Plan · 20/40 done");
-  assert.match(embed.description, /^\*17 earlier tasks done\*\n✅ Task 18\n/);
-  assert.match(embed.description, /▶️ Task 21\n⬜ Task 22/);
-  assert.match(embed.description, /\*8 more tasks\*$/);
+  assert.equal(embed.title, "📋 Plan · 35/60 done");
+  assert.match(embed.description, /^\*32 earlier tasks done\*\n✅ Task 33\n/);
+  assert.match(embed.description, /▶️ Task 36\n⬜ Task 37/);
+  assert.match(embed.description, /\*13 more tasks\*$/);
   assert.ok(embed.description.length <= 4096);
   assert.equal(renderProgressEmbed(applyProgressActivity(createProgressState(0), { status: "completed" })), null);
 
@@ -54,5 +60,5 @@ test("bot renders the plan embed live and collapses it on completion", async () 
   const renderer = createProgressRenderer({ initialState: state, edit: (options) => edits.push(options) });
   await renderer.finalize({ status: "completed", todos }, "completed", "Done.");
   assert.deepEqual(edits.at(-1).embeds, []);
-  assert.match(edits.at(-1).content, /📋 20\/40 tasks done/);
+  assert.match(edits.at(-1).content, /📋 35\/60 tasks done/);
 });

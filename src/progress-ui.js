@@ -108,14 +108,22 @@ function addAction(actions, value) {
   return [...actions, action].slice(-12);
 }
 
+function count(value, min, max, fallback) {
+  return Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback;
+}
+
 function safeTodos(value) {
-  if (!Array.isArray(value)) return null;
-  const todos = [];
-  for (const todo of value.slice(0, MAX_TODOS)) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.items)) return null;
+  const items = [];
+  for (const todo of value.items.slice(0, MAX_TODOS)) {
     const text = sanitizeProgressText(todo?.text, TODO_TEXT_LIMIT);
-    if (text) todos.push({ text, done: todo?.done === true });
+    if (text) items.push({ text, done: todo?.done === true });
   }
-  return todos;
+  const visibleDone = items.filter((todo) => todo.done).length;
+  const offset = count(value.offset, 0, Number.MAX_SAFE_INTEGER, 0);
+  const total = count(value.total, offset + items.length, Number.MAX_SAFE_INTEGER, offset + items.length);
+  const done = count(value.done, visibleDone, total - items.length + visibleDone, visibleDone);
+  return { items, offset, done, total };
 }
 
 export function createProgressState(startedAt = Date.now()) {
@@ -132,7 +140,7 @@ export function createProgressState(startedAt = Date.now()) {
     next: "",
     actions: [],
     milestones: [],
-    todos: [],
+    todos: null,
     legacyToolIds: [],
     source: "none",
   };
@@ -304,16 +312,17 @@ function todoWindow(todos) {
   return { current, start, end: Math.min(todos.length, start + MAX_VISIBLE_TODOS) };
 }
 
-function todoDescription(todos) {
-  const { current, start, end } = todoWindow(todos);
-  const lines = todos.slice(start, end).map((todo, offset) => {
+function todoDescription(plan) {
+  const { current, start, end } = todoWindow(plan.items);
+  const earlier = plan.offset + start;
+  const lines = plan.items.slice(start, end).map((todo, offset) => {
     const icon = todo.done ? "✅" : start + offset === current ? "▶️" : "⬜";
     return `${icon} ${escapeStrayMarkdown(sanitizeProgressText(todo.text, TODO_TEXT_LIMIT))}`;
   });
   const describe = (visible) => {
-    const hidden = todos.length - start - visible.length;
+    const hidden = plan.total - earlier - visible.length;
     return [
-      ...(start ? [`*${start} earlier task${start === 1 ? "" : "s"} done*`] : []),
+      ...(earlier ? [`*${earlier} earlier task${earlier === 1 ? "" : "s"} done*`] : []),
       ...visible,
       ...(hidden ? [`*${hidden} more task${hidden === 1 ? "" : "s"}*`] : []),
     ].join("\n");
@@ -326,17 +335,12 @@ function todoDescription(todos) {
   return description.slice(0, MAX_EMBED_DESCRIPTION);
 }
 
-function todoCounts(todos) {
-  return { done: todos.filter((todo) => todo.done).length, total: todos.length };
-}
-
 export function renderProgressEmbed(state) {
-  const todos = state.todos || [];
-  if (!todos.length) return null;
-  const { done, total } = todoCounts(todos);
+  const plan = state.todos;
+  if (!plan?.total) return null;
   return {
-    title: `📋 Plan · ${done}/${total} done`,
-    description: todoDescription(todos),
+    title: `📋 Plan · ${plan.done}/${plan.total} done`,
+    description: todoDescription(plan),
     color: PLAN_COLOR,
   };
 }
@@ -363,10 +367,7 @@ export function renderProgressRecap(state, result = "") {
     `🔨 ${state.toolCalls} tool${state.toolCalls === 1 ? "" : "s"} used`,
     `💭 ${formatProgressDuration(state.elapsedMs)}`,
   ];
-  if (state.todos?.length) {
-    const { done, total } = todoCounts(state.todos);
-    stats.push(`📋 ${done}/${total} tasks done`);
-  }
+  if (state.todos?.total) stats.push(`📋 ${state.todos.done}/${state.todos.total} tasks done`);
   const resultText = String(result || "").trim();
 
   if (status === "completed") {

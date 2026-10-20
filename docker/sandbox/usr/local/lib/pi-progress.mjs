@@ -8,6 +8,7 @@ const MAX_MILESTONES = 6;
 const MAX_ACTION_LENGTH = 140;
 const MAX_TODOS = 50;
 const MAX_TODO_LENGTH = 200;
+const TODOS_BEFORE_CURRENT = 3;
 const HEARTBEAT_MS = 15_000;
 const PUBLIC_FIELD_LIMITS = Object.freeze({
   goal: 200,
@@ -161,11 +162,18 @@ function sanitizeTodos(details) {
   if (!Array.isArray(details?.todos)) return null;
   const todos = [];
   for (const todo of details.todos) {
-    if (todos.length >= MAX_TODOS) break;
     const text = neutralizePublicText(todo?.text, MAX_TODO_LENGTH);
     if (text) todos.push({ text, done: todo?.done === true });
   }
-  return todos;
+  const current = todos.findIndex((todo) => !todo.done);
+  const anchor = current === -1 ? todos.length : current;
+  const offset = Math.max(0, Math.min(anchor - TODOS_BEFORE_CURRENT, todos.length - MAX_TODOS));
+  return {
+    items: todos.slice(offset, offset + MAX_TODOS),
+    offset,
+    done: todos.filter((todo) => todo.done).length,
+    total: todos.length,
+  };
 }
 
 function todosFromToolEnd(event) {
@@ -485,7 +493,9 @@ export function activityFromProgress(state, now) {
     current: data.current,
     actions: [...state.actions],
     milestones: state.milestones.map((milestone) => ({ ...milestone })),
-    ...(state.todos ? { todos: state.todos.map((todo) => ({ ...todo })) } : {}),
+    ...(state.todos
+      ? { todos: { ...state.todos, items: state.todos.items.map((todo) => ({ ...todo })) } }
+      : {}),
   };
 }
 
