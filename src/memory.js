@@ -485,6 +485,7 @@ export function compactMemory({ userId, channelId } = {}) {
 const AUDIT_NOTE_DAYS = 7;
 const AUDIT_NOTE_LIMIT = 60;
 const AUDIT_FACT_LIMIT = 400;
+const AUDIT_PAGE_CHARS = 40_000;
 const AUDIT_CHANGE_LIMIT = 200;
 const AUDIT_OPS = new Set(["add", "merge", "drop", "fix", "flag"]);
 
@@ -501,10 +502,15 @@ export function memoryAuditSnapshot(userId, offset = 0) {
   const profileIds = new Set(coreProfileLines(userId).map((item) => item.id).filter(Boolean));
   const since = dateKey(new Date(Date.now() - (AUDIT_NOTE_DAYS - 1) * 86_400_000));
   const notes = database().recentDaily(userId, since, AUDIT_NOTE_LIMIT);
-  const factLines = facts.slice(start, start + AUDIT_FACT_LIMIT).map((entry) => {
+  const factLines = [];
+  let pageChars = 0;
+  for (const entry of facts.slice(start, start + AUDIT_FACT_LIMIT)) {
     const flags = [entry.pinned === true && "pinned", !entry.confirmed && "unconfirmed", profileIds.has(entry.id) && "core profile"].filter(Boolean);
-    return `- [fact:${entry.id}] ${cleanLine(entry.text)} (saved ${auditDay(entry.ts)}, last seen ${auditDay(entry.lastSeen)}, last recalled ${auditDay(entry.lastUsed)}${flags.length ? `, ${flags.join(", ")}` : ""})`;
-  });
+    const line = `- [fact:${entry.id}] ${cleanLine(entry.text)} (saved ${auditDay(entry.ts)}, last seen ${auditDay(entry.lastSeen)}, last recalled ${auditDay(entry.lastUsed)}${flags.length ? `, ${flags.join(", ")}` : ""})`;
+    if (factLines.length && pageChars + line.length > AUDIT_PAGE_CHARS) break;
+    factLines.push(line);
+    pageChars += line.length + 1;
+  }
   const noteLines = notes.map((note) => `- [daily:${note.day}] ${cleanLine(note.text).slice(0, 400)}`);
   const end = start + factLines.length;
   return [
