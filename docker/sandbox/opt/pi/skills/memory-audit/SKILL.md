@@ -27,7 +27,7 @@ Each item belongs in one place. When something is in the wrong store, add it to 
    - `flag` facts that look stale but can't be checked from what you have (`id`). flagged facts leave the core profile (pinned ones stay, marked unconfirmed) and show as unconfirmed in recall until the user confirms or corrects them
 3. leave facts alone when they look fine. never being recalled is not a reason to drop a name, time zone, or preference
 4. send the changes with `action: "apply"` in batches of at most 200, or one call with an empty `changes` list when nothing needs changing so the audit is still recorded. if a batch is rejected, fix the problem it names and retry it once
-5. changes on facts the user restated while the audit was running are skipped. leave those facts alone
+5. changes on facts the user restated while the audit was running, or on facts that no longer exist, are skipped. leave those facts alone
 
 ## 2. Project memory
 

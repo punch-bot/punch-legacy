@@ -65,12 +65,12 @@ If memory is unavailable, the turn still runs without a context id, and Pi audit
 `memory_audit` lives in the existing `memory-recall.ts` deployment extension and calls `POST /memory/audit`:
 
 - `action: "list"` returns user-scope facts 400 at a time with their ids, dates, and pinned, unconfirmed, and core-profile flags. When more remain, the listing names the `offset` for the next page. The first page also includes up to 60 DM notes from the last seven days.
-- `action: "apply"` takes up to 200 changes (`add` with `text`, `merge` with `ids` and `text`, `drop` with `id`, `fix` with `id` and `text`, `flag` with `id`) and applies them in one transaction. Pi can send several batches in one run. Any invalid change (an unknown id, dropping a pinned fact, empty or secret-looking text) rejects the whole batch with a 400 that names the problem.
+- `action: "apply"` takes up to 200 changes (`add` with `text`, `merge` with `ids` and `text`, `drop` with `id`, `fix` with `id` and `text`, `flag` with `id`) and applies them in one transaction. Pi can send several batches in one run. Any invalid change (dropping a pinned fact, a merge without two ids, empty or secret-looking text) rejects the whole batch with a 400 that names the problem. A change that cites an id that no longer exists is skipped and the reply names the id, because a user correction during the run can supersede the fact Pi listed.
 - A change is skipped and counted as `skipped` when any fact it would touch was restated after the audit started. That includes the named ids and the facts its text would collapse into or supersede. A restatement counts when `last_seen` is newer than both the run start and the audit's own last write to that fact. A user's restatement during the run wins over the audit's earlier listing. An `add` whose text is already saved changes nothing.
 - A merge stays unconfirmed when any of its source facts, or an existing fact it collapses into, was unconfirmed. A `fix` confirms the fact, because the audit corrected it from evidence.
 - The run's totals across all batches are recorded in `memory_meta` under `audit:<userId>`.
 
-Authorization works like recall: the user comes from the sandbox's bearer token, and the request must carry a bot-created audit context id for that user. Recall context ids and ordinary chat turns get 403, so a prompt-injected chat turn can't mass-edit memory.
+Authorization works like recall: the user comes from the sandbox's bearer token, and the request must carry a bot-created audit context id for that user. Recall context ids and ordinary chat turns get 403. A prompt-injected chat turn therefore can't mass-edit memory without the audit's context id, which only the audit turn's prompt carries and which is revoked when that turn ends.
 
 ### Uncertain items
 

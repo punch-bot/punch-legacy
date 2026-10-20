@@ -532,11 +532,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
   const touched = new Map();
   const counts = db.transaction(() => {
     const batch = { added: 0, merged: 0, dropped: 0, fixed: 0, flagged: 0, skipped: 0 };
-    const factFor = (id) => {
-      const entry = db.fact("user", userId, String(id ?? ""));
-      if (!entry) throw Object.assign(new Error(`Unknown fact id ${JSON.stringify(id)}; list again and retry.`), { status: 400 });
-      return entry;
-    };
+    const missing = [];
     const auditSeen = (id) => touched.get(id) ?? run.touched.get(id) ?? -Infinity;
     const restated = (entry) => entry.lastSeen > run.since && entry.lastSeen > auditSeen(entry.id);
     const mark = (id) => touched.set(id, db.fact("user", userId, id).lastSeen);
@@ -560,8 +556,14 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
       if (change.op === "merge" && (!Array.isArray(change.ids) || new Set(change.ids).size < 2)) {
         throw Object.assign(new Error("merge needs at least two distinct ids."), { status: 400 });
       }
-      const entries = (change.op === "merge" ? [...new Set(change.ids)] : [change.id]).map(factFor);
+      const ids = (change.op === "merge" ? [...new Set(change.ids)] : [change.id]).map((id) => String(id ?? ""));
+      const entries = ids.map((id) => db.fact("user", userId, id));
       const text = ["merge", "fix"].includes(change.op) ? auditText(change.text) : null;
+      if (entries.includes(null)) {
+        missing.push(...ids.filter((_, index) => !entries[index]));
+        batch.skipped += 1;
+        continue;
+      }
       if ([...entries, ...(text ? related(text) : [])].some(restated)) {
         batch.skipped += 1;
         continue;
@@ -590,7 +592,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
     }
     const totals = Object.fromEntries(Object.entries(run.totals).map(([name, value]) => [name, value + batch[name]]));
     db.setMeta(auditKey(userId), JSON.stringify({ at: Date.now(), ...totals }));
-    return batch;
+    return { ...batch, missing };
   });
   for (const [id, seen] of touched) run.touched.set(id, seen);
   for (const name of Object.keys(run.totals)) run.totals[name] += counts[name];

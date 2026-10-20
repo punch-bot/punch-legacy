@@ -62,7 +62,8 @@ export function auditForSandbox(identity, body) {
   if (body.action === "list") return { text: memoryAuditSnapshot(identity.userId, body.offset) };
   if (body.action === "apply") {
     const counts = applyMemoryAudit(identity.userId, body.changes, audit.run);
-    const skipped = counts.skipped ? ` Skipped ${counts.skipped} change(s) whose facts the user restated during this audit; leave those facts alone.` : "";
+    const missing = counts.missing.length ? ` Unknown or already removed ids: ${counts.missing.join(", ")}.` : "";
+    const skipped = counts.skipped ? ` Skipped ${counts.skipped} change(s) whose facts no longer exist or were restated by the user during this audit; leave those facts alone.${missing}` : "";
     return { text: `Applied: ${counts.added} added, ${counts.merged} merged away, ${counts.dropped} dropped, ${counts.fixed} fixed, ${counts.flagged} flagged unconfirmed.${skipped}`, counts };
   }
   throw Object.assign(new Error("action must be list or apply."), { status: 400 });
