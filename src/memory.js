@@ -576,7 +576,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
         const merged = reviseMemory("user", userId, kept.id, text);
         if (uncertain) db.setConfirmed("user", userId, merged.id, false);
         mark(merged.id);
-        batch.merged += rest.length;
+        batch.merged += rest.length + (merged.id === kept.id ? 0 : 1);
       } else if (change.op === "drop") {
         const [entry] = entries;
         if (entry.pinned === true) throw Object.assign(new Error(`Fact ${entry.id} is pinned by the user; flag it instead of dropping it.`), { status: 400 });
