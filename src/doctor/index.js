@@ -296,7 +296,7 @@ function memoryChecks({ memory, routines, userId }) {
     const routine = routines.listAll().find((entry) => entry.type === "memory-audit" && String(entry.userId) === String(userId));
     const audit = memory.memoryAuditStatus(userId);
     const day = (ms) => new Date(ms).toISOString().slice(0, 10);
-    const last = audit.last ? `last applied ${day(audit.last.at)} (${audit.last.merged} merged, ${audit.last.dropped} dropped, ${audit.last.fixed} fixed, ${audit.last.flagged} flagged)` : "no audit changes applied yet";
+    const last = audit.last ? `last applied ${day(audit.last.at)} (${audit.last.added} added, ${audit.last.merged} merged, ${audit.last.dropped} dropped, ${audit.last.fixed} fixed, ${audit.last.flagged} flagged)` : "no audit changes applied yet";
     const summary = `${audit.facts} fact(s), ${audit.unconfirmed} unconfirmed; ${last}.`;
     const duration = elapsed(startedAt);
     if (!routine) checks.push(check("memory-audit", "warn", "Weekly memory audit", `No audit routine is scheduled. ${summary}`, duration, "Restart the bot to recreate built-in routines."));

@@ -22,10 +22,10 @@ Rules of thumb, also in the bundled `memory` and `project-memory` skills:
 
 ## Write-time rules
 
-These run in the bot on every fact write, inside one SQLite transaction:
+These run in the bot inside one SQLite transaction whenever a fact is saved, restated, revised, or imported:
 
 - **Dedupe.** Writing a fact whose normalized text already exists for that scope and owner doesn't insert a row. It refreshes the existing fact's `last_seen`, marks it confirmed, and keeps any pin. Restating a fact is how it gets reconfirmed. Automatic DM extraction goes through the same path.
-- **Supersede.** Single-valued facts (`my name is …`, `my time zone is …`) replace any earlier fact with the same prefix in that scope. A pin on a replaced fact carries over.
+- **Supersede.** Single-valued facts (`my name is …`, `my time zone is …`) replace any other fact with the same prefix in that scope, including when an existing fact is restated or revised. Imports keep the newest one by timestamp. A pin on a replaced fact carries over.
 - **Replace in place.** `<remember replaces="ID">text</remember>` rewrites the cited fact (user scope first, then channel), keeps its id and pin, and marks it confirmed. If the new text duplicates another fact, the two collapse into one. An unknown id falls back to an ordinary save.
 
 ## Usage tracking
@@ -34,20 +34,20 @@ Schema version 3 adds three columns to `memory_records`:
 
 - `last_seen`: when the fact was written or last restated. Backfilled from `ts`.
 - `last_used`: when bot-backed `recall_memory` last returned the fact to Pi, throttled to one write per fact per hour. `/memory search` and `/memory explain` don't count as use. Facts shown in the core profile aren't stamped on every turn; the audit listing marks them as `core profile` instead.
-- `confirmed`: `1` by default, `0` when the audit flags a fact as uncertain.
+- `confirmed`: `1` by default, `0` when the audit flags a fact as uncertain. `/memory export` writes `confirmed: false` for unconfirmed facts, and `/memory import` restores it. Older exports without the field import as confirmed.
 
 ## Weekly audit
 
 ### Schedule
 
-Every registered user gets one built-in routine of type `memory-audit` in the existing routine store. The bot creates it at startup and after `/sandbox create`, and deletes it after `/sandbox remove` or at the next startup once the user is unregistered. It runs weekly at a fixed time between 03:00 and 05:59 in the user's configured time zone, and setting or clearing the time zone reschedules it. The weekday and minute come from a hash of the user id, so audits don't all run at once. The routine shows in `/routines` lists as `[memory audit]`. It can be paused and resumed but not removed, because the next sync would just recreate it. Failures, including a provider error returned as the turn's reply, use the normal routine backoff and pause after the usual attempt limit.
+Every user registered in `/data/sandbox_users.json` gets one built-in routine of type `memory-audit` in the existing routine store. The bot creates it at startup and after `/sandbox create`, and deletes it after `/sandbox remove` or at the next startup once the user is unregistered. It runs weekly at a fixed time between 03:00 and 05:59 in the user's configured time zone, and setting or clearing the time zone reschedules it. The weekday and minute come from a hash of the user id, so audits don't all run at once. The routine shows in `/routines` lists as `[memory audit]`. It can be paused and resumed but not removed, because the next sync would just recreate it. Failures, including a provider error returned as the turn's reply, use the normal routine backoff and pause after the usual attempt limit.
 
 ### Run
 
 When the routine fires, the bot:
 
-1. ensures the sandbox is up and takes the user's run lock, so the audit never overlaps a chat turn;
-2. runs exact-duplicate compaction on the user's facts (the same as `/memory compact` without the channel part);
+1. ensures the sandbox is up and takes the user's run lock, so the audit doesn't overlap Discord turns or other routines for that user. Spectrum turns and memory commands don't take that lock and can still write facts during the audit; see the `apply` rules below;
+2. runs exact-duplicate compaction on the user's facts (the same as `/memory compact` without the channel part). A compaction failure is logged and the audit continues;
 3. creates an audit context id, valid for two hours and revoked when the turn ends;
 4. runs one Pi turn in a fresh session that isn't stored, with a `--- Weekly memory audit ---` block that points Pi at the bundled `memory-audit` skill;
 5. delivers nothing and records the one-line summary as a `memory-audit` activity. Memory tags in the reply are not executed, so every fact change goes through the validated `apply` path.
@@ -65,7 +65,10 @@ If memory is unavailable, the turn still runs without a context id, and Pi audit
 `memory_audit` lives in the existing `memory-recall.ts` deployment extension and calls `POST /memory/audit`:
 
 - `action: "list"` returns user-scope facts 400 at a time with their ids, dates, and pinned, unconfirmed, and core-profile flags. When more remain, the listing names the `offset` for the next page. The first page also includes up to 60 DM notes from the last seven days.
-- `action: "apply"` takes up to 200 changes (`merge` with `ids` and `text`, `drop` with `id`, `fix` with `id` and `text`, `flag` with `id`) and applies them in one transaction. Any invalid change (an unknown id, dropping a pinned fact, empty or secret-looking text) rejects the whole batch with a 400 that names the problem. Successful batches record their counts in `memory_meta` under `audit:<userId>`.
+- `action: "apply"` takes up to 200 changes (`add` with `text`, `merge` with `ids` and `text`, `drop` with `id`, `fix` with `id` and `text`, `flag` with `id`) and applies them in one transaction. Pi can send several batches in one run. Any invalid change (an unknown id, dropping a pinned fact, empty or secret-looking text) rejects the whole batch with a 400 that names the problem.
+- A change that touches a fact restated after the audit started (its `last_seen` is newer than the run start, and the audit didn't make that change itself) is skipped and counted as `skipped`. A user's restatement during the run wins over the audit's earlier listing.
+- A merge stays unconfirmed when any of its source facts was unconfirmed. A `fix` confirms the fact, because the audit corrected it from evidence.
+- The run's totals across all batches are recorded in `memory_meta` under `audit:<userId>`.
 
 Authorization works like recall: the user comes from the sandbox's bearer token, and the request must carry a bot-created audit context id for that user. Recall context ids and ordinary chat turns get 403, so a prompt-injected chat turn can't mass-edit memory.
 
@@ -83,4 +86,4 @@ Uncertain items stay inside the system and get verified the next time they matte
 
 ## Rollout
 
-The bot changes and the sandbox changes (the `memory_audit` tool, the `memory-audit` skill, the updated `memory`/`project-memory` skills, and `SYSTEM.md`) have to ship together. Rebuild the sandbox image and recreate sandboxes with `/sandbox restart-all recreate:true`. Until a sandbox is recreated, its weekly audit still runs, but Pi has neither the skill nor the tool, so no fact changes are applied.
+The bot changes and the sandbox changes (the `memory_audit` tool, the `memory-audit` skill, the updated `memory`/`project-memory` skills, and `SYSTEM.md`) have to ship together. Rebuild the sandbox image and recreate sandboxes with `/sandbox restart-all recreate:true`. Until a sandbox is recreated, its weekly audit still runs the bot-side exact-duplicate compaction, but Pi has neither the skill nor the tool, so no other fact changes are applied.

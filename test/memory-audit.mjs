@@ -40,16 +40,17 @@ test("writes dedupe and supersede, and only the audit context can merge, drop, f
     { op: "merge", ids: [tea.id, tea2.id], text: "Prefers tea" },
     { op: "fix", id: city.id, text: "Lives in Berlin" },
     { op: "flag", id: job.id },
+    { op: "add", text: "Plays chess" },
   ] });
   endMemoryAudit(contextId);
   assert.throws(() => auditForSandbox(identity, { contextId, action: "list" }), { status: 403 });
   assert.deepEqual(memory.list("user", "ann").map((entry) => [entry.text, entry.confirmed, entry.pinned === true]),
-    [["My name is Annie", true, false], ["Prefers tea", true, false], ["Works at Acme", false, false], ["Lives in Berlin", true, true]]);
+    [["My name is Annie", true, false], ["Prefers tea", true, false], ["Works at Acme", false, false], ["Lives in Berlin", true, true], ["Plays chess", true, false]]);
   assert.doesNotMatch(memory.coreProfile("ann"), /Acme/);
   assert.match(recallForSandbox(identity, { query: "acme" }).text, /\(unconfirmed\) Works at Acme/);
   assert.ok(memory.list("user", "ann").find((entry) => entry.id === job.id).lastUsed);
   const { last, unconfirmed } = memory.memoryAuditStatus("ann");
-  assert.deepEqual([last.merged, last.dropped, last.fixed, last.flagged, unconfirmed], [1, 0, 1, 1, 1]);
+  assert.deepEqual([last.added, last.merged, last.dropped, last.fixed, last.flagged, unconfirmed], [1, 1, 0, 1, 1, 1]);
 
   persistMemoryTags(`ok <remember replaces="${job.id}">Works at Acme Corp</remember>`, "ann", "dm");
   assert.deepEqual(memory.list("user", "ann").filter((entry) => entry.id === job.id).map((entry) => [entry.text, entry.confirmed]), [["Works at Acme Corp", true]]);

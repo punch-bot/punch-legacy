@@ -55,20 +55,20 @@ export default function (pi: ExtensionAPI) {
     name: "memory_audit",
     label: "Audit memory",
     description: "List and clean up the user's saved Punch facts during the scheduled weekly memory audit.",
-    promptSnippet: "Merge, drop, fix, or flag saved facts during the weekly memory audit",
+    promptSnippet: "Add, merge, drop, fix, or flag saved facts during the weekly memory audit",
     promptGuidelines: [
       "Use memory_audit only during the weekly memory audit, with the audit contextId from that turn. Other turns are refused.",
-      "Call action=list first, then send all changes in one action=apply call. Changes apply together or not at all.",
+      "Call action=list first, then send changes with action=apply in batches of at most 200. Each batch applies together or not at all.",
     ],
     parameters: Type.Object({
       contextId: Type.String({ description: "Audit contextId from the weekly memory audit turn" }),
       action: Type.Union([Type.Literal("list"), Type.Literal("apply")]),
       offset: Type.Optional(Type.Integer({ minimum: 0, description: "For list: index of the first fact to return when the previous listing said more remain" })),
       changes: Type.Optional(Type.Array(Type.Object({
-        op: Type.Union([Type.Literal("merge"), Type.Literal("drop"), Type.Literal("fix"), Type.Literal("flag")]),
+        op: Type.Union([Type.Literal("add"), Type.Literal("merge"), Type.Literal("drop"), Type.Literal("fix"), Type.Literal("flag")]),
         id: Type.Optional(Type.String({ description: "Fact id for drop, fix, and flag" })),
         ids: Type.Optional(Type.Array(Type.String(), { description: "Fact ids to merge into one" })),
-        text: Type.Optional(Type.String({ maxLength: 2_000, description: "New fact text for merge and fix" })),
+        text: Type.Optional(Type.String({ maxLength: 2_000, description: "Fact text for add, merge, and fix" })),
       }), { maxItems: 200 })),
     }),
     async execute(_toolCallId, args, signal) {

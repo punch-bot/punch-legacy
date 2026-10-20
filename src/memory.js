@@ -165,6 +165,15 @@ function singleValueKey(text) {
   return SINGLE_VALUE_FACTS.find((pattern) => pattern.test(key)) || null;
 }
 
+function supersedeSingleValue(db, scope, ownerId, keep) {
+  const key = singleValueKey(keep.text);
+  if (!key) return keep;
+  const others = db.list(scope, ownerId).filter((entry) => entry.id !== keep.id && key.test(normalize(entry.text)));
+  for (const entry of others) db.forget(scope, ownerId, entry.id);
+  if (keep.pinned !== true && others.some((entry) => entry.pinned === true)) db.pin(scope, ownerId, keep.id, true);
+  return others.length ? db.fact(scope, ownerId, keep.id) : keep;
+}
+
 function storeFact(scope, ownerId, text, { pinned = false } = {}) {
   if (!["user", "channel"].includes(scope) || ownerId == null || !String(ownerId) || !String(text).trim()) {
     throw new Error("Memory requires a scope, owner, and nonempty text.");
@@ -172,17 +181,13 @@ function storeFact(scope, ownerId, text, { pinned = false } = {}) {
   const db = database();
   return db.transaction(() => {
     const [existing] = db.sameFacts(scope, ownerId, text);
-    if (existing) {
-      db.reassert(scope, ownerId, existing.id, pinned);
-      return { entry: db.fact(scope, ownerId, existing.id), created: false };
+    let id = existing?.id;
+    if (existing) db.reassert(scope, ownerId, id, pinned);
+    else {
+      id = newId();
+      db.insert("fact", scope, ownerId, { id, text: text.trim(), ts: Date.now(), ...(pinned ? { pinned: true } : {}) });
     }
-    const key = singleValueKey(text);
-    const superseded = key ? db.list(scope, ownerId).filter((entry) => key.test(normalize(entry.text))) : [];
-    for (const entry of superseded) db.forget(scope, ownerId, entry.id);
-    const keepPin = pinned || superseded.some((entry) => entry.pinned === true);
-    const entry = { id: newId(), text: text.trim(), ts: Date.now(), ...(keepPin ? { pinned: true } : {}) };
-    db.insert("fact", scope, ownerId, entry);
-    return { entry, created: true };
+    return { entry: supersedeSingleValue(db, scope, ownerId, db.fact(scope, ownerId, id)), created: !existing };
   });
 }
 
@@ -201,10 +206,10 @@ export function reviseMemory(scope, ownerId, id, text) {
     if (duplicate) {
       db.forget(scope, ownerId, current.id);
       db.reassert(scope, ownerId, duplicate.id, current.pinned === true);
-      return db.fact(scope, ownerId, duplicate.id);
+      return supersedeSingleValue(db, scope, ownerId, db.fact(scope, ownerId, duplicate.id));
     }
     db.revise(scope, ownerId, current.id, value);
-    return db.fact(scope, ownerId, current.id);
+    return supersedeSingleValue(db, scope, ownerId, db.fact(scope, ownerId, current.id));
   });
 }
 
@@ -401,6 +406,7 @@ export function exportUserMemory(userId, { source = "punch" } = {}) {
       ts: Number.isFinite(Number(entry.ts)) ? Number(entry.ts) : Date.now(),
       ...(entry.origin ? { origin: String(entry.origin).slice(0, 120) } : {}),
       ...(entry.pinned === true ? { pinned: true } : {}),
+      ...(entry.confirmed === false ? { confirmed: false } : {}),
     }));
   return {
     format: "punch-memory-v1",
@@ -440,6 +446,7 @@ export function importUserMemory(userId, document, { source = "import" } = {}) {
         ts: Number.isFinite(Number(record.ts)) ? Number(record.ts) : Date.now(),
         origin: String(record.origin || document.source || source).slice(0, 120),
         ...(record.pinned === true ? { pinned: true } : {}),
+        ...(record.confirmed === false ? { confirmed: false } : {}),
       });
       existing.add(key);
       imported += 1;
@@ -447,6 +454,12 @@ export function importUserMemory(userId, document, { source = "import" } = {}) {
     const entries = list("user", userId);
     const keep = new Set(dedupeEntries(entries).map((entry) => entry.id));
     for (const entry of entries) if (!keep.has(entry.id)) database().forget("user", userId, entry.id);
+    const newest = new Map();
+    for (const entry of list("user", userId).sort((a, b) => b.ts - a.ts)) {
+      const key = singleValueKey(entry.text);
+      if (key && !newest.has(key)) newest.set(key, entry);
+    }
+    for (const entry of newest.values()) supersedeSingleValue(database(), "user", userId, entry);
     const after = list("user", userId).length;
     return { imported, skipped, before, after, removed: before + imported - after };
   });
@@ -473,7 +486,11 @@ const AUDIT_NOTE_DAYS = 7;
 const AUDIT_NOTE_LIMIT = 60;
 const AUDIT_FACT_LIMIT = 400;
 const AUDIT_CHANGE_LIMIT = 200;
-const AUDIT_OPS = new Set(["merge", "drop", "fix", "flag"]);
+const AUDIT_OPS = new Set(["add", "merge", "drop", "fix", "flag"]);
+
+export function newAuditRun() {
+  return { since: Date.now(), touched: new Set(), totals: { added: 0, merged: 0, dropped: 0, fixed: 0, flagged: 0, skipped: 0 } };
+}
 
 const auditKey = (userId) => `audit:${userId}`;
 const auditDay = (ms) => (Number.isFinite(ms) ? dateKey(new Date(ms)) : "never");
@@ -507,48 +524,64 @@ function auditText(text) {
   return value;
 }
 
-export function applyMemoryAudit(userId, changes) {
+export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
   if (!Array.isArray(changes) || changes.length > AUDIT_CHANGE_LIMIT) {
     throw Object.assign(new Error(`changes must be an array of at most ${AUDIT_CHANGE_LIMIT} items.`), { status: 400 });
   }
   const db = database();
-  return db.transaction(() => {
-    const counts = { merged: 0, dropped: 0, fixed: 0, flagged: 0 };
+  const touched = new Set();
+  const counts = db.transaction(() => {
+    const batch = { added: 0, merged: 0, dropped: 0, fixed: 0, flagged: 0, skipped: 0 };
     const factFor = (id) => {
       const entry = db.fact("user", userId, String(id ?? ""));
       if (!entry) throw Object.assign(new Error(`Unknown fact id ${JSON.stringify(id)}; list again and retry.`), { status: 400 });
       return entry;
     };
+    const restated = (entry) => entry.lastSeen > run.since && !run.touched.has(entry.id) && !touched.has(entry.id);
     for (const change of changes) {
       if (!AUDIT_OPS.has(change?.op)) throw Object.assign(new Error(`Unknown op ${JSON.stringify(change?.op)}.`), { status: 400 });
+      if (change.op === "add") {
+        touched.add(storeFact("user", userId, auditText(change.text)).entry.id);
+        batch.added += 1;
+        continue;
+      }
+      if (change.op === "merge" && (!Array.isArray(change.ids) || new Set(change.ids).size < 2)) {
+        throw Object.assign(new Error("merge needs at least two distinct ids."), { status: 400 });
+      }
+      const entries = (change.op === "merge" ? [...new Set(change.ids)] : [change.id]).map(factFor);
+      if (entries.some(restated)) {
+        batch.skipped += 1;
+        continue;
+      }
       if (change.op === "merge") {
-        if (!Array.isArray(change.ids) || new Set(change.ids).size < 2) {
-          throw Object.assign(new Error("merge needs at least two distinct ids."), { status: 400 });
-        }
         const text = auditText(change.text);
-        const entries = [...new Set(change.ids)].map(factFor).sort((a, b) => a.ts - b.ts);
-        const [kept, ...rest] = entries;
+        const [kept, ...rest] = entries.sort((a, b) => a.ts - b.ts);
         for (const entry of rest) db.forget("user", userId, entry.id);
         if (rest.some((entry) => entry.pinned === true)) db.pin("user", userId, kept.id, true);
-        reviseMemory("user", userId, kept.id, text);
-        counts.merged += rest.length;
+        const merged = reviseMemory("user", userId, kept.id, text);
+        if (entries.some((entry) => !entry.confirmed)) db.setConfirmed("user", userId, merged.id, false);
+        touched.add(merged.id);
+        batch.merged += rest.length;
       } else if (change.op === "drop") {
-        const entry = factFor(change.id);
+        const [entry] = entries;
         if (entry.pinned === true) throw Object.assign(new Error(`Fact ${entry.id} is pinned by the user; flag it instead of dropping it.`), { status: 400 });
         db.forget("user", userId, entry.id);
-        counts.dropped += 1;
+        batch.dropped += 1;
       } else if (change.op === "fix") {
-        const entry = factFor(change.id);
-        reviseMemory("user", userId, entry.id, auditText(change.text));
-        counts.fixed += 1;
+        touched.add(reviseMemory("user", userId, entries[0].id, auditText(change.text)).id);
+        batch.fixed += 1;
       } else {
-        db.setConfirmed("user", userId, factFor(change.id).id, false);
-        counts.flagged += 1;
+        db.setConfirmed("user", userId, entries[0].id, false);
+        batch.flagged += 1;
       }
     }
-    db.setMeta(auditKey(userId), JSON.stringify({ at: Date.now(), ...counts }));
-    return counts;
+    const totals = Object.fromEntries(Object.entries(run.totals).map(([name, value]) => [name, value + batch[name]]));
+    db.setMeta(auditKey(userId), JSON.stringify({ at: Date.now(), ...totals }));
+    return batch;
   });
+  for (const id of touched) run.touched.add(id);
+  for (const name of Object.keys(run.totals)) run.totals[name] += counts[name];
+  return counts;
 }
 
 export function memoryAuditStatus(userId) {

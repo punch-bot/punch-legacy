@@ -35,12 +35,10 @@ async function fireMemoryAudit(routine) {
   const res = await withUserRunLock(uid, async () => {
     let contextId = null;
     if (store.getMemoryStatus().available) {
-      try {
-        store.compactMemory({ userId: uid });
-        contextId = beginMemoryAudit(uid);
-      } catch (error) {
-        console.warn(`[routines] memory audit ${routine.id} skipped saved facts: ${error.message}`);
+      try { store.compactMemory({ userId: uid }); } catch (error) {
+        console.warn(`[routines] memory audit ${routine.id} compaction failed: ${error.message}`);
       }
+      contextId = beginMemoryAudit(uid);
     }
     try {
       return await runAgent(`[user:${uid}] (memory audit):\n${memoryAuditBlock(contextId)}`, null, null, null, uid);

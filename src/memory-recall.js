@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { applyMemoryAudit, memoryAuditSnapshot, preamble } from "./memory.js";
+import { applyMemoryAudit, memoryAuditSnapshot, newAuditRun, preamble } from "./memory.js";
 
 const contexts = new Map();
 const audits = new Map();
@@ -45,7 +45,7 @@ export function beginMemoryAudit(userId) {
   const now = Date.now();
   for (const [id, audit] of audits) if (audit.expires <= now) audits.delete(id);
   const id = randomUUID();
-  audits.set(id, { userId: String(userId), expires: now + AUDIT_TTL_MS });
+  audits.set(id, { userId: String(userId), expires: now + AUDIT_TTL_MS, run: newAuditRun() });
   return id;
 }
 
@@ -61,8 +61,9 @@ export function auditForSandbox(identity, body) {
   }
   if (body.action === "list") return { text: memoryAuditSnapshot(identity.userId, body.offset) };
   if (body.action === "apply") {
-    const counts = applyMemoryAudit(identity.userId, body.changes);
-    return { text: `Applied: ${counts.merged} merged away, ${counts.dropped} dropped, ${counts.fixed} fixed, ${counts.flagged} flagged unconfirmed.`, counts };
+    const counts = applyMemoryAudit(identity.userId, body.changes, audit.run);
+    const skipped = counts.skipped ? ` Skipped ${counts.skipped} change(s) whose facts the user restated during this audit; leave those facts alone.` : "";
+    return { text: `Applied: ${counts.added} added, ${counts.merged} merged away, ${counts.dropped} dropped, ${counts.fixed} fixed, ${counts.flagged} flagged unconfirmed.${skipped}`, counts };
   }
   throw Object.assign(new Error("action must be list or apply."), { status: 400 });
 }

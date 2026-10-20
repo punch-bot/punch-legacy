@@ -14,18 +14,20 @@ Punch runs this once a week in an isolated session. Nobody reads the reply. Appl
 - project memory: `/work/.punch-memory.md`. project decisions, conventions, gotchas, and open work
 - skills: reusable procedures in `/work/.pi/skills/<name>/SKILL.md` and `/data/pi/skills/<name>/SKILL.md`. never edit `/opt/pi/skills`, which ships with the image
 
-Each item belongs in one place. When something is in the wrong store, add it to the right one before removing it from the wrong one.
+Each item belongs in one place. When something is in the wrong store, add it to the right one before removing it from the wrong one. use `add` to move a fact about the person out of project memory or a skill into saved facts
 
 ## 1. Saved facts
 
 1. call `memory_audit` with `action: "list"` and the audit contextId. when the listing says more facts remain, call it again with the `offset` it gives until you've seen them all
 2. pick changes:
+   - `add` a fact about the person that only lives in project memory or a skill (`text`)
    - `merge` duplicates or near-duplicates into one clear fact (`ids` and `text`)
    - `fix` a fact that the notes or other facts show is wrong or out of date (`id` and `text`)
    - `drop` facts that are contradicted, superseded, one-off, or trivia (`id`). pinned facts can't be dropped, so flag them instead
-   - `flag` facts that look stale but can't be checked from what you have (`id`). flagged facts leave the core profile and show as unconfirmed in recall until the user confirms or corrects them
+   - `flag` facts that look stale but can't be checked from what you have (`id`). flagged facts leave the core profile (pinned ones stay, marked unconfirmed) and show as unconfirmed in recall until the user confirms or corrects them
 3. leave facts alone when they look fine. never being recalled is not a reason to drop a name, time zone, or preference
-4. send every change in one `action: "apply"` call, with an empty `changes` list when nothing needs changing so the audit is still recorded. if it's rejected, fix the problem it names and retry once
+4. send the changes with `action: "apply"` in batches of at most 200, or one call with an empty `changes` list when nothing needs changing so the audit is still recorded. if a batch is rejected, fix the problem it names and retry it once
+5. changes on facts the user restated while the audit was running are skipped. leave those facts alone
 
 ## 2. Project memory
 
