@@ -37,8 +37,6 @@ export const MODEL_LIST = [
   { label: "Poolside Laguna XS", value: "poolside/poolside/laguna-xs-2.1", emoji: "🏊" },
   { label: "NIM GLM-5.2 (z-ai)", value: "nvidia/z-ai/glm-5.2", emoji: "💚" },
   { label: "NIM Nemotron 70B", value: "nvidia/nvidia/llama-3.1-nemotron-70b-instruct", emoji: "💚" },
-  { label: "ChatGPT GPT-6.1 Sol", value: "openai-codex/gpt-6.1-sol", emoji: "💬" },
-  { label: "ChatGPT GPT-5.5", value: "openai-codex/gpt-5.5", emoji: "💬" },
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 

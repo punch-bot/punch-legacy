@@ -134,7 +134,7 @@ function chatgptCodeReply({ userCode, verificationUri, expiresAt }) {
 function chatgptResultReply(flow) {
   if (flow.status === "success") {
     return {
-      content: `✅ Signed in with ChatGPT. Pi is restarting with your subscription.\nSwitch to \`${CHATGPT_MODEL}\` below, or pick another ChatGPT model in \`/models\`.`,
+      content: `✅ Signed in with ChatGPT. Pi is restarting with your subscription.\nSwitch to \`${CHATGPT_MODEL}\` below, or enter any \`openai-codex/...\` model under "Custom model..." in \`/models\`.`,
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(CHATGPT_MODEL_BUTTON_ID).setStyle(ButtonStyle.Primary).setLabel("Use GPT-6.1 Sol"),
       )],
