@@ -41,6 +41,7 @@ import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
 import { settingsDeps } from "../chat/context.js";
 import { enqueueChat, withUserRunLock } from "../chat/queue.js";
+import { syncMemoryAuditRoutines } from "../chat/routines-fire.js";
 import { formatInTimeZone } from "../timezone.js";
 import { renderDoctorReport, runDoctor } from "../doctor/index.js";
 import * as pigeonGate from "../pigeon-gate.js";
@@ -445,6 +446,7 @@ export function registerInteractions(client) {
         }
 
         reloadSandboxMap();
+        syncMemoryAuditRoutines();
         await interaction.editReply({ content: `✅ Sandbox **${name}** created and running!` });
         return;
       }
@@ -465,6 +467,7 @@ export function registerInteractions(client) {
         }
 
         reloadSandboxMap();
+        syncMemoryAuditRoutines();
         await interaction.reply({ content: `✅ Sandbox **${name}** removed.`, flags: MessageFlags.Ephemeral });
         return;
       }

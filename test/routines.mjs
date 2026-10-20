@@ -62,3 +62,16 @@ test("a failing routine backs off instead of retrying every tick", async () => {
   assert.ok(after.nextRunAt >= Date.now() + 800);
   assert.equal(routines.listHistory("retry-user", routine.id)[0].error, "delivery failed");
 });
+
+test("built-in memory audits follow registered users and cannot be removed", () => {
+  routines.syncMemoryAudits([{ userId: "audit-a", timezone: "Europe/Berlin" }, { userId: "audit-b" }]);
+  routines.syncMemoryAudits([{ userId: "audit-a", timezone: "Europe/Berlin" }, { userId: "audit-b" }]);
+  const audits = () => routines.listAll().filter((routine) => routine.type === routines.MEMORY_AUDIT_TYPE);
+  assert.deepEqual(audits().map((routine) => [routine.userId, routine.timezone, routine.isolatedSession]), [["audit-a", "Europe/Berlin", true], ["audit-b", "UTC", true]]);
+  const [audit] = audits();
+  assert.match(audit.schedule.cron, /^\d+ [345] \* \* [0-6]$/);
+  assert.equal(routines.removeRoutine(audit.id, "audit-a"), false);
+  assert.equal(routines.pauseRoutine(audit.id, "audit-a").enabled, false);
+  routines.syncMemoryAudits([{ userId: "audit-a", timezone: "Europe/Berlin" }]);
+  assert.deepEqual(audits().map((routine) => [routine.userId, routine.enabled]), [["audit-a", false]]);
+});

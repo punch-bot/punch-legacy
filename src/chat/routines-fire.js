@@ -18,8 +18,47 @@ import {
   sendQuestion,
 } from "../chat/embeds-questions.js";
 import { withUserRunLock, labelLineFor } from "../chat/queue.js";
+import { beginMemoryAudit, endMemoryAudit } from "../memory-recall.js";
+import { MEMORY_AUDIT_TYPE, syncMemoryAudits } from "../routines.js";
+import { loadUsers } from "../sandbox-manager.js";
+import { memoryAuditBlock } from "../prompt-blocks.js";
+
+function syncMemoryAuditRoutines() {
+  syncMemoryAudits(loadUsers().map((user) => ({ userId: user.userId, timezone: store.getUserSettings(user.userId).timeZone })));
+}
+
+async function fireMemoryAudit(routine) {
+  const uid = routine.userId;
+  const start = Date.now();
+  if (!(await ensureUserSandbox(uid))) throw new Error(`sandbox unreachable for memory audit ${routine.id}`);
+  console.log(`[routines] firing memory audit ${routine.id} uid=${uid}`);
+  const res = await withUserRunLock(uid, async () => {
+    let contextId = null;
+    if (store.getMemoryStatus().available) {
+      try {
+        store.compactMemory({ userId: uid });
+        contextId = beginMemoryAudit(uid);
+      } catch (error) {
+        console.warn(`[routines] memory audit ${routine.id} skipped saved facts: ${error.message}`);
+      }
+    }
+    try {
+      return await runAgent(`[user:${uid}] (memory audit):\n${memoryAuditBlock(contextId)}`, null, null, null, uid);
+    } finally {
+      if (contextId) endMemoryAudit(contextId);
+    }
+  });
+  const { clean } = persistMemoryTags(res.text, uid, null);
+  state.recordActivity({
+    userId: uid, type: "memory-audit", prompt: routine.payload.slice(0, 500),
+    response: clean.slice(0, 2000), sessionId: res.sessionId, status: "success",
+    duration: Date.now() - start, routineId: routine.id,
+    ...statistics.tokenFieldsFromAgent(res),
+  });
+}
 
 async function fireRoutine(routine) {
+  if (routine.type === MEMORY_AUDIT_TYPE) return fireMemoryAudit(routine);
   if (routine.type === "heartbeat") {
     const uid = routine.userId;
     console.log(`[heartbeat] firing routine ${routine.id} uid=${uid}`);
@@ -240,4 +279,4 @@ function verifyRoutineUser(bodyUserId, authUserId) {
   return authUserId;
 }
 
-export { fireRoutine, verifyRoutineUser };
+export { fireRoutine, syncMemoryAuditRoutines, verifyRoutineUser };

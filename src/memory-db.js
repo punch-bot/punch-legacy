@@ -24,6 +24,10 @@ function validRecord(record, file) {
   }
 }
 
+function factRow(row) {
+  return { ...JSON.parse(row.payload), lastSeen: row.last_seen, lastUsed: row.last_used, confirmed: row.confirmed === 1 };
+}
+
 export class MemoryDatabase {
   constructor(dataDir) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -33,12 +37,13 @@ export class MemoryDatabase {
       throw new Error("[memory] SQLite disappeared after cutover. Restore a database backup; refusing to reimport stale JSON.");
     }
     this.db = new DatabaseSync(file);
+    this.depth = 0;
     try {
       chmodSync(file, 0o600);
       this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       this.transaction(() => {
         const version = this.db.prepare("PRAGMA user_version").get().user_version;
-        if (version > 2) throw new Error("[memory] database schema is newer than this bot; refusing to open it.");
+        if (version > 3) throw new Error("[memory] database schema is newer than this bot; refusing to open it.");
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
           CREATE TABLE IF NOT EXISTS memory_records (
@@ -78,8 +83,16 @@ export class MemoryDatabase {
           this.db.exec("ALTER TABLE memory_records ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0, 1))");
           this.db.exec("UPDATE memory_records SET pinned = 1 WHERE json_extract(payload, '$.pinned') = 1");
         }
+        const columns = new Set(this.db.prepare("PRAGMA table_info(memory_records)").all().map((column) => column.name));
+        if (!columns.has("last_seen")) {
+          this.db.exec(`ALTER TABLE memory_records ADD COLUMN last_seen REAL;
+            ALTER TABLE memory_records ADD COLUMN last_used REAL;
+            ALTER TABLE memory_records ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 1 CHECK(confirmed IN (0, 1));
+            UPDATE memory_records SET last_seen = ts;`);
+        }
         this.db.exec(`CREATE INDEX IF NOT EXISTS memory_profile ON memory_records(kind, scope, owner_id, pinned DESC, ts);
-          PRAGMA user_version = 2;`);
+          CREATE INDEX IF NOT EXISTS memory_normalized ON memory_records(kind, scope, owner_id, normalized);
+          PRAGMA user_version = 3;`);
         if (!this.db.prepare("SELECT 1 FROM memory_meta WHERE key = 'legacy_json_v1'").get()) {
           if (existsSync(cutoverFile)) throw new Error("[memory] SQLite cutover marker exists but database migration state is missing; restore a database backup.");
           this.importLegacy(dataDir);
@@ -98,7 +111,9 @@ export class MemoryDatabase {
   }
 
   transaction(fn) {
+    if (this.depth) return fn();
     this.db.exec("BEGIN IMMEDIATE");
+    this.depth = 1;
     try {
       const value = fn();
       this.db.exec("COMMIT");
@@ -106,15 +121,18 @@ export class MemoryDatabase {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    } finally {
+      this.depth = 0;
     }
   }
 
   insert(kind, scope, ownerId, entry, channelId = "", day = "") {
     this.db.prepare(`INSERT INTO memory_records
-      (kind, scope, owner_id, channel_id, day, id, ts, text, normalized, search_text, payload, pinned)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (kind, scope, owner_id, channel_id, day, id, ts, text, normalized, search_text, payload, pinned, last_seen, confirmed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(kind, scope, String(ownerId), String(channelId), day, entry.id, entry.ts,
-        entry.text, normalize(entry.text), terms(entry.text).join(" "), JSON.stringify(entry), entry.pinned === true ? 1 : 0);
+        entry.text, normalize(entry.text), terms(entry.text).join(" "), JSON.stringify(entry), entry.pinned === true ? 1 : 0,
+        entry.ts, entry.confirmed === false ? 0 : 1);
   }
 
   importRecord(file, index, reservedIds, kind, scope, ownerId, entry, channelId = "", day = "") {
@@ -191,8 +209,59 @@ export class MemoryDatabase {
 
   list(scope, ownerId) {
     if (ownerId == null) return [];
-    return this.db.prepare(`SELECT payload FROM memory_records WHERE kind = 'fact'
-      AND scope = ? AND owner_id = ? ORDER BY rowid`).all(scope, String(ownerId)).map((row) => JSON.parse(row.payload));
+    return this.db.prepare(`SELECT payload, last_seen, last_used, confirmed FROM memory_records WHERE kind = 'fact'
+      AND scope = ? AND owner_id = ? ORDER BY rowid`).all(scope, String(ownerId)).map(factRow);
+  }
+
+  fact(scope, ownerId, id) {
+    const row = this.db.prepare(`SELECT payload, last_seen, last_used, confirmed FROM memory_records WHERE kind = 'fact'
+      AND scope = ? AND owner_id = ? AND id = ?`).get(scope, String(ownerId), String(id));
+    return row ? factRow(row) : null;
+  }
+
+  sameFacts(scope, ownerId, text) {
+    return this.db.prepare(`SELECT payload, last_seen, last_used, confirmed FROM memory_records WHERE kind = 'fact'
+      AND scope = ? AND owner_id = ? AND normalized = ? ORDER BY rowid`).all(scope, String(ownerId), normalize(text)).map(factRow);
+  }
+
+  reassert(scope, ownerId, id, pinned) {
+    this.db.prepare(`UPDATE memory_records SET last_seen = ?, confirmed = 1,
+      pinned = max(pinned, ?), payload = CASE WHEN ? = 1 THEN json_set(payload, '$.pinned', json('true')) ELSE payload END
+      WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ?`)
+      .run(Date.now(), pinned ? 1 : 0, pinned ? 1 : 0, scope, String(ownerId), String(id));
+  }
+
+  revise(scope, ownerId, id, text) {
+    return this.db.prepare(`UPDATE memory_records SET text = ?, normalized = ?, search_text = ?,
+      payload = json_set(payload, '$.text', ?), last_seen = ?, confirmed = 1
+      WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ?`)
+      .run(text, normalize(text), terms(text).join(" "), text, Date.now(), scope, String(ownerId), String(id)).changes > 0;
+  }
+
+  setConfirmed(scope, ownerId, id, confirmed) {
+    return this.db.prepare("UPDATE memory_records SET confirmed = ? WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ?")
+      .run(confirmed ? 1 : 0, scope, String(ownerId), String(id)).changes > 0;
+  }
+
+  markUsed(records, at = Date.now()) {
+    const statement = this.db.prepare(`UPDATE memory_records SET last_used = ?
+      WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ? AND (last_used IS NULL OR last_used < ?)`);
+    this.transaction(() => {
+      for (const { scope, ownerId, id } of records) statement.run(at, scope, String(ownerId), String(id), at - 3_600_000);
+    });
+  }
+
+  recentDaily(userId, sinceDay, limit) {
+    return this.db.prepare(`SELECT id, day, text FROM memory_records WHERE kind = 'daily' AND owner_id = ? AND day >= ?
+      ORDER BY ts DESC, rowid DESC LIMIT ?`).all(String(userId), sinceDay, limit);
+  }
+
+  meta(key) {
+    return this.db.prepare("SELECT value FROM memory_meta WHERE key = ?").get(key)?.value ?? null;
+  }
+
+  setMeta(key, value) {
+    this.db.prepare("INSERT INTO memory_meta VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
   }
 
   forget(scope, ownerId, id) {
@@ -208,6 +277,7 @@ export class MemoryDatabase {
 
   coreFacts(userId) {
     return this.db.prepare(`SELECT payload FROM memory_records WHERE kind = 'fact' AND scope = 'user' AND owner_id = ?
+      AND (pinned = 1 OR confirmed = 1)
       ORDER BY pinned DESC, CASE WHEN normalized LIKE 'my name is %' OR normalized LIKE 'my time%zone is %'
         OR normalized LIKE 'i prefer %' THEN 0 ELSE 1 END, ts, rowid LIMIT 50`)
       .all(String(userId)).map((row) => JSON.parse(row.payload));
@@ -222,7 +292,7 @@ export class MemoryDatabase {
         (? = 1 AND kind = 'daily' AND owner_id = ? AND channel_id = ? AND day >= ?)
       )`).all(ftsQuery(queryTerms), String(userId ?? ""), String(channelId ?? ""),
       isDm ? 1 : 0, String(userId ?? ""), String(channelId ?? ""), cutoff)
-      .map((row) => ({ ...JSON.parse(row.payload), scope: row.scope,
+      .map((row) => ({ ...JSON.parse(row.payload), scope: row.scope, ownerId: row.owner_id, confirmed: row.confirmed === 1,
         source: row.kind === "fact" ? "durable" : "daily",
         citation: row.kind === "fact" ? `[memory:${row.scope}:${row.id}]` : `[daily:${row.day}:${row.id}]`,
       }));

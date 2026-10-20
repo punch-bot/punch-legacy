@@ -13,7 +13,7 @@ import { userTimeZone } from "../commands/prefix.js";
 import { sandboxNameForUser } from "../agent.js";
 import { notifyPigeonDM, handleAgentPigeon } from "./pigeon.js";
 import { isRegisteredSandboxName } from "../pigeon-peer.js";
-import { recallForSandbox } from "../memory-recall.js";
+import { auditForSandbox, recallForSandbox } from "../memory-recall.js";
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -75,6 +75,17 @@ const botHttpServer = createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(error.status || 500, { "content-type": "application/json" });
       return void res.end(JSON.stringify({ error: error.status ? error.message : "Memory recall unavailable." }));
+    }
+  }
+
+  if (url.pathname === "/memory/audit" && req.method === "POST") {
+    try {
+      const result = auditForSandbox(req.sandboxIdentity, body);
+      res.writeHead(200, { "content-type": "application/json" });
+      return void res.end(JSON.stringify(result));
+    } catch (error) {
+      res.writeHead(error.status || 500, { "content-type": "application/json" });
+      return void res.end(JSON.stringify({ error: error.status ? error.message : "Memory audit unavailable." }));
     }
   }
 

@@ -55,6 +55,16 @@ export function memoryBlock({ contextId = null, profile = "", unavailable = fals
   ].filter(Boolean).join("\n"));
 }
 
+export function memoryAuditBlock(contextId) {
+  return promptBlock("Weekly memory audit", [
+    "This is the scheduled weekly memory audit, run in an isolated session. Nobody reads this reply.",
+    "Read the memory-audit skill and follow it to clean up saved facts, project memory, and skills.",
+    contextId ? `Audit contextId for memory_audit: ${contextId}` :
+      "Saved facts are unavailable while the memory store is being repaired; audit project memory and skills only.",
+    "Finish with one short line summarizing what you changed.",
+  ].join("\n"), "weekly memory audit");
+}
+
 export function timestampLine(sentAt) {
   return `Message sent at ${sentAt}.`;
 }

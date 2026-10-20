@@ -1,8 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { preamble } from "./memory.js";
+import { applyMemoryAudit, memoryAuditSnapshot, preamble } from "./memory.js";
 
 const contexts = new Map();
+const audits = new Map();
 const CONTEXT_TTL_MS = 60 * 60_000;
+const AUDIT_TTL_MS = 2 * 60 * 60_000;
+
+function forbidden(message) {
+  return Object.assign(new Error(message), { status: 403 });
+}
 
 export function beginMemoryRecall(userId, channelId, isDm) {
   const now = Date.now();
@@ -31,6 +37,32 @@ export function recallForSandbox(identity, body) {
     channelId = context.channelId;
     isDm = context.isDm;
   }
-  const text = preamble(identity.userId, channelId, body.query, { isDm, maxChars: body.maxChars, limit: body.limit });
+  const text = preamble(identity.userId, channelId, body.query, { isDm, maxChars: body.maxChars, limit: body.limit, markUsed: true });
   return { text };
+}
+
+export function beginMemoryAudit(userId) {
+  const now = Date.now();
+  for (const [id, audit] of audits) if (audit.expires <= now) audits.delete(id);
+  const id = randomUUID();
+  audits.set(id, { userId: String(userId), expires: now + AUDIT_TTL_MS });
+  return id;
+}
+
+export function endMemoryAudit(id) {
+  audits.delete(id);
+}
+
+export function auditForSandbox(identity, body) {
+  if (!identity?.userId) throw Object.assign(new Error("Unauthorized"), { status: 401 });
+  const audit = audits.get(body?.contextId);
+  if (!audit || audit.userId !== String(identity.userId) || audit.expires <= Date.now()) {
+    throw forbidden("Memory audit is only available during the scheduled weekly audit.");
+  }
+  if (body.action === "list") return { text: memoryAuditSnapshot(identity.userId) };
+  if (body.action === "apply") {
+    const counts = applyMemoryAudit(identity.userId, body.changes);
+    return { text: `Applied: ${counts.merged} merged away, ${counts.dropped} dropped, ${counts.fixed} fixed, ${counts.flagged} flagged unconfirmed.`, counts };
+  }
+  throw Object.assign(new Error("action must be list or apply."), { status: 400 });
 }

@@ -158,13 +158,54 @@ function newId() {
   return randomUUID();
 }
 
-export function remember(scope, ownerId, text, { pinned = false } = {}) {
+const SINGLE_VALUE_FACTS = [/^my name is /, /^my time ?zone is /];
+
+function singleValueKey(text) {
+  const key = normalize(text);
+  return SINGLE_VALUE_FACTS.find((pattern) => pattern.test(key)) || null;
+}
+
+function storeFact(scope, ownerId, text, { pinned = false } = {}) {
   if (!["user", "channel"].includes(scope) || ownerId == null || !String(ownerId) || !String(text).trim()) {
     throw new Error("Memory requires a scope, owner, and nonempty text.");
   }
-  const entry = { id: newId(), text: text.trim(), ts: Date.now(), ...(pinned ? { pinned: true } : {}) };
-  database().insert("fact", scope, ownerId, entry);
-  return entry;
+  const db = database();
+  return db.transaction(() => {
+    const [existing] = db.sameFacts(scope, ownerId, text);
+    if (existing) {
+      db.reassert(scope, ownerId, existing.id, pinned);
+      return { entry: db.fact(scope, ownerId, existing.id), created: false };
+    }
+    const key = singleValueKey(text);
+    const superseded = key ? db.list(scope, ownerId).filter((entry) => key.test(normalize(entry.text))) : [];
+    for (const entry of superseded) db.forget(scope, ownerId, entry.id);
+    const keepPin = pinned || superseded.some((entry) => entry.pinned === true);
+    const entry = { id: newId(), text: text.trim(), ts: Date.now(), ...(keepPin ? { pinned: true } : {}) };
+    db.insert("fact", scope, ownerId, entry);
+    return { entry, created: true };
+  });
+}
+
+export function remember(scope, ownerId, text, options = {}) {
+  return storeFact(scope, ownerId, text, options).entry;
+}
+
+export function reviseMemory(scope, ownerId, id, text) {
+  const db = database();
+  return db.transaction(() => {
+    const current = db.fact(scope, ownerId, id);
+    if (!current) return null;
+    const value = cleanLine(text);
+    if (!value) throw new Error("Memory requires nonempty text.");
+    const duplicate = db.sameFacts(scope, ownerId, value).find((entry) => entry.id !== current.id);
+    if (duplicate) {
+      db.forget(scope, ownerId, current.id);
+      db.reassert(scope, ownerId, duplicate.id, current.pinned === true);
+      return db.fact(scope, ownerId, duplicate.id);
+    }
+    db.revise(scope, ownerId, current.id, value);
+    return db.fact(scope, ownerId, current.id);
+  });
 }
 
 export function forget(scope, ownerId, id) {
@@ -179,16 +220,16 @@ export function pinMemory(scope, ownerId, id, pinned = true) {
   return database().pin(scope, ownerId, id, Boolean(pinned));
 }
 
-export function coreProfile(userId) {
+function coreProfileLines(userId) {
   const lines = [];
   const timeZone = config.userSettings?.[userId]?.timeZone;
-  if (timeZone) lines.push(`- Configured time zone: ${cleanLine(timeZone).slice(0, 80)}`);
+  if (timeZone) lines.push({ id: null, line: `- Configured time zone: ${cleanLine(timeZone).slice(0, 80)}` });
   let entries;
   try { entries = database().coreFacts(userId); } catch {
-    return lines.join("\n");
+    return lines;
   }
   const seen = new Set();
-  let used = lines.join("\n").length;
+  let used = lines.map((item) => item.line).join("\n").length;
   for (const entry of entries) {
     if (containsSensitive(entry.text)) continue;
     const text = cleanLine(entry.text);
@@ -199,10 +240,14 @@ export function coreProfile(userId) {
     if (available < 4 || lines.length >= 5) break;
     const budget = Math.min(available, 180);
     const line = text.length + 2 > budget ? `- ${text.slice(0, budget - 3).trimEnd()}…` : `- ${text}`;
-    lines.push(line);
+    lines.push({ id: entry.id, line });
     used += line.length + (lines.length > 1 ? 1 : 0);
   }
-  return lines.join("\n");
+  return lines;
+}
+
+export function coreProfile(userId) {
+  return coreProfileLines(userId).map((item) => item.line).join("\n");
 }
 
 function dateKey(date = new Date()) {
@@ -254,6 +299,8 @@ export function searchMemory({ userId, channelId, query = "", isDm = false, limi
       id: record.id,
       text,
       scope: record.scope,
+      ownerId: record.ownerId,
+      confirmed: record.confirmed,
       source: record.source,
       citation: record.citation,
       score: Number(score.toFixed(6)),
@@ -290,22 +337,29 @@ export function preamble(userId, channelId, query = "", options = {}) {
   }
   const results = searchMemory({ userId, channelId, query, isDm: options.isDm === true, limit: 100 });
   const lines = [];
-  let used = 0;
+  const used = [];
+  let usedChars = 0;
   for (const result of results) {
     if (recalled?.has(result.citation)) continue;
-    let line = `- ${result.citation} ${result.text}`;
+    let line = `- ${result.citation} ${result.confirmed ? "" : "(unconfirmed) "}${result.text}`;
     const separator = lines.length ? 1 : 0;
-    const available = maxChars - used - separator;
+    const available = maxChars - usedChars - separator;
     if (available <= 0) break;
     if (line.length > available) {
-      const prefix = `- ${result.citation} `;
+      const prefix = `- ${result.citation} ${result.confirmed ? "" : "(unconfirmed) "}`;
       if (available <= prefix.length) break;
       line = `${prefix}${result.text.slice(0, Math.max(0, available - prefix.length - 1)).trimEnd()}…`;
     }
     lines.push(line);
-    used += line.length + separator;
+    usedChars += line.length + separator;
+    if (result.source === "durable") used.push({ scope: result.scope, ownerId: result.ownerId, id: result.id });
     recalled?.add(result.citation);
     if (lines.length >= limit) break;
+  }
+  if (options.markUsed && used.length) {
+    try { database().markUsed(used); } catch (error) {
+      console.warn(`[memory] could not record recall use: ${error.code || error.name || "write error"}`);
+    }
   }
   return lines.join("\n");
 }
@@ -415,6 +469,93 @@ export function compactMemory({ userId, channelId } = {}) {
   });
 }
 
+const AUDIT_NOTE_DAYS = 7;
+const AUDIT_NOTE_LIMIT = 60;
+const AUDIT_FACT_LIMIT = 400;
+const AUDIT_CHANGE_LIMIT = 200;
+const AUDIT_OPS = new Set(["merge", "drop", "fix", "flag"]);
+
+const auditKey = (userId) => `audit:${userId}`;
+const auditDay = (ms) => (Number.isFinite(ms) ? dateKey(new Date(ms)) : "never");
+
+export function memoryAuditSnapshot(userId) {
+  const facts = list("user", userId);
+  const profileIds = new Set(coreProfileLines(userId).map((item) => item.id).filter(Boolean));
+  const since = dateKey(new Date(Date.now() - (AUDIT_NOTE_DAYS - 1) * 86_400_000));
+  const notes = database().recentDaily(userId, since, AUDIT_NOTE_LIMIT);
+  const factLines = facts.slice(0, AUDIT_FACT_LIMIT).map((entry) => {
+    const flags = [entry.pinned === true && "pinned", !entry.confirmed && "unconfirmed", profileIds.has(entry.id) && "core profile"].filter(Boolean);
+    return `- [fact:${entry.id}] ${cleanLine(entry.text)} (saved ${auditDay(entry.ts)}, last seen ${auditDay(entry.lastSeen)}, last recalled ${auditDay(entry.lastUsed)}${flags.length ? `, ${flags.join(", ")}` : ""})`;
+  });
+  const noteLines = notes.map((note) => `- [daily:${note.day}] ${cleanLine(note.text).slice(0, 400)}`);
+  return [
+    `User facts (${facts.length}${facts.length > factLines.length ? `, first ${factLines.length} shown` : ""}):`,
+    factLines.join("\n") || "- none",
+    `DM notes from the last ${AUDIT_NOTE_DAYS} days, newest first (read-only evidence):`,
+    noteLines.join("\n") || "- none",
+  ].join("\n");
+}
+
+function auditText(text) {
+  const value = cleanLine(text);
+  if (!value || value.length > 2_000 || containsSensitive(value)) {
+    throw Object.assign(new Error("Fact text must be nonempty, at most 2,000 characters, and free of secrets."), { status: 400 });
+  }
+  return value;
+}
+
+export function applyMemoryAudit(userId, changes) {
+  if (!Array.isArray(changes) || changes.length > AUDIT_CHANGE_LIMIT) {
+    throw Object.assign(new Error(`changes must be an array of at most ${AUDIT_CHANGE_LIMIT} items.`), { status: 400 });
+  }
+  const db = database();
+  return db.transaction(() => {
+    const counts = { merged: 0, dropped: 0, fixed: 0, flagged: 0 };
+    const factFor = (id) => {
+      const entry = db.fact("user", userId, String(id ?? ""));
+      if (!entry) throw Object.assign(new Error(`Unknown fact id ${JSON.stringify(id)}; list again and retry.`), { status: 400 });
+      return entry;
+    };
+    for (const change of changes) {
+      if (!AUDIT_OPS.has(change?.op)) throw Object.assign(new Error(`Unknown op ${JSON.stringify(change?.op)}.`), { status: 400 });
+      if (change.op === "merge") {
+        if (!Array.isArray(change.ids) || new Set(change.ids).size < 2) {
+          throw Object.assign(new Error("merge needs at least two distinct ids."), { status: 400 });
+        }
+        const text = auditText(change.text);
+        const entries = [...new Set(change.ids)].map(factFor).sort((a, b) => a.ts - b.ts);
+        const [kept, ...rest] = entries;
+        for (const entry of rest) db.forget("user", userId, entry.id);
+        if (rest.some((entry) => entry.pinned === true)) db.pin("user", userId, kept.id, true);
+        reviseMemory("user", userId, kept.id, text);
+        counts.merged += rest.length;
+      } else if (change.op === "drop") {
+        const entry = factFor(change.id);
+        if (entry.pinned === true) throw Object.assign(new Error(`Fact ${entry.id} is pinned by the user; flag it instead of dropping it.`), { status: 400 });
+        db.forget("user", userId, entry.id);
+        counts.dropped += 1;
+      } else if (change.op === "fix") {
+        const entry = factFor(change.id);
+        reviseMemory("user", userId, entry.id, auditText(change.text));
+        counts.fixed += 1;
+      } else {
+        db.setConfirmed("user", userId, factFor(change.id).id, false);
+        counts.flagged += 1;
+      }
+    }
+    db.setMeta(auditKey(userId), JSON.stringify({ at: Date.now(), ...counts }));
+    return counts;
+  });
+}
+
+export function memoryAuditStatus(userId) {
+  const db = database();
+  const facts = list("user", userId);
+  let last = null;
+  try { last = JSON.parse(db.meta(auditKey(userId)) || "null"); } catch {}
+  return { facts: facts.length, unconfirmed: facts.filter((entry) => !entry.confirmed).length, last };
+}
+
 const SENSITIVE_RE = /\b(?:api[_ -]?key|password|passwd|secret|access[_ -]?token|auth(?:orization)?[_ -]?token|bearer)\b\s*(?:is|=|:)?\s*[^\s,;]+|\b(?:sk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/gi;
 
 function containsSensitive(text) {
@@ -468,14 +609,9 @@ export function captureConversation({ userId, channelId, isDm, userText, assista
       database().pruneDaily(userId, channelId, today, cutoff, DAILY_MAX_RECORDS);
       notesAdded = 1;
     }
-    const existing = new Set(list("user", userId).map((entry) => normalize(entry.text)));
     const facts = [];
     for (const fact of extractDurableFacts ? extractFacts(userText) : []) {
-      const key = normalize(fact);
-      if (existing.has(key)) continue;
-      remember("user", userId, fact);
-      existing.add(key);
-      facts.push(fact);
+      if (storeFact("user", userId, fact).created) facts.push(fact);
     }
     return { notesAdded, factsAdded: facts.length, facts };
   });
