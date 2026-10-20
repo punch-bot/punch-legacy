@@ -17,7 +17,7 @@ export function createDeviceSignin({ login, save, now = Date.now }) {
   let flow = null;
 
   function expireStaleCode() {
-    if (flow?.status !== "pending" || now() < flow.expiresAt) return;
+    if (flow?.status !== "pending" || flow.redeemed || now() < flow.expiresAt) return;
     flow.controller.abort();
     Object.assign(flow, { status: "error", error: "The sign-in code expired." });
   }
@@ -50,6 +50,7 @@ export function createDeviceSignin({ login, save, now = Date.now }) {
         }))
         .then(async (credential) => {
           if (flow !== current) return settle({ status: "cancelled" });
+          current.redeemed = true;
           await save(credential, controller.signal);
           settle({ status: "success" });
         })

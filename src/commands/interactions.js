@@ -812,8 +812,9 @@ export function registerInteractions(client) {
       const uid = interaction.user.id;
       if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const signingOut = interaction.options.getSubcommand() === "signout";
       try {
-        if (interaction.options.getSubcommand() === "signout") {
+        if (signingOut) {
           const { removed } = await chatgptSupervisor(uid, "DELETE", "/chatgpt");
           await interaction.editReply(removed ? "✅ Signed out of ChatGPT. Pi is restarting…\nIf you were using an `openai-codex/...` model, pick another in `/models`." : "You weren't signed in to ChatGPT.");
           return;
@@ -823,7 +824,7 @@ export function registerInteractions(client) {
         await interaction.editReply(chatgptCodeReply(flow));
         watchChatgptSignin(interaction, uid, flow.expiresAt);
       } catch (err) {
-        await interaction.editReply({ content: `⚠️ ChatGPT sign-in failed: ${err.message}`, components: [] });
+        await interaction.editReply({ content: `⚠️ ChatGPT ${signingOut ? "sign-out" : "sign-in"} failed: ${err.message}`, components: [] });
       }
       return;
     }
