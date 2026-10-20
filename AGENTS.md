@@ -13,7 +13,7 @@ Punch is a personal assistant that lives in Discord and, optionally, iMessage vi
 npm install
 npm test             # node --test test/*.mjs, no Docker needed
 npm run typecheck
-npm run lint         # Spectrum files only
+npm run lint         # all of src; recommended rules on Spectrum files only
 docker compose up --build -d && docker compose logs -f bot
 docker compose build sandbox   # rebuild the sandbox image (profile: sandbox)
 ```
@@ -24,7 +24,7 @@ Compose needs a `.env` file. It's gitignored, so copy it from `.env.example`. Wi
 
 Writing tests is strictly forbidden unless you're adding new functionality. Bug fixes, refactors, cleanups, and behavior tweaks don't get new tests, and you don't add tests to existing code. When a change does add new functionality, write the fewest tests that cover it.
 
-Lint rules are favored over tests. If an ESLint rule (built-in, `no-restricted-syntax`, or `no-restricted-imports`) can enforce an invariant, add the rule to `eslint.config.js` instead of writing a test. Tightening lint is always allowed. Note that `npm run lint` only covers the Spectrum files today, so widen its file list when the rule applies elsewhere.
+Lint rules are favored over tests. If an ESLint rule (built-in, `no-restricted-syntax`, or `no-restricted-imports`) can enforce an invariant, add the rule to `eslint.config.js` instead of writing a test. Tightening lint is always allowed. `npm run lint` covers all of `src`, but `js.configs.recommended` applies only to the Spectrum files, so scope a new rule's `files` to where it should apply.
 
 Never change the thing that judges your work to make your work pass. That covers tests, assertions, fixtures, lint and type configs, timeouts, thresholds, and the task's own requirements. Don't skip, loosen, or delete them, and don't special-case code for them. When a check fails, fix the code. If you think the check itself is wrong, stop and say so rather than editing it.
 
