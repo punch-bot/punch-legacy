@@ -11,6 +11,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from "discord.js";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import * as store from "../memory.js";
 import * as sandbox from "../sandbox-manager.js";
@@ -103,6 +104,58 @@ async function setModelNotice(uid, model) {
   }
 }
 
+const CHATGPT_MODEL = "openai-codex/gpt-6.1-sol";
+const CHATGPT_MODEL_BUTTON_ID = "chatgpt_model";
+const CHATGPT_POLL_MS = 5_000;
+const INTERACTION_TOKEN_TTL_MS = 14.5 * 60_000;
+
+async function chatgptSupervisor(uid, method, path) {
+  const res = await fetch(`${apiUrlFor(uid)}${path}`, { method, headers: { authorization: supervisorAuth() } });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404) throw new Error("Your sandbox predates ChatGPT sign-in. Ask the bot owner to recreate it.");
+  if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
+  return data;
+}
+
+function chatgptCodeReply({ userCode, verificationUri, expiresAt }) {
+  return {
+    content: [
+      "**Sign in with ChatGPT**",
+      `1. Open ${verificationUri} and sign in to your ChatGPT account.`,
+      `2. Enter this code: \`${userCode}\``,
+      `-# The code expires <t:${Math.floor(expiresAt / 1000)}:R>. This message updates once you're signed in.`,
+    ].join("\n"),
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel("Open ChatGPT sign-in").setURL(verificationUri),
+    )],
+  };
+}
+
+function chatgptResultReply(flow) {
+  if (flow.status === "success") {
+    return {
+      content: `✅ Signed in with ChatGPT. Pi is restarting with your subscription.\nSwitch to \`${CHATGPT_MODEL}\` below, or pick another ChatGPT model in \`/models\`.`,
+      components: [new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(CHATGPT_MODEL_BUTTON_ID).setStyle(ButtonStyle.Primary).setLabel("Use GPT-6.1 Sol"),
+      )],
+    };
+  }
+  if (flow.status === "error") return { content: `⚠️ ChatGPT sign-in failed: ${flow.error}`, components: [] };
+  return { content: "ChatGPT sign-in was cancelled. Run `/chatgpt signin` to try again.", components: [] };
+}
+
+async function watchChatgptSignin(interaction, uid, expiresAt) {
+  const deadline = Math.min(expiresAt, interaction.createdTimestamp + INTERACTION_TOKEN_TTL_MS);
+  while (Date.now() < deadline) {
+    await sleep(CHATGPT_POLL_MS);
+    const flow = await chatgptSupervisor(uid, "GET", "/chatgpt").catch(() => null);
+    if (!flow || flow.status === "pending") continue;
+    await interaction.editReply(chatgptResultReply(flow)).catch(() => {});
+    return;
+  }
+  await interaction.editReply({ content: "⌛ The sign-in code expired. Run `/chatgpt signin` again.", components: [] }).catch(() => {});
+}
+
 async function memoryReplyGuard(interaction, fn) {
   try {
     return await fn();
@@ -118,6 +171,12 @@ export function registerInteractions(client) {
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith("stats:")) {
       await statistics.handleStatisticsInteraction(interaction, statisticsExtrasForUser);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId === CHATGPT_MODEL_BUTTON_ID) {
+      await interaction.deferUpdate();
+      await interaction.editReply({ content: await setModelNotice(interaction.user.id, CHATGPT_MODEL), components: [] });
       return;
     }
 
@@ -745,6 +804,26 @@ export function registerInteractions(client) {
         });
       } catch (err) {
         await interaction.reply({ content: `⚠️ Error: ${err.message}`, flags: MessageFlags.Ephemeral });
+      }
+      return;
+    }
+
+    if (interaction.commandName === "chatgpt") {
+      const uid = interaction.user.id;
+      if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      try {
+        if (interaction.options.getSubcommand() === "signout") {
+          const { removed } = await chatgptSupervisor(uid, "DELETE", "/chatgpt");
+          await interaction.editReply(removed ? "✅ Signed out of ChatGPT. Pi is restarting…" : "You weren't signed in to ChatGPT.");
+          return;
+        }
+        const flow = await chatgptSupervisor(uid, "POST", "/chatgpt/login");
+        if (flow.status !== "pending") { await interaction.editReply(chatgptResultReply(flow)); return; }
+        await interaction.editReply(chatgptCodeReply(flow));
+        watchChatgptSignin(interaction, uid, flow.expiresAt);
+      } catch (err) {
+        await interaction.editReply({ content: `⚠️ ChatGPT sign-in failed: ${err.message}`, components: [] });
       }
       return;
     }
