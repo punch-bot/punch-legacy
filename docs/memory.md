@@ -34,7 +34,7 @@ Schema version 3 adds three columns to `memory_records`:
 
 - `last_seen`: when the fact was written or last restated. Backfilled from `ts`.
 - `last_used`: when bot-backed `recall_memory` last returned the fact to Pi, throttled to one write per fact per hour. `/memory search` and `/memory explain` don't count as use. Facts shown in the core profile aren't stamped on every turn; the audit listing marks them as `core profile` instead.
-- `confirmed`: `1` by default, `0` when the audit flags a fact as uncertain. `/memory export` writes `confirmed: false` for unconfirmed facts, and `/memory import` restores it. Older exports without the field import as confirmed.
+- `confirmed`: `1` by default, `0` when the audit flags a fact as uncertain. `/memory export` writes `confirmed: false` for unconfirmed facts, and `/memory import` restores it. Older exports without the field import as confirmed. Imported facts keep their original `ts` but get the import time as `last_seen`, because an import is a fresh write.
 
 ## Weekly audit
 

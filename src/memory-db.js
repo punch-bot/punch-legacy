@@ -126,13 +126,13 @@ export class MemoryDatabase {
     }
   }
 
-  insert(kind, scope, ownerId, entry, channelId = "", day = "") {
+  insert(kind, scope, ownerId, entry, channelId = "", day = "", lastSeen = entry.ts) {
     this.db.prepare(`INSERT INTO memory_records
       (kind, scope, owner_id, channel_id, day, id, ts, text, normalized, search_text, payload, pinned, last_seen, confirmed)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(kind, scope, String(ownerId), String(channelId), day, entry.id, entry.ts,
         entry.text, normalize(entry.text), terms(entry.text).join(" "), JSON.stringify(entry), entry.pinned === true ? 1 : 0,
-        entry.ts, entry.confirmed === false ? 0 : 1);
+        lastSeen, entry.confirmed === false ? 0 : 1);
   }
 
   importRecord(file, index, reservedIds, kind, scope, ownerId, entry, channelId = "", day = "") {

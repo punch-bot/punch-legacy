@@ -447,7 +447,7 @@ export function importUserMemory(userId, document, { source = "import" } = {}) {
         origin: String(record.origin || document.source || source).slice(0, 120),
         ...(record.pinned === true ? { pinned: true } : {}),
         ...(record.confirmed === false ? { confirmed: false } : {}),
-      });
+      }, "", "", Date.now());
       existing.add(key);
       imported += 1;
     }
