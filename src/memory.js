@@ -489,7 +489,7 @@ const AUDIT_CHANGE_LIMIT = 200;
 const AUDIT_OPS = new Set(["add", "merge", "drop", "fix", "flag"]);
 
 export function newAuditRun() {
-  return { since: Date.now(), touched: new Set(), totals: { added: 0, merged: 0, dropped: 0, fixed: 0, flagged: 0, skipped: 0 } };
+  return { since: Date.now(), touched: new Map(), totals: { added: 0, merged: 0, dropped: 0, fixed: 0, flagged: 0, skipped: 0 } };
 }
 
 const auditKey = (userId) => `audit:${userId}`;
@@ -529,7 +529,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
     throw Object.assign(new Error(`changes must be an array of at most ${AUDIT_CHANGE_LIMIT} items.`), { status: 400 });
   }
   const db = database();
-  const touched = new Set();
+  const touched = new Map();
   const counts = db.transaction(() => {
     const batch = { added: 0, merged: 0, dropped: 0, fixed: 0, flagged: 0, skipped: 0 };
     const factFor = (id) => {
@@ -537,30 +537,43 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
       if (!entry) throw Object.assign(new Error(`Unknown fact id ${JSON.stringify(id)}; list again and retry.`), { status: 400 });
       return entry;
     };
-    const restated = (entry) => entry.lastSeen > run.since && !run.touched.has(entry.id) && !touched.has(entry.id);
+    const auditSeen = (id) => touched.get(id) ?? run.touched.get(id) ?? -Infinity;
+    const restated = (entry) => entry.lastSeen > run.since && entry.lastSeen > auditSeen(entry.id);
+    const mark = (id) => touched.set(id, db.fact("user", userId, id).lastSeen);
+    const related = (text) => {
+      const key = singleValueKey(text);
+      const same = db.sameFacts("user", userId, text);
+      return key ? [...same, ...db.list("user", userId).filter((entry) => key.test(normalize(entry.text)))] : same;
+    };
     for (const change of changes) {
       if (!AUDIT_OPS.has(change?.op)) throw Object.assign(new Error(`Unknown op ${JSON.stringify(change?.op)}.`), { status: 400 });
       if (change.op === "add") {
-        touched.add(storeFact("user", userId, auditText(change.text)).entry.id);
-        batch.added += 1;
+        const text = auditText(change.text);
+        if (related(text).some(restated)) {
+          batch.skipped += 1;
+        } else if (!db.sameFacts("user", userId, text).length) {
+          mark(storeFact("user", userId, text).entry.id);
+          batch.added += 1;
+        }
         continue;
       }
       if (change.op === "merge" && (!Array.isArray(change.ids) || new Set(change.ids).size < 2)) {
         throw Object.assign(new Error("merge needs at least two distinct ids."), { status: 400 });
       }
       const entries = (change.op === "merge" ? [...new Set(change.ids)] : [change.id]).map(factFor);
-      if (entries.some(restated)) {
+      const text = ["merge", "fix"].includes(change.op) ? auditText(change.text) : null;
+      if ([...entries, ...(text ? related(text) : [])].some(restated)) {
         batch.skipped += 1;
         continue;
       }
       if (change.op === "merge") {
-        const text = auditText(change.text);
+        const uncertain = [...entries, ...db.sameFacts("user", userId, text)].some((entry) => !entry.confirmed);
         const [kept, ...rest] = entries.sort((a, b) => a.ts - b.ts);
         for (const entry of rest) db.forget("user", userId, entry.id);
         if (rest.some((entry) => entry.pinned === true)) db.pin("user", userId, kept.id, true);
         const merged = reviseMemory("user", userId, kept.id, text);
-        if (entries.some((entry) => !entry.confirmed)) db.setConfirmed("user", userId, merged.id, false);
-        touched.add(merged.id);
+        if (uncertain) db.setConfirmed("user", userId, merged.id, false);
+        mark(merged.id);
         batch.merged += rest.length;
       } else if (change.op === "drop") {
         const [entry] = entries;
@@ -568,7 +581,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
         db.forget("user", userId, entry.id);
         batch.dropped += 1;
       } else if (change.op === "fix") {
-        touched.add(reviseMemory("user", userId, entries[0].id, auditText(change.text)).id);
+        mark(reviseMemory("user", userId, entries[0].id, text).id);
         batch.fixed += 1;
       } else {
         db.setConfirmed("user", userId, entries[0].id, false);
@@ -579,7 +592,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
     db.setMeta(auditKey(userId), JSON.stringify({ at: Date.now(), ...totals }));
     return batch;
   });
-  for (const id of touched) run.touched.add(id);
+  for (const [id, seen] of touched) run.touched.set(id, seen);
   for (const name of Object.keys(run.totals)) run.totals[name] += counts[name];
   return counts;
 }
