@@ -48,13 +48,13 @@ async function fireMemoryAudit(routine) {
       if (contextId) endMemoryAudit(contextId);
     }
   });
-  const { clean } = persistMemoryTags(res.text, uid, null);
   state.recordActivity({
     userId: uid, type: "memory-audit", prompt: routine.payload.slice(0, 500),
-    response: clean.slice(0, 2000), sessionId: res.sessionId, status: "success",
+    response: String(res.error || res.text || "").slice(0, 2000), sessionId: res.sessionId, status: res.error ? "error" : "success",
     duration: Date.now() - start, routineId: routine.id,
     ...statistics.tokenFieldsFromAgent(res),
   });
+  if (res.error) throw new Error(`memory audit ${routine.id} failed: ${res.error}`);
 }
 
 async function fireRoutine(routine) {

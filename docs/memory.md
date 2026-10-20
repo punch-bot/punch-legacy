@@ -40,7 +40,7 @@ Schema version 3 adds three columns to `memory_records`:
 
 ### Schedule
 
-Every registered user gets one built-in routine of type `memory-audit` in the existing routine store. The bot creates it at startup and after `/sandbox create`, and deletes it after `/sandbox remove` or at the next startup once the user is unregistered. It runs weekly at a fixed time between 03:00 and 05:59 in the user's configured time zone. The weekday and minute come from a hash of the user id, so audits don't all run at once. The routine shows in `/routines` lists as `[memory audit]`. It can be paused and resumed but not removed, because the next sync would just recreate it. Failures use the normal routine backoff and pause after the usual attempt limit.
+Every registered user gets one built-in routine of type `memory-audit` in the existing routine store. The bot creates it at startup and after `/sandbox create`, and deletes it after `/sandbox remove` or at the next startup once the user is unregistered. It runs weekly at a fixed time between 03:00 and 05:59 in the user's configured time zone, and setting or clearing the time zone reschedules it. The weekday and minute come from a hash of the user id, so audits don't all run at once. The routine shows in `/routines` lists as `[memory audit]`. It can be paused and resumed but not removed, because the next sync would just recreate it. Failures, including a provider error returned as the turn's reply, use the normal routine backoff and pause after the usual attempt limit.
 
 ### Run
 
@@ -50,7 +50,7 @@ When the routine fires, the bot:
 2. runs exact-duplicate compaction on the user's facts (the same as `/memory compact` without the channel part);
 3. creates an audit context id, valid for two hours and revoked when the turn ends;
 4. runs one Pi turn in a fresh session that isn't stored, with a `--- Weekly memory audit ---` block that points Pi at the bundled `memory-audit` skill;
-5. strips any memory tags in the reply, delivers nothing, and records the one-line summary as a `memory-audit` activity.
+5. delivers nothing and records the one-line summary as a `memory-audit` activity. Memory tags in the reply are not executed, so every fact change goes through the validated `apply` path.
 
 If memory is unavailable, the turn still runs without a context id, and Pi audits only project memory and skills.
 
@@ -64,7 +64,7 @@ If memory is unavailable, the turn still runs without a context id, and Pi audit
 
 `memory_audit` lives in the existing `memory-recall.ts` deployment extension and calls `POST /memory/audit`:
 
-- `action: "list"` returns every user-scope fact (up to 400) with its id, dates, and pinned, unconfirmed, and core-profile flags, plus up to 60 DM notes from the last seven days.
+- `action: "list"` returns user-scope facts 400 at a time with their ids, dates, and pinned, unconfirmed, and core-profile flags. When more remain, the listing names the `offset` for the next page. The first page also includes up to 60 DM notes from the last seven days.
 - `action: "apply"` takes up to 200 changes (`merge` with `ids` and `text`, `drop` with `id`, `fix` with `id` and `text`, `flag` with `id`) and applies them in one transaction. Any invalid change (an unknown id, dropping a pinned fact, empty or secret-looking text) rejects the whole batch with a 400 that names the problem. Successful batches record their counts in `memory_meta` under `audit:<userId>`.
 
 Authorization works like recall: the user comes from the sandbox's bearer token, and the request must carry a bot-created audit context id for that user. Recall context ids and ordinary chat turns get 403, so a prompt-injected chat turn can't mass-edit memory.
@@ -73,7 +73,7 @@ Authorization works like recall: the user comes from the sandbox's bearer token,
 
 Uncertain items stay inside the system and get verified the next time they matter. Nothing is reported to a person.
 
-- **Facts.** `flag` sets `confirmed = 0`. Unconfirmed facts drop out of the core profile unless pinned, and recall shows them as `(unconfirmed) …` (so does `!memories`). The `memory` skill tells Pi to check such a fact with the person when it becomes relevant, then confirm it with `<remember replaces="ID">`, correct it, or `<forget>` it. Restating the fact in conversation also confirms it.
+- **Facts.** `flag` sets `confirmed = 0`. Unconfirmed facts drop out of the core profile unless pinned. Pinned ones stay in it with an `(unconfirmed)` prefix. Recall and `!memories` also show them as `(unconfirmed) …`. The `memory` skill tells Pi to check such a fact with the person when it becomes relevant, then confirm it with `<remember replaces="ID">`, correct it, or `<forget>` it. Restating the fact in conversation also confirms it.
 - **Project memory.** The audit prefixes unverifiable lines with `[unconfirmed] `. The `project-memory` skill tells Pi to verify those lines against the workspace when it reads them.
 - **Skills.** The audit adds an `Unconfirmed: <reason>` line after the frontmatter instead of deleting the skill. `SYSTEM.md` tells Pi to check such a skill before relying on it and to remove the line once verified.
 

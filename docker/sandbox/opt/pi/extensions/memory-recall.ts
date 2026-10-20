@@ -63,6 +63,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       contextId: Type.String({ description: "Audit contextId from the weekly memory audit turn" }),
       action: Type.Union([Type.Literal("list"), Type.Literal("apply")]),
+      offset: Type.Optional(Type.Integer({ minimum: 0, description: "For list: index of the first fact to return when the previous listing said more remain" })),
       changes: Type.Optional(Type.Array(Type.Object({
         op: Type.Union([Type.Literal("merge"), Type.Literal("drop"), Type.Literal("fix"), Type.Literal("flag")]),
         id: Type.Optional(Type.String({ description: "Fact id for drop, fix, and flag" })),
@@ -71,7 +72,7 @@ export default function (pi: ExtensionAPI) {
       }), { maxItems: 200 })),
     }),
     async execute(_toolCallId, args, signal) {
-      const response = await botRequest("/memory/audit", { contextId: args.contextId, action: args.action, changes: args.changes || [] }, signal);
+      const response = await botRequest("/memory/audit", { contextId: args.contextId, action: args.action, offset: args.offset, changes: args.changes || [] }, signal);
       const data = await response.json().catch(() => ({})) as { text?: string; error?: string };
       if (!response.ok) throw new Error(data.error || `Punch memory audit returned HTTP ${response.status}.`);
       return { content: [{ type: "text" as const, text: data.text || "Done." }], details: { action: args.action } };

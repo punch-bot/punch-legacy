@@ -232,8 +232,8 @@ function coreProfileLines(userId) {
   let used = lines.map((item) => item.line).join("\n").length;
   for (const entry of entries) {
     if (containsSensitive(entry.text)) continue;
-    const text = cleanLine(entry.text);
-    const key = normalize(text);
+    const text = `${entry.confirmed ? "" : "(unconfirmed) "}${cleanLine(entry.text)}`;
+    const key = normalize(entry.text);
     if (seen.has(key)) continue;
     seen.add(key);
     const available = 600 - used - (lines.length ? 1 : 0);
@@ -478,22 +478,25 @@ const AUDIT_OPS = new Set(["merge", "drop", "fix", "flag"]);
 const auditKey = (userId) => `audit:${userId}`;
 const auditDay = (ms) => (Number.isFinite(ms) ? dateKey(new Date(ms)) : "never");
 
-export function memoryAuditSnapshot(userId) {
+export function memoryAuditSnapshot(userId, offset = 0) {
   const facts = list("user", userId);
+  const start = Math.min(Math.max(0, Math.floor(Number(offset) || 0)), facts.length);
   const profileIds = new Set(coreProfileLines(userId).map((item) => item.id).filter(Boolean));
   const since = dateKey(new Date(Date.now() - (AUDIT_NOTE_DAYS - 1) * 86_400_000));
   const notes = database().recentDaily(userId, since, AUDIT_NOTE_LIMIT);
-  const factLines = facts.slice(0, AUDIT_FACT_LIMIT).map((entry) => {
+  const factLines = facts.slice(start, start + AUDIT_FACT_LIMIT).map((entry) => {
     const flags = [entry.pinned === true && "pinned", !entry.confirmed && "unconfirmed", profileIds.has(entry.id) && "core profile"].filter(Boolean);
     return `- [fact:${entry.id}] ${cleanLine(entry.text)} (saved ${auditDay(entry.ts)}, last seen ${auditDay(entry.lastSeen)}, last recalled ${auditDay(entry.lastUsed)}${flags.length ? `, ${flags.join(", ")}` : ""})`;
   });
   const noteLines = notes.map((note) => `- [daily:${note.day}] ${cleanLine(note.text).slice(0, 400)}`);
+  const end = start + factLines.length;
   return [
-    `User facts (${facts.length}${facts.length > factLines.length ? `, first ${factLines.length} shown` : ""}):`,
+    `User facts ${factLines.length ? `${start + 1}-${end}` : "none"} of ${facts.length}:`,
     factLines.join("\n") || "- none",
-    `DM notes from the last ${AUDIT_NOTE_DAYS} days, newest first (read-only evidence):`,
-    noteLines.join("\n") || "- none",
-  ].join("\n");
+    end < facts.length ? `More facts remain: call list again with offset ${end} before applying.` : "",
+    start === 0 ? `DM notes from the last ${AUDIT_NOTE_DAYS} days, newest first (read-only evidence):` : "",
+    start === 0 ? noteLines.join("\n") || "- none" : "",
+  ].filter(Boolean).join("\n");
 }
 
 function auditText(text) {

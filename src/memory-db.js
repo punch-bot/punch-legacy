@@ -276,11 +276,11 @@ export class MemoryDatabase {
   }
 
   coreFacts(userId) {
-    return this.db.prepare(`SELECT payload FROM memory_records WHERE kind = 'fact' AND scope = 'user' AND owner_id = ?
+    return this.db.prepare(`SELECT payload, last_seen, last_used, confirmed FROM memory_records WHERE kind = 'fact' AND scope = 'user' AND owner_id = ?
       AND (pinned = 1 OR confirmed = 1)
       ORDER BY pinned DESC, CASE WHEN normalized LIKE 'my name is %' OR normalized LIKE 'my time%zone is %'
         OR normalized LIKE 'i prefer %' THEN 0 ELSE 1 END, ts, rowid LIMIT 50`)
-      .all(String(userId)).map((row) => JSON.parse(row.payload));
+      .all(String(userId)).map(factRow);
   }
 
   search({ userId, channelId, isDm, queryTerms, cutoff }) {

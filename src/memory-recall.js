@@ -59,7 +59,7 @@ export function auditForSandbox(identity, body) {
   if (!audit || audit.userId !== String(identity.userId) || audit.expires <= Date.now()) {
     throw forbidden("Memory audit is only available during the scheduled weekly audit.");
   }
-  if (body.action === "list") return { text: memoryAuditSnapshot(identity.userId) };
+  if (body.action === "list") return { text: memoryAuditSnapshot(identity.userId, body.offset) };
   if (body.action === "apply") {
     const counts = applyMemoryAudit(identity.userId, body.changes);
     return { text: `Applied: ${counts.merged} merged away, ${counts.dropped} dropped, ${counts.fixed} fixed, ${counts.flagged} flagged unconfirmed.`, counts };

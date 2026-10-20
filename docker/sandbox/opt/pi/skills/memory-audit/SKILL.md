@@ -18,7 +18,7 @@ Each item belongs in one place. When something is in the wrong store, add it to 
 
 ## 1. Saved facts
 
-1. call `memory_audit` with `action: "list"` and the audit contextId
+1. call `memory_audit` with `action: "list"` and the audit contextId. when the listing says more facts remain, call it again with the `offset` it gives until you've seen them all
 2. pick changes:
    - `merge` duplicates or near-duplicates into one clear fact (`ids` and `text`)
    - `fix` a fact that the notes or other facts show is wrong or out of date (`id` and `text`)
@@ -45,5 +45,6 @@ Each item belongs in one place. When something is in the wrong store, add it to 
 ## Rules
 
 - don't message anyone, create routines, or start other work
+- change saved facts only through `memory_audit`. `<remember>` and `<forget>` tags in this reply are ignored
 - never write secrets into any memory
 - finish with one line counting what changed in each store

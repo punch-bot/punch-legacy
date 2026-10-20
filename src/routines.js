@@ -250,6 +250,20 @@ function memoryAuditCron(userId) {
   return `${hash % 60} ${3 + (Math.floor(hash / 60) % 3)} * * ${Math.floor(hash / 180) % 7}`;
 }
 
+function retime(routine, timezone) {
+  if (routine.timezone === timezone) return false;
+  routine.timezone = timezone;
+  routine.nextRunAt = computeNextRun(routine.schedule, Date.now(), timezone);
+  return true;
+}
+
+export function retimeMemoryAudit(userId, timezone) {
+  const routine = routines.find((entry) => entry.type === MEMORY_AUDIT_TYPE && entry.userId === String(userId));
+  if (!routine || !retime(routine, validTimezone(timezone) ? timezone : DEFAULT_TIME_ZONE)) return;
+  saveRoutines();
+  rescheduleCallback?.();
+}
+
 export function syncMemoryAudits(users) {
   const registered = new Map(users.map((user) => [String(user.userId), user]));
   const before = routines.length;
@@ -259,10 +273,7 @@ export function syncMemoryAudits(users) {
     const timezone = validTimezone(user.timezone) ? user.timezone : DEFAULT_TIME_ZONE;
     const existing = routines.find((routine) => routine.type === MEMORY_AUDIT_TYPE && routine.userId === userId);
     if (existing) {
-      if (existing.timezone === timezone) continue;
-      existing.timezone = timezone;
-      existing.nextRunAt = computeNextRun(existing.schedule, Date.now(), timezone);
-      changed = true;
+      if (retime(existing, timezone)) changed = true;
       continue;
     }
     const schedule = { kind: "cron", cron: memoryAuditCron(userId) };
