@@ -16,8 +16,8 @@ async function piAuthStorage() {
   return AuthStorage.create(AUTH_FILE);
 }
 
-async function saveCodexCredential(credential) {
-  await (await piAuthStorage()).modify(CODEX_PROVIDER_ID, async () => credential);
+async function saveCodexCredential(credential, signal) {
+  await (await piAuthStorage()).modify(CODEX_PROVIDER_ID, async () => credential, { signal });
   log("chatgpt sign-in saved");
   forceRestart();
 }

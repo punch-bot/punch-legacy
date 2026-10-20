@@ -153,7 +153,7 @@ async function watchChatgptSignin(interaction, uid, expiresAt) {
     await interaction.editReply(chatgptResultReply(flow)).catch(() => {});
     return;
   }
-  await interaction.editReply({ content: "⌛ The sign-in code expired. Run `/chatgpt signin` again.", components: [] }).catch(() => {});
+  await interaction.editReply({ content: "⌛ This message stopped updating. If you already entered the code, Pi will finish signing you in; otherwise run `/chatgpt signin` again.", components: [] }).catch(() => {});
 }
 
 async function memoryReplyGuard(interaction, fn) {
@@ -815,7 +815,7 @@ export function registerInteractions(client) {
       try {
         if (interaction.options.getSubcommand() === "signout") {
           const { removed } = await chatgptSupervisor(uid, "DELETE", "/chatgpt");
-          await interaction.editReply(removed ? "✅ Signed out of ChatGPT. Pi is restarting…" : "You weren't signed in to ChatGPT.");
+          await interaction.editReply(removed ? "✅ Signed out of ChatGPT. Pi is restarting…\nIf you were using an `openai-codex/...` model, pick another in `/models`." : "You weren't signed in to ChatGPT.");
           return;
         }
         const flow = await chatgptSupervisor(uid, "POST", "/chatgpt/login");

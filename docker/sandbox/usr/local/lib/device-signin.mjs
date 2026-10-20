@@ -50,7 +50,7 @@ export function createDeviceSignin({ login, save, now = Date.now }) {
         }))
         .then(async (credential) => {
           if (flow !== current) return settle({ status: "cancelled" });
-          await save(credential);
+          await save(credential, controller.signal);
           settle({ status: "success" });
         })
         .catch((error) => {
