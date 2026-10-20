@@ -225,7 +225,7 @@ export class MemoryDatabase {
   }
 
   reassert(scope, ownerId, id, pinned) {
-    this.db.prepare(`UPDATE memory_records SET last_seen = ?, confirmed = 1,
+    this.db.prepare(`UPDATE memory_records SET last_seen = max(?, coalesce(last_seen, 0) + 1), confirmed = 1,
       pinned = max(pinned, ?), payload = CASE WHEN ? = 1 THEN json_set(payload, '$.pinned', json('true')) ELSE payload END
       WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ?`)
       .run(Date.now(), pinned ? 1 : 0, pinned ? 1 : 0, scope, String(ownerId), String(id));
@@ -233,7 +233,7 @@ export class MemoryDatabase {
 
   revise(scope, ownerId, id, text) {
     return this.db.prepare(`UPDATE memory_records SET text = ?, normalized = ?, search_text = ?,
-      payload = json_set(payload, '$.text', ?), last_seen = ?, confirmed = 1
+      payload = json_set(payload, '$.text', ?), last_seen = max(?, coalesce(last_seen, 0) + 1), confirmed = 1
       WHERE kind = 'fact' AND scope = ? AND owner_id = ? AND id = ?`)
       .run(text, normalize(text), terms(text).join(" "), text, Date.now(), scope, String(ownerId), String(id)).changes > 0;
   }

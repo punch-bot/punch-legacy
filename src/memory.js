@@ -569,7 +569,7 @@ export function applyMemoryAudit(userId, changes, run = newAuditRun()) {
         continue;
       }
       if (change.op === "merge") {
-        const uncertain = [...entries, ...db.sameFacts("user", userId, text)].some((entry) => !entry.confirmed);
+        const uncertain = [...entries, ...related(text)].some((entry) => !entry.confirmed);
         const [kept, ...rest] = entries.sort((a, b) => a.ts - b.ts);
         for (const entry of rest) db.forget("user", userId, entry.id);
         if (rest.some((entry) => entry.pinned === true)) db.pin("user", userId, kept.id, true);
