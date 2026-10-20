@@ -10,7 +10,7 @@ Punch runs this once a week in an isolated session. Nobody reads the reply. Appl
 ## What lives where
 
 - saved facts: short durable statements about the user. reach them with `memory_audit`. the core profile shown every turn is drawn from these
-- DM notes: automatic snippets from private chats, kept 30 days. read-only evidence for spotting wrong or outdated facts
+- daily notes: automatic snippets of the user's conversations with Punch in DMs and servers, kept 30 days. read-only evidence for spotting wrong or outdated facts
 - project memory: `/work/.punch-memory.md`. project decisions, conventions, gotchas, and open work
 - skills: reusable procedures in `/work/.pi/skills/<name>/SKILL.md` and `/data/pi/skills/<name>/SKILL.md`. never edit `/opt/pi/skills`, which ships with the image
 

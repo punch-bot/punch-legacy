@@ -259,11 +259,11 @@ function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-export function searchMemory({ userId, channelId, query = "", isDm = false, limit = 10 } = {}) {
+export function searchMemory({ userId, channelId, guildId = null, query = "", isDm = false, limit = 10 } = {}) {
   const queryTerms = terms(query);
   if (!queryTerms.length) return [];
   const cutoff = dateKey(new Date(Date.now() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
-  const records = database().search({ userId, channelId, isDm, queryTerms, cutoff });
+  const records = database().search({ userId, channelId, isDm, guildId, queryTerms, cutoff });
   const now = Date.now();
   const documentFrequency = new Map();
   for (const record of records) {
@@ -340,7 +340,7 @@ export function preamble(userId, channelId, query = "", options = {}) {
       }
     }
   }
-  const results = searchMemory({ userId, channelId, query, isDm: options.isDm === true, limit: 100 });
+  const results = searchMemory({ userId, channelId, guildId: options.guildId ?? null, query, isDm: options.isDm === true, limit: 100 });
   const lines = [];
   const used = [];
   let usedChars = 0;
@@ -511,7 +511,7 @@ export function memoryAuditSnapshot(userId, offset = 0) {
     `User facts ${factLines.length ? `${start + 1}-${end}` : "none"} of ${facts.length}:`,
     factLines.join("\n") || "- none",
     end < facts.length ? `More facts remain: call list again with offset ${end} before applying.` : "",
-    start === 0 ? `DM notes from the last ${AUDIT_NOTE_DAYS} days, newest first (read-only evidence):` : "",
+    start === 0 ? `Daily notes from the last ${AUDIT_NOTE_DAYS} days, DMs and servers, newest first (read-only evidence):` : "",
     start === 0 ? noteLines.join("\n") || "- none" : "",
   ].filter(Boolean).join("\n");
 }
@@ -639,8 +639,8 @@ function extractFacts(userText) {
   return facts;
 }
 
-export function captureConversation({ userId, channelId, isDm, userText, assistantText, extractDurableFacts = true } = {}) {
-  if (!isDm) return { notesAdded: 0, factsAdded: 0, facts: [] };
+export function captureConversation({ userId, channelId, guildId = null, isDm, userText, assistantText, extractDurableFacts = true } = {}) {
+  if (!isDm && !guildId) return { notesAdded: 0, factsAdded: 0, facts: [] };
   if (userId == null || channelId == null || !String(userId) || !String(channelId)) {
     throw new Error("Daily memory requires user and channel ownership.");
   }
@@ -654,14 +654,15 @@ export function captureConversation({ userId, channelId, isDm, userText, assista
         id: newId(), userId: String(userId), channelId: String(channelId),
         text: cleanLine(`User: ${safeUser}${safeAssistant ? ` Assistant: ${safeAssistant}` : ""}`),
         userText: safeUser, assistantText: safeAssistant, ts: Date.now(), date: today,
+        ...(isDm ? {} : { guildId: String(guildId) }),
       };
-      database().insert("daily", "dm", userId, entry, channelId, today);
+      database().insert("daily", isDm ? "dm" : "channel", userId, entry, channelId, today);
       const cutoff = dateKey(new Date(Date.now() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
       database().pruneDaily(userId, channelId, today, cutoff, DAILY_MAX_RECORDS);
       notesAdded = 1;
     }
     const facts = [];
-    for (const fact of extractDurableFacts ? extractFacts(userText) : []) {
+    for (const fact of extractDurableFacts && isDm ? extractFacts(userText) : []) {
       if (storeFact("user", userId, fact).created) facts.push(fact);
     }
     return { notesAdded, factsAdded: facts.length, facts };

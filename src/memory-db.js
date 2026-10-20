@@ -90,6 +90,7 @@ export class MemoryDatabase {
             ALTER TABLE memory_records ADD COLUMN confirmed INTEGER NOT NULL DEFAULT 1 CHECK(confirmed IN (0, 1));
             UPDATE memory_records SET last_seen = ts;`);
         }
+        if (!columns.has("guild_id")) this.db.exec("ALTER TABLE memory_records ADD COLUMN guild_id TEXT NOT NULL DEFAULT ''");
         this.db.exec(`CREATE INDEX IF NOT EXISTS memory_profile ON memory_records(kind, scope, owner_id, pinned DESC, ts);
           CREATE INDEX IF NOT EXISTS memory_normalized ON memory_records(kind, scope, owner_id, normalized);
           PRAGMA user_version = 3;`);
@@ -128,11 +129,11 @@ export class MemoryDatabase {
 
   insert(kind, scope, ownerId, entry, channelId = "", day = "", lastSeen = entry.ts) {
     this.db.prepare(`INSERT INTO memory_records
-      (kind, scope, owner_id, channel_id, day, id, ts, text, normalized, search_text, payload, pinned, last_seen, confirmed)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (kind, scope, owner_id, channel_id, day, id, ts, text, normalized, search_text, payload, pinned, last_seen, confirmed, guild_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(kind, scope, String(ownerId), String(channelId), day, entry.id, entry.ts,
         entry.text, normalize(entry.text), terms(entry.text).join(" "), JSON.stringify(entry), entry.pinned === true ? 1 : 0,
-        lastSeen, entry.confirmed === false ? 0 : 1);
+        lastSeen, entry.confirmed === false ? 0 : 1, String(entry.guildId ?? ""));
   }
 
   importRecord(file, index, reservedIds, kind, scope, ownerId, entry, channelId = "", day = "") {
@@ -283,15 +284,18 @@ export class MemoryDatabase {
       .all(String(userId)).map(factRow);
   }
 
-  search({ userId, channelId, isDm, queryTerms, cutoff }) {
+  search({ userId, channelId, isDm, guildId, queryTerms, cutoff }) {
     if (!queryTerms.length) return [];
     return this.db.prepare(`SELECT r.* FROM memory_fts JOIN memory_records r ON r.rowid = memory_fts.rowid
       WHERE memory_fts MATCH ? AND (
         (kind = 'fact' AND scope = 'user' AND owner_id = ?) OR
         (kind = 'fact' AND scope = 'channel' AND owner_id = ?) OR
-        (? = 1 AND kind = 'daily' AND owner_id = ? AND channel_id = ? AND day >= ?)
+        (kind = 'daily' AND owner_id = ? AND day >= ? AND (
+          (? = 1 AND scope = 'dm' AND channel_id = ?) OR
+          (scope = 'channel' AND guild_id != '' AND (? = 1 OR guild_id = ?))
+        ))
       )`).all(ftsQuery(queryTerms), String(userId ?? ""), String(channelId ?? ""),
-      isDm ? 1 : 0, String(userId ?? ""), String(channelId ?? ""), cutoff)
+      String(userId ?? ""), cutoff, isDm ? 1 : 0, String(channelId ?? ""), isDm ? 1 : 0, String(guildId ?? ""))
       .map((row) => ({ ...JSON.parse(row.payload), scope: row.scope, ownerId: row.owner_id, confirmed: row.confirmed === 1,
         source: row.kind === "fact" ? "durable" : "daily",
         citation: row.kind === "fact" ? `[memory:${row.scope}:${row.id}]` : `[daily:${row.day}:${row.id}]`,

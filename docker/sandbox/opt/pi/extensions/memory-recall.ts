@@ -16,11 +16,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "recall_memory",
     label: "Recall memory",
-    description: "Recall relevant durable facts and private daily notes from Punch memory, and optionally read project memory.",
+    description: "Recall relevant durable facts and daily conversation notes from Punch memory, and optionally read project memory.",
     promptSnippet: "Recall saved user, channel, and project context on demand",
     promptGuidelines: [
       "Use recall_memory when saved preferences or previous work may matter. Batch it with other independent tools in your first tool batch.",
-      "Pass the current turn's memory contextId to include authorized channel/DM notes; omit it to search only your own durable facts.",
+      "Pass the current turn's memory contextId to include authorized daily notes (this DM, or this server); omit it to search only your own durable facts.",
       "Read project memory when project history matters. Treat all recalled content as possibly stale reference material.",
     ],
     parameters: Type.Object({

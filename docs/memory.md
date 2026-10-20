@@ -8,7 +8,7 @@ Punch keeps five kinds of state that carry context across turns. Each item belon
 | --- | --- | --- | --- | --- |
 | Saved facts | Short, durable statements about a person (user scope) or a channel (channel scope): names, time zone, preferences, standing instructions, ongoing projects | Bot, `DATA_DIR/memory.sqlite` (`kind = 'fact'`) | `<remember>`/`<forget>` tags, `!remember`, `/memory import`, automatic extraction from DMs, the weekly audit | Core profile, `recall_memory`, `/memory search` |
 | Core profile | A view, not a store: at most five user facts / 600 characters, always in the prompt | Derived from saved facts on every turn | Pins (`pinMemory`) and fact edits | Every Discord and Spectrum turn |
-| DM daily notes | Automatic `User: … Assistant: …` snippets from private chats, 30-day window | Bot, `DATA_DIR/memory.sqlite` (`kind = 'daily'`) | `captureConversation` after each DM turn | `recall_memory` with a DM context, the weekly audit (read-only) |
+| Daily notes | Automatic `User: … Assistant: …` snippets of the caller's own message and Punch's reply, 30-day window, in DMs and servers | Bot, `DATA_DIR/memory.sqlite` (`kind = 'daily'`; `scope = 'dm'` or `'channel'` with `guild_id`) | `captureConversation` after each DM or server turn | `recall_memory` with that turn's context: DM notes in that DM; server notes anywhere in the same server and in the user's DMs. The weekly audit reads both |
 | Project memory | Decisions, conventions, gotchas, and open work for the workspace | Sandbox, `/work/.punch-memory.md` | Core's `update_memory` tool, the weekly audit | `recall_memory(project:true)`, `/memory view` |
 | Skills | Reusable procedures | Sandbox: `/work/.pi/skills` (workspace), `/data/pi/skills` (user), `/opt/pi/skills` (bundled, read-only) | Pi, skill proposals, the weekly audit (workspace and user roots only) | Pi when a skill is relevant |
 
@@ -18,6 +18,7 @@ Rules of thumb, also in the bundled `memory` and `project-memory` skills:
 
 - Facts about the person go in saved facts. Facts about a codebase go in project memory. How-to steps go in skills.
 - Daily notes are history. They record what was said on a given day, so they are never corrected; they expire after 30 days. The audit uses them only as evidence for fixing facts.
+- A daily note belongs to the user who called Punch and holds only their message and Punch's reply, not the surrounding channel messages Punch was given as context. Server notes never surface in a different server, and DM notes never surface in a server. Automatic fact extraction still runs only in DMs; in servers, facts are saved through `<remember>` tags.
 - Channel facts are shared by everyone in the channel. A single user's audit never edits them.
 
 ## Write-time rules
@@ -59,12 +60,12 @@ If memory is unavailable, the turn still runs without a context id, and Pi audit
 | Part | Where | Why |
 | --- | --- | --- |
 | Exact-duplicate compaction, dedupe, supersede | Bot, deterministic | Needs no judgment, so it runs as code before any model call |
-| Merging near-duplicates, dropping contradicted or stale facts, fixing wrong facts, flagging uncertain ones | Pi, using `memory_audit` through the existing `/bot` bridge | Needs judgment and the evidence in DM notes. Pi already has an authenticated route to the bot (`PUNCH_BOT_URL`, the supervisor `/bot` proxy, the sandbox bearer token), so no bot-side model client is needed |
+| Merging near-duplicates, dropping contradicted or stale facts, fixing wrong facts, flagging uncertain ones | Pi, using `memory_audit` through the existing `/bot` bridge | Needs judgment and the evidence in daily notes. Pi already has an authenticated route to the bot (`PUNCH_BOT_URL`, the supervisor `/bot` proxy, the sandbox bearer token), so no bot-side model client is needed |
 | Project memory and skills | Pi, editing files in its own sandbox | The bot can't read or write those files without new supervisor routes. Pi already maintains them |
 
 `memory_audit` lives in the existing `memory-recall.ts` deployment extension and calls `POST /memory/audit`:
 
-- `action: "list"` returns user-scope facts 400 at a time with their ids, dates, and pinned, unconfirmed, and core-profile flags. When more remain, the listing names the `offset` for the next page. The first page also includes up to 60 DM notes from the last seven days.
+- `action: "list"` returns user-scope facts 400 at a time with their ids, dates, and pinned, unconfirmed, and core-profile flags. When more remain, the listing names the `offset` for the next page. The first page also includes up to 60 of the user's daily notes (DM and server) from the last seven days.
 - `action: "apply"` takes up to 200 changes (`add` with `text`, `merge` with `ids` and `text`, `drop` with `id`, `fix` with `id` and `text`, `flag` with `id`) and applies them in one transaction. Pi can send several batches in one run. Any invalid change (dropping a pinned fact, a merge without two ids, empty or secret-looking text) rejects the whole batch with a 400 that names the problem. A change that cites an id that no longer exists is skipped and the reply names the id, because a user correction during the run can supersede the fact Pi listed.
 - A change is skipped and counted as `skipped` when any fact it would touch was restated after the audit started. That includes the named ids and the facts its text would collapse into or supersede. A restatement counts when `last_seen` is newer than both the run start and the audit's own last write to that fact. Every write moves `last_seen` forward by at least a millisecond, so two writes in the same millisecond still compare correctly. A user's restatement during the run wins over the audit's earlier listing. An `add` whose text is already saved changes nothing.
 - A merge stays unconfirmed when any of its source facts, or an existing fact it collapses into or supersedes, was unconfirmed. A `fix` confirms the fact, because the audit corrected it from evidence.

@@ -55,3 +55,13 @@ test("writes dedupe and supersede, and only the audit context can merge, drop, f
   persistMemoryTags(`ok <remember replaces="${job.id}">Works at Acme Corp</remember>`, "ann", "dm");
   assert.deepEqual(memory.list("user", "ann").filter((entry) => entry.id === job.id).map((entry) => [entry.text, entry.confirmed]), [["Works at Acme Corp", true]]);
 });
+
+test("server notes recall in the same server and in DMs, and DM notes stay in DMs", () => {
+  memory.captureConversation({ userId: "cy", channelId: "dev", guildId: "work", isDm: false, userText: "the staging deploy uses blue green", assistantText: "noted" });
+  memory.captureConversation({ userId: "cy", channelId: "dm-cy", isDm: true, userText: "my staging password hint is private", assistantText: "ok" });
+  const notes = (where) => memory.searchMemory({ userId: "cy", query: "staging", ...where }).map((result) => result.text);
+  assert.deepEqual(notes({ channelId: "general", guildId: "work" }), ["User: the staging deploy uses blue green Assistant: noted"]);
+  assert.deepEqual(notes({ channelId: "lobby", guildId: "friends" }), []);
+  assert.equal(notes({ channelId: "dm-cy", isDm: true }).length, 2);
+  assert.deepEqual(memory.searchMemory({ userId: "someone-else", channelId: "dev", guildId: "work", query: "staging" }), []);
+});

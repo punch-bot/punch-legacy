@@ -1573,7 +1573,7 @@ export function registerInteractions(client) {
         if (!bundle) return;
         const content = JSON.stringify(bundle, null, 2) + "\n";
         await interaction.editReply({
-          content: `Exported ${bundle.records.length} durable user memory record(s). Channel memories and DM daily notes are excluded.`,
+          content: `Exported ${bundle.records.length} durable user memory record(s). Channel memories and daily notes are excluded.`,
           files: [{ attachment: Buffer.from(content, "utf8"), name: "punch-memory-export.json" }],
         });
         return;
@@ -1622,8 +1622,8 @@ export function registerInteractions(client) {
 
       const query = interaction.options.getString("query", true);
       const results = await memoryReplyGuard(interaction, () => (sub === "explain"
-        ? store.explainMemory({ userId: uid, channelId: cid, query, isDm, limit: 10 })
-        : store.searchMemory({ userId: uid, channelId: cid, query, isDm, limit: 10 })));
+        ? store.explainMemory({ userId: uid, channelId: cid, guildId: interaction.guildId, query, isDm, limit: 10 })
+        : store.searchMemory({ userId: uid, channelId: cid, guildId: interaction.guildId, query, isDm, limit: 10 })));
       if (!results) return;
       if (!results.length) {
         await interaction.editReply("No relevant memories found.");

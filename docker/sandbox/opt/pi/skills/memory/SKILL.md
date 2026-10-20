@@ -10,7 +10,7 @@ description: Save, correct, and remove durable user facts with <remember> and <f
 - saved facts: short statements about a person or a channel that should outlast this chat. names, time zone, preferences, standing instructions, ongoing projects. managed with the tags below
 - project memory: `/work/.punch-memory.md`, facts about a codebase or project. see the project-memory skill
 - skills: reusable procedures. keep how-to steps there, not in facts
-- private DMs are also logged as daily notes automatically for 30 days. don't re-save them as facts unless something durable came up
+- every conversation with Punch is also logged as a daily note for 30 days, in DMs and in servers. server notes come back in the same server and in DMs; DM notes stay in DMs. don't re-save notes as facts unless something durable came up
 
 ## Finding facts
 

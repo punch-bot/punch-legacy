@@ -249,7 +249,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
       const currentSession = store.getSession(cid);
-      memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage);
+      memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage, message.guildId);
       const profile = store.coreProfile(uid);
       const memory = memoryBlock({ contextId: memoryRecallKey, profile, unavailable: !store.getMemoryStatus().available });
       if (memory) preambleParts.push(memory);
@@ -312,12 +312,13 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     out = formatReplyNewlines(textAfterQuestions || "");
 
     let capturedMemory = { notesAdded: 0, factsAdded: 0, facts: [] };
-    if (isDirectMessage && !message.author.bot && !opts.pigeonFrom) {
+    if (!message.author.bot && !opts.pigeonFrom) {
       try {
         capturedMemory = store.captureConversation({
           userId: uid,
           channelId: cid,
-          isDm: true,
+          guildId: message.guildId,
+          isDm: isDirectMessage,
           userText: [memoryUserText, ...turn.steeredTexts].filter(Boolean).join("\n\n"),
           assistantText: out,
           extractDurableFacts: saved === 0 && failed === 0,
