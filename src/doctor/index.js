@@ -213,9 +213,9 @@ function invalidRoutineFields(routine) {
   if (!routine || typeof routine !== "object") return ["record"];
   if (typeof routine.id !== "string" || !routine.id.trim()) invalid.push("id");
   if (typeof routine.userId !== "string" || !routine.userId.trim()) invalid.push("userId");
-  if (typeof routine.channelId !== "string" || !routine.channelId.trim()) invalid.push("channelId");
+  if (["message", "llm"].includes(routine.type) && (typeof routine.channelId !== "string" || !routine.channelId.trim())) invalid.push("channelId");
   if (routine.guildId !== null && routine.guildId !== undefined && typeof routine.guildId !== "string") invalid.push("guildId");
-  if (!new Set(["message", "llm", "heartbeat"]).has(routine.type)) invalid.push("type");
+  if (!new Set(["message", "llm", "heartbeat", "memory-audit"]).has(routine.type)) invalid.push("type");
   if (typeof routine.payload !== "string") invalid.push("payload");
   if (typeof routine.enabled !== "boolean") invalid.push("enabled");
   if (!Number.isFinite(routine.nextRunAt)) invalid.push("nextRunAt");
@@ -284,6 +284,31 @@ async function securityCheck({ env }) {
   }
 }
 
+function memoryChecks({ memory, routines, userId }) {
+  if (typeof memory?.getMemoryStatus !== "function") return [];
+  const status = memory.getMemoryStatus();
+  const checks = [check("memory", status.available ? "pass" : "fail", "Memory store",
+    status.available ? "SQLite memory is available." : String(status.error || "Memory is disabled.").slice(0, 700), 0,
+    status.available ? undefined : "Restore the named source or SQLite backup, then restart the bot. Memory writes remain disabled until recovery.")];
+  if (!status.available || typeof memory.memoryAuditStatus !== "function" || typeof routines?.listAll !== "function") return checks;
+  const startedAt = Date.now();
+  try {
+    const routine = routines.listAll().find((entry) => entry.type === "memory-audit" && String(entry.userId) === String(userId));
+    const audit = memory.memoryAuditStatus(userId);
+    const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const last = audit.last ? `last applied ${day(audit.last.at)} (${audit.last.added} added, ${audit.last.merged} merged, ${audit.last.dropped} dropped, ${audit.last.fixed} fixed, ${audit.last.flagged} flagged)` : "no audit changes applied yet";
+    const summary = `${audit.facts} fact(s), ${audit.unconfirmed} unconfirmed; ${last}.`;
+    const duration = elapsed(startedAt);
+    if (!routine) checks.push(check("memory-audit", "warn", "Weekly memory audit", `No audit routine is scheduled. ${summary}`, duration, "Restart the bot to recreate built-in routines."));
+    else if (routine.state === "failed") checks.push(check("memory-audit", "warn", "Weekly memory audit", `Audit stopped after failures: ${String(routine.lastError || "unknown error").slice(0, 300)} ${summary}`, duration, `Resume routine ${routine.id} once the sandbox is healthy.`));
+    else if (!routine.enabled) checks.push(check("memory-audit", "info", "Weekly memory audit", `Audit routine ${routine.id} is paused. ${summary}`, duration));
+    else checks.push(check("memory-audit", "pass", "Weekly memory audit", `Next run ${day(routine.nextRunAt)}; ${summary}`, duration));
+  } catch (error) {
+    checks.push(check("memory-audit", "warn", "Weekly memory audit", `Could not inspect memory audit: ${errorMessage(error)}`, elapsed(startedAt)));
+  }
+  return checks;
+}
+
 function summarize(checks) {
   const summary = { pass: 0, warn: 0, fail: 0, info: 0 };
   for (const item of checks) summary[item.status] += 1;
@@ -297,12 +322,7 @@ export async function runDoctor({ userId, sandboxName, deep = false, sandbox, ap
 
   const groups = await Promise.all([
     routingCheck(context),
-    typeof memory?.getMemoryStatus === "function" ? (() => {
-      const status = memory.getMemoryStatus();
-      return [check("memory", status.available ? "pass" : "fail", "Memory store",
-        status.available ? "SQLite memory is available." : String(status.error || "Memory is disabled.").slice(0, 700), 0,
-        status.available ? undefined : "Restore the named source or SQLite backup, then restart the bot. Memory writes remain disabled until recovery.")];
-    })() : [],
+    memoryChecks({ memory, routines, userId }),
     containerCheck(context),
     gatewayCheck(context),
     supervisorChecks(context),

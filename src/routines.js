@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import * as chrono from "chrono-node";
 import cronParser from "cron-parser";
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getTimeZoneOffsetMinutes, localDateParts, normalizeTimeZone, zonedWallTimeToUtc } from "./timezone.js";
@@ -242,8 +243,50 @@ export function addRoutine({ userId, channelId, guildId, type, payload, schedule
   return routine;
 }
 
+export const MEMORY_AUDIT_TYPE = "memory-audit";
+
+function memoryAuditCron(userId) {
+  const hash = createHash("sha256").update(String(userId)).digest().readUInt32BE(0);
+  return `${hash % 60} ${3 + (Math.floor(hash / 60) % 3)} * * ${Math.floor(hash / 180) % 7}`;
+}
+
+function retime(routine, timezone) {
+  if (routine.timezone === timezone) return false;
+  routine.timezone = timezone;
+  routine.nextRunAt = computeNextRun(routine.schedule, Date.now(), timezone);
+  return true;
+}
+
+export function retimeMemoryAudit(userId, timezone) {
+  const routine = routines.find((entry) => entry.type === MEMORY_AUDIT_TYPE && entry.userId === String(userId));
+  if (!routine || !retime(routine, validTimezone(timezone) ? timezone : DEFAULT_TIME_ZONE)) return;
+  saveRoutines();
+  rescheduleCallback?.();
+}
+
+export function syncMemoryAudits(users) {
+  const registered = new Map(users.map((user) => [String(user.userId), user]));
+  const before = routines.length;
+  routines = routines.filter((routine) => routine.type !== MEMORY_AUDIT_TYPE || registered.has(routine.userId));
+  let changed = routines.length !== before;
+  for (const [userId, user] of registered) {
+    const timezone = validTimezone(user.timezone) ? user.timezone : DEFAULT_TIME_ZONE;
+    const existing = routines.find((routine) => routine.type === MEMORY_AUDIT_TYPE && routine.userId === userId);
+    if (existing) {
+      if (retime(existing, timezone)) changed = true;
+      continue;
+    }
+    const schedule = { kind: "cron", cron: memoryAuditCron(userId) };
+    routines.push({ id: newId(), userId, channelId: null, guildId: null, type: MEMORY_AUDIT_TYPE, payload: "Weekly memory audit (built-in; pause to stop)", schedule, timezone, activeHours: null, isolatedSession: true, nextRunAt: computeNextRun(schedule, Date.now(), timezone), lastRunAt: null, enabled: true, state: "queued", attempts: 0, createdAt: Date.now(), lastError: null });
+    changed = true;
+  }
+  if (!changed) return;
+  saveRoutines();
+  rescheduleCallback?.();
+}
+
 export function removeRoutine(id, userId) {
-  const index = routines.findIndex((routine) => routine.id === id && routine.userId === userId);
+  const index = routines.findIndex((routine) => routine.id === id && routine.userId === userId && routine.type !== MEMORY_AUDIT_TYPE);
   if (index < 0) return false;
   routines.splice(index, 1);
   saveRoutines();
@@ -331,7 +374,7 @@ export function markFired(routine) {
 }
 
 export function formatRoutine(routine) {
-  const label = routine.type === "heartbeat" ? "heartbeat" : routine.type === "llm" ? "auto" : "remind";
+  const label = routine.type === "heartbeat" ? "heartbeat" : routine.type === "llm" ? "auto" : routine.type === MEMORY_AUDIT_TYPE ? "memory audit" : "remind";
   const schedule = routine.schedule;
   const zone = routine.timezone || DEFAULT_TIME_ZONE;
   const next = formatInTimeZone(routine.nextRunAt, zone);

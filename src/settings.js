@@ -1,5 +1,6 @@
 import * as store from "./memory.js";
 import { normalizeTimeZone } from "./timezone.js";
+import { retimeMemoryAudit } from "./routines.js";
 
 export function reactionMatches(reaction, configured) {
   if (!configured) return false;
@@ -146,11 +147,13 @@ export function setWorkingPigeonsEnabled(userId, enabled) {
 export function setUserTimeZone(userId, timeZone) {
   const normalized = normalizeTimeZone(timeZone);
   store.patchUserSettings(userId, { timeZone: normalized });
+  retimeMemoryAudit(userId, normalized);
   return `Timezone set to **${normalized}**.`;
 }
 
 export function clearUserTimeZone(userId) {
   store.patchUserSettings(userId, { timeZone: "UTC" });
+  retimeMemoryAudit(userId, "UTC");
   return "Timezone reset to **UTC**.";
 }
 

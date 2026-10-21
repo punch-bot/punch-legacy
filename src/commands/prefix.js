@@ -178,9 +178,9 @@ async function handleCommand(message, cmd, rest) {
       const { u, c } = value;
       const lines = [];
       lines.push(`**Your memories (${u.length}):**`);
-      for (const e of u) lines.push(`\`${e.id}\` ${e.text}`);
+      for (const e of u) lines.push(`\`${e.id}\` ${e.confirmed ? "" : "(unconfirmed) "}${e.text}`);
       lines.push(`\n**Channel memories (${c.length}):**`);
-      for (const e of c) lines.push(`\`${e.id}\` ${e.text}`);
+      for (const e of c) lines.push(`\`${e.id}\` ${e.confirmed ? "" : "(unconfirmed) "}${e.text}`);
       await reply(message, lines.join("\n") || "Nothing yet.");
       return true;
     }

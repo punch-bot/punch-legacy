@@ -13,7 +13,7 @@ Punch is a personal assistant that lives in Discord and, optionally, iMessage vi
 npm install
 npm test             # node --test test/*.mjs, no Docker needed
 npm run typecheck
-npm run lint         # Spectrum files only
+npm run lint         # all of src; recommended rules on Spectrum files and punch-turn.js only
 docker compose up --build -d && docker compose logs -f bot
 docker compose build sandbox   # rebuild the sandbox image (profile: sandbox)
 ```
@@ -24,7 +24,7 @@ Compose needs a `.env` file. It's gitignored, so copy it from `.env.example`. Wi
 
 Writing tests is strictly forbidden unless you're adding new functionality. Bug fixes, refactors, cleanups, and behavior tweaks don't get new tests, and you don't add tests to existing code. When a change does add new functionality, write the fewest tests that cover it.
 
-Lint rules are favored over tests. If an ESLint rule (built-in, `no-restricted-syntax`, or `no-restricted-imports`) can enforce an invariant, add the rule to `eslint.config.js` instead of writing a test. Tightening lint is always allowed. Note that `npm run lint` only covers the Spectrum files today, so widen its file list when the rule applies elsewhere.
+Lint rules are favored over tests. If an ESLint rule (built-in, `no-restricted-syntax`, or `no-restricted-imports`) can enforce an invariant, add the rule to `eslint.config.js` instead of writing a test. Tightening lint is always allowed. `npm run lint` covers all of `src`, but `js.configs.recommended` applies only to the Spectrum files and `src/punch-turn.js`, so scope a new rule's `files` to where it should apply.
 
 Never change the thing that judges your work to make your work pass. That covers tests, assertions, fixtures, lint and type configs, timeouts, thresholds, and the task's own requirements. Don't skip, loosen, or delete them, and don't special-case code for them. When a check fails, fix the code. If you think the check itself is wrong, stop and say so rather than editing it.
 
@@ -56,7 +56,7 @@ Discord / Spectrum → bot :4098 → http://sandbox-<name>:4096 (pi-gateway) →
 | `src/gateway/` | Bot HTTP API (:4098) and pigeon delivery |
 | `src/agent.js` | Pi gateway client, routing, timeouts, context limits |
 | `src/prompt-blocks.js` | Builders for every `--- name ---` prompt section |
-| `src/memory.js` | Memory retrieval, durable facts, DM-only daily notes |
+| `src/memory.js` | Memory retrieval, durable facts, daily notes (DM and server) |
 | `src/routines.js`, `src/heartbeat.js` | Durable routine store and scheduler tick |
 | `src/punch-turn.js`, `src/spectrum/` | Non-Discord turn path and the iMessage entrypoint |
 | `src/doctor/` | Bot-side diagnostics (the sandbox side is `usr/local/lib/doctor.mjs`) |
@@ -67,7 +67,8 @@ Discord / Spectrum → bot :4098 → http://sandbox-<name>:4096 (pi-gateway) →
 - `/work` is the workspace. User extensions go in `/work/.pi/extensions/*.ts`, skills in `/work/.pi/skills/<name>/SKILL.md`, and the prompt addendum in `/work/.pi/SYSTEM.md`.
 - Skill precedence is workspace, then user (`/data/pi/skills`), then bundled (`/opt/pi/skills`).
 - The supervisor writes provider keys to `/data/pi/agent/auth.json`. Sessions live in `/data/pi/sessions`, and logical session ids in `/data/pi/gateway-sessions.json`.
-- Facts and DM daily notes live in `DATA_DIR/memory.sqlite` (Node >=22.13). Startup imports legacy JSON transactionally and preserves the sources. Migration failure disables memory, keeps the bot online, and is reported by `/doctor`. See `docs/memory-sqlite.md` before rollback or recovery.
+- Facts and daily notes live in `DATA_DIR/memory.sqlite` (Node >=22.13). Startup imports legacy JSON transactionally and preserves the sources. Migration failure disables memory, keeps the bot online, and is reported by `/doctor`. See `docs/memory-sqlite.md` before rollback or recovery.
+- [`docs/memory.md`](docs/memory.md) defines what belongs in facts, the core profile, daily notes, project memory, and skills. It also covers write-time dedupe/supersede and the built-in weekly `memory-audit` routine, which runs Pi silently in an isolated session with the `memory_audit` tool.
 - Project memory lives in `/work/.punch-memory.md`. Turns include a core user profile (up to 5 items/600 chars) plus a compact recall hint; the `recall_memory` deployment extension reads project memory only on demand (up to 12k chars). Keep that cap in sync with `MAX_MEMORY_CHARS` in core's context-pruning extension. Bot-backed recall is capped at 4k chars and authorized by sandbox identity plus a bot-created turn context. Managed sandboxes receive `PUNCH_BOT_TOKEN` at creation/recreation. The supervisor strips it from Pi's environment, so Pi tools reach the bot through the supervisor's `/bot` proxy (`PUNCH_BOT_URL=http://localhost:4097/bot`, baked into the image), which swaps sandbox basic auth for the bearer token. Don't point `PUNCH_BOT_URL` at `http://bot:4098`, because core's collab tool only accepts https or localhost.
 
 ## Gotchas

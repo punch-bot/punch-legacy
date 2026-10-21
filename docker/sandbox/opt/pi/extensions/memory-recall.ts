@@ -2,15 +2,25 @@ import type { ExtensionAPI } from "@punch-bot/cli";
 import { readFile } from "node:fs/promises";
 import { Type } from "typebox";
 
+function botRequest(path: string, body: unknown, signal?: AbortSignal) {
+  const botUrl = process.env.PUNCH_BOT_URL || "http://localhost:4097/bot";
+  const credentials = Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
+  return fetch(`${botUrl}${path}`, {
+    method: "POST", headers: { authorization: `Basic ${credentials}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
+  });
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "recall_memory",
     label: "Recall memory",
-    description: "Recall relevant durable facts and private daily notes from Punch memory, and optionally read project memory.",
+    description: "Recall relevant durable facts and daily conversation notes from Punch memory, and optionally read project memory.",
     promptSnippet: "Recall saved user, channel, and project context on demand",
     promptGuidelines: [
       "Use recall_memory when saved preferences or previous work may matter. Batch it with other independent tools in your first tool batch.",
-      "Pass the current turn's memory contextId to include authorized channel/DM notes; omit it to search only your own durable facts.",
+      "Pass the current turn's memory contextId to include authorized daily notes (this DM, or this server); omit it to search only your own durable facts.",
       "Read project memory when project history matters. Treat all recalled content as possibly stale reference material.",
     ],
     parameters: Type.Object({
@@ -20,13 +30,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, args, signal) {
       const notes = (async () => {
-        const botUrl = process.env.PUNCH_BOT_URL || "http://localhost:4097/bot";
-        const credentials = Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
-        const response = await fetch(`${botUrl}/memory/recall`, {
-          method: "POST", headers: { authorization: `Basic ${credentials}`, "content-type": "application/json" },
-          body: JSON.stringify({ query: args.query, contextId: args.contextId, maxChars: 4_000 }),
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
-        });
+        const response = await botRequest("/memory/recall", { query: args.query, contextId: args.contextId, maxChars: 4_000 }, signal);
         if (!response.ok) throw new Error(`Punch memory recall returned HTTP ${response.status}.`);
         const data = await response.json() as { text?: string };
         return data.text || "No matching saved records.";
@@ -44,6 +48,34 @@ export default function (pi: ExtensionAPI) {
       }
       const text = results.map((result) => result.status === "fulfilled" ? result.value : `Recall unavailable: ${result.reason.message}`).filter(Boolean).join("\n\n");
       return { content: [{ type: "text" as const, text }], details: { botAvailable: results[0].status === "fulfilled", projectRequested: args.project === true } };
+    },
+  });
+
+  pi.registerTool({
+    name: "memory_audit",
+    label: "Audit memory",
+    description: "List and clean up the user's saved Punch facts during the scheduled weekly memory audit.",
+    promptSnippet: "Add, merge, drop, fix, or flag saved facts during the weekly memory audit",
+    promptGuidelines: [
+      "Use memory_audit only during the weekly memory audit, with the audit contextId from that turn. Other turns are refused.",
+      "Call action=list first, then send changes with action=apply in batches of at most 200. Each batch applies together or not at all.",
+    ],
+    parameters: Type.Object({
+      contextId: Type.String({ description: "Audit contextId from the weekly memory audit turn" }),
+      action: Type.Union([Type.Literal("list"), Type.Literal("apply")]),
+      offset: Type.Optional(Type.Integer({ minimum: 0, description: "For list: index of the first fact to return when the previous listing said more remain" })),
+      changes: Type.Optional(Type.Array(Type.Object({
+        op: Type.Union([Type.Literal("add"), Type.Literal("merge"), Type.Literal("drop"), Type.Literal("fix"), Type.Literal("flag")]),
+        id: Type.Optional(Type.String({ description: "Fact id for drop, fix, and flag" })),
+        ids: Type.Optional(Type.Array(Type.String(), { description: "Fact ids to merge into one" })),
+        text: Type.Optional(Type.String({ maxLength: 2_000, description: "Fact text for add, merge, and fix" })),
+      }), { maxItems: 200 })),
+    }),
+    async execute(_toolCallId, args, signal) {
+      const response = await botRequest("/memory/audit", { contextId: args.contextId, action: args.action, offset: args.offset, changes: args.changes || [] }, signal);
+      const data = await response.json().catch(() => ({})) as { text?: string; error?: string };
+      if (!response.ok) throw new Error(data.error || `Punch memory audit returned HTTP ${response.status}.`);
+      return { content: [{ type: "text" as const, text: data.text || "Done." }], details: { action: args.action } };
     },
   });
 }

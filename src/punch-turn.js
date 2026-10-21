@@ -12,6 +12,7 @@ import {
 } from "./prompt-blocks.js";
 import { formatMessageTimestamp } from "./timezone.js";
 import { beginMemoryRecall, endMemoryRecall } from "./memory-recall.js";
+import { persistMemoryTags } from "./chat/memory-tags.js";
 
 const NO_SANDBOX_MSG =
   "You don't have a Punch sandbox yet. Ask an admin to set one up with `/sandbox create <name>` " +
@@ -46,6 +47,7 @@ export async function runPunchTurn({
   speaker = null,
   signal = null,
   onProgress = null,
+  privateChat = false,
 }) {
   const uid = String(userId || "").trim();
   const key = String(sessionKey || "").trim();
@@ -73,7 +75,7 @@ export async function runPunchTurn({
     };
   }
 
-  const memoryContextId = beginMemoryRecall(uid, key, true);
+  const memoryContextId = beginMemoryRecall(uid, key, true, null, privateChat === true);
   const settings = store.getUserSettings(uid);
   const sentAt = formatMessageTimestamp(Date.now(), settings.timeZone);
   const who = speaker || `spectrum-user`;
@@ -110,7 +112,8 @@ export async function runPunchTurn({
     store.setSession(key, result.sessionId);
   }
 
-  const replyText = stripDiscordMarkup(result?.text || "");
+  const { clean: textAfterMemory } = persistMemoryTags(result?.text || "", uid, null);
+  const replyText = stripDiscordMarkup(textAfterMemory);
   try {
     store.captureConversation({
       userId: uid,

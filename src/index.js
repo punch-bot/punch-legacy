@@ -10,7 +10,7 @@ import { registerMessageCreate } from "./chat/message-create.js";
 import { registerReactionAdd } from "./chat/reaction-add.js";
 import { registerInteractions } from "./commands/interactions.js";
 import { buildSlashCommands } from "./commands/slash.js";
-import { fireRoutine } from "./chat/routines-fire.js";
+import { fireRoutine, syncMemoryAuditRoutines } from "./chat/routines-fire.js";
 import { startBotHttpServer } from "./gateway/bot-server.js";
 import { initializeMemory } from "./memory.js";
 
@@ -72,6 +72,7 @@ client.once(Events.ClientReady, async (c) => {
     console.error("Failed to register slash commands:", err.message);
   }
 
+  syncMemoryAuditRoutines();
   routines.startScheduler(fireRoutine);
 });
 

@@ -10,7 +10,7 @@
     "dev": "node --watch src/index.js",
     "test": "node --test test/*.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src/spectrum.js src/spectrum src/punch-turn.js"
+    "lint": "eslint src"
   },
   "engines": {
     "node": ">=22.13.0"

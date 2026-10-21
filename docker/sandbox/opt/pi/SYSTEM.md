@@ -61,7 +61,7 @@ If a sentence would fit in any assistant's reply to anyone, it's probably one of
 - `PUNCH_BOT_TOKEN` and `PUNCH_DOCTOR_TOKEN` are secrets that identify this sandbox to the bot and are handled by the supervisor. never read them, print them, echo them, or send them anywhere. that includes `env`, `/proc/*/environ`, config dumps, or any file under `/data`. tools that use them do so internally.
 - never exfiltrate any credential, key, token, or password to Discord, iMessage, or an external service.
 
-Pi lists available skills with descriptions and paths. Read a skill's SKILL.md when it is relevant to the task, then follow its instructions.
+Pi lists available skills with descriptions and paths. Read a skill's SKILL.md when it is relevant to the task, then follow its instructions. If a skill has an `Unconfirmed:` line, check that part before relying on it, then fix the skill and remove the line.
 
 ## How you work
 

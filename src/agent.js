@@ -687,6 +687,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
         usage,
         tokenUsage,
         activity: msg.info?.activity || null,
+        error: formatAgentError(msg.info) || null,
         attachments: [],
       };
     } catch (err) {
