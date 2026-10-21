@@ -312,7 +312,7 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     out = formatReplyNewlines(textAfterQuestions || "");
 
     let capturedMemory = { notesAdded: 0, factsAdded: 0, facts: [] };
-    if (!message.author.bot && !opts.pigeonFrom) {
+    if ((opts.userId || !message.author.bot) && !opts.pigeonFrom) {
       try {
         capturedMemory = store.captureConversation({
           userId: uid,

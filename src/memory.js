@@ -259,11 +259,11 @@ function dateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-export function searchMemory({ userId, channelId, guildId = null, query = "", isDm = false, limit = 10 } = {}) {
+export function searchMemory({ userId, channelId, guildId = null, query = "", isDm = false, serverNotes = isDm, limit = 10 } = {}) {
   const queryTerms = terms(query);
   if (!queryTerms.length) return [];
   const cutoff = dateKey(new Date(Date.now() - (DAILY_RETENTION_DAYS - 1) * 86_400_000));
-  const records = database().search({ userId, channelId, isDm, guildId, queryTerms, cutoff });
+  const records = database().search({ userId, channelId, isDm, guildId, serverNotes, queryTerms, cutoff });
   const now = Date.now();
   const documentFrequency = new Map();
   for (const record of records) {
@@ -340,7 +340,7 @@ export function preamble(userId, channelId, query = "", options = {}) {
       }
     }
   }
-  const results = searchMemory({ userId, channelId, guildId: options.guildId ?? null, query, isDm: options.isDm === true, limit: 100 });
+  const results = searchMemory({ userId, channelId, guildId: options.guildId ?? null, query, isDm: options.isDm === true, serverNotes: options.serverNotes === true, limit: 100 });
   const lines = [];
   const used = [];
   let usedChars = 0;

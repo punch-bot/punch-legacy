@@ -284,7 +284,7 @@ export class MemoryDatabase {
       .all(String(userId)).map(factRow);
   }
 
-  search({ userId, channelId, isDm, guildId, queryTerms, cutoff }) {
+  search({ userId, channelId, isDm, guildId, serverNotes, queryTerms, cutoff }) {
     if (!queryTerms.length) return [];
     return this.db.prepare(`SELECT r.* FROM memory_fts JOIN memory_records r ON r.rowid = memory_fts.rowid
       WHERE memory_fts MATCH ? AND (
@@ -295,7 +295,7 @@ export class MemoryDatabase {
           (scope = 'channel' AND guild_id != '' AND (? = 1 OR guild_id = ?))
         ))
       )`).all(ftsQuery(queryTerms), String(userId ?? ""), String(channelId ?? ""),
-      String(userId ?? ""), cutoff, isDm ? 1 : 0, String(channelId ?? ""), isDm ? 1 : 0, String(guildId ?? ""))
+      String(userId ?? ""), cutoff, isDm ? 1 : 0, String(channelId ?? ""), serverNotes ? 1 : 0, String(guildId ?? ""))
       .map((row) => ({ ...JSON.parse(row.payload), scope: row.scope, ownerId: row.owner_id, confirmed: row.confirmed === 1,
         source: row.kind === "fact" ? "durable" : "daily",
         citation: row.kind === "fact" ? `[memory:${row.scope}:${row.id}]` : `[daily:${row.day}:${row.id}]`,

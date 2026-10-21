@@ -10,11 +10,11 @@ function forbidden(message) {
   return Object.assign(new Error(message), { status: 403 });
 }
 
-export function beginMemoryRecall(userId, channelId, isDm, guildId = null) {
+export function beginMemoryRecall(userId, channelId, isDm, guildId = null, serverNotes = isDm === true) {
   const now = Date.now();
   for (const [id, context] of contexts) if (context.expires <= now) contexts.delete(id);
   const id = randomUUID();
-  contexts.set(id, { userId: String(userId), channelId: String(channelId), isDm: isDm === true, guildId: guildId ? String(guildId) : null, expires: now + CONTEXT_TTL_MS });
+  contexts.set(id, { userId: String(userId), channelId: String(channelId), isDm: isDm === true, guildId: guildId ? String(guildId) : null, serverNotes: serverNotes === true, expires: now + CONTEXT_TTL_MS });
   return id;
 }
 
@@ -30,6 +30,7 @@ export function recallForSandbox(identity, body) {
   let channelId;
   let guildId = null;
   let isDm = false;
+  let serverNotes = false;
   if (body.contextId) {
     const context = contexts.get(body.contextId);
     if (!context || context.userId !== String(identity.userId) || context.expires <= Date.now()) {
@@ -38,8 +39,9 @@ export function recallForSandbox(identity, body) {
     channelId = context.channelId;
     guildId = context.guildId;
     isDm = context.isDm;
+    serverNotes = context.serverNotes;
   }
-  const text = preamble(identity.userId, channelId, body.query, { isDm, guildId, maxChars: body.maxChars, limit: body.limit, markUsed: true });
+  const text = preamble(identity.userId, channelId, body.query, { isDm, guildId, serverNotes, maxChars: body.maxChars, limit: body.limit, markUsed: true });
   return { text };
 }
 

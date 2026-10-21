@@ -151,6 +151,7 @@ export async function handleSpectrumMessage(space, message, config) {
       sessionKey,
       text: inboundText,
       speaker: String(speaker),
+      privateChat: sp.type === "dm" || msg.platform === "terminal",
     });
 
     if (!result.ok) {

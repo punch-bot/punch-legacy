@@ -18,7 +18,7 @@ Rules of thumb, also in the bundled `memory` and `project-memory` skills:
 
 - Facts about the person go in saved facts. Facts about a codebase go in project memory. How-to steps go in skills.
 - Daily notes are history. They record what was said on a given day, so they are never corrected; they expire after 30 days. The audit uses them only as evidence for fixing facts.
-- A daily note belongs to the user who called Punch and holds only their message and Punch's reply, not the surrounding channel messages Punch was given as context. Server notes never surface in a different server, and DM notes never surface in a server. Automatic fact extraction still runs only in DMs; in servers, facts are saved through `<remember>` tags.
+- A daily note belongs to the user who called Punch and holds only their message and Punch's reply, not the surrounding channel messages Punch was given as context. Server notes never surface in a different server, and DM notes never surface in a server. Server notes reach Spectrum only in private conversations (an iMessage space with `type: "dm"`, or the terminal provider); Spectrum group chats never see them. Automatic fact extraction still runs only in DMs; in servers, facts are saved through `<remember>` tags.
 - Channel facts are shared by everyone in the channel. A single user's audit never edits them.
 
 ## Write-time rules

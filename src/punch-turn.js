@@ -47,6 +47,7 @@ export async function runPunchTurn({
   speaker = null,
   signal = null,
   onProgress = null,
+  privateChat = false,
 }) {
   const uid = String(userId || "").trim();
   const key = String(sessionKey || "").trim();
@@ -74,7 +75,7 @@ export async function runPunchTurn({
     };
   }
 
-  const memoryContextId = beginMemoryRecall(uid, key, true);
+  const memoryContextId = beginMemoryRecall(uid, key, true, null, privateChat === true);
   const settings = store.getUserSettings(uid);
   const sentAt = formatMessageTimestamp(Date.now(), settings.timeZone);
   const who = speaker || `spectrum-user`;
