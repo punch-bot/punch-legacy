@@ -249,7 +249,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     let compressed = false;
     const res = await withUserRunLock(uid, async () => {
       const currentSession = store.getSession(cid);
-      memoryRecallKey = beginMemoryRecall(uid, cid, isDirectMessage, message.guildId);
+      memoryRecallKey = opts.pigeonFrom
+        ? beginMemoryRecall(uid, cid, false)
+        : beginMemoryRecall(uid, cid, isDirectMessage, message.guildId);
       const profile = store.coreProfile(uid);
       const memory = memoryBlock({ contextId: memoryRecallKey, profile, unavailable: !store.getMemoryStatus().available });
       if (memory) preambleParts.push(memory);
