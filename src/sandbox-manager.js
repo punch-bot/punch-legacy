@@ -139,6 +139,9 @@ function userEnvArgs(name) {
     "--env", `PI_MODEL=${process.env.PI_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
     "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,
+    ...["PI_HARD_TIMEOUT", "PI_IDLE_TIMEOUT"]
+      .filter((key) => process.env[key])
+      .flatMap((key) => ["--env", `${key}=${process.env[key]}`]),
   ];
 }
 
