@@ -54,7 +54,7 @@ export const THINKING_LEVEL_LIST = [
   { label: "Max", value: "max", description: "Only some models" },
 ];
 
-export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia"];
+export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia", "xai"];
 
 export function supervisorAuth() {
   return "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
