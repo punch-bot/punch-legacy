@@ -114,6 +114,7 @@ export const PROVIDER_ENV_MAP = {
   opencode: "OPENCODE_API_KEY",
   "opencode-go": "OPENCODE_API_KEY",
   nvidia: "NVIDIA_API_KEY",
+  xai: "XAI_API_KEY",
 };
 
 export const RESERVED_PROVIDER_IDS = new Set(["__proto__", "constructor", "prototype"]);

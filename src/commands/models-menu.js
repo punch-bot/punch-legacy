@@ -44,7 +44,8 @@ export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "",
       .addOptions(MODEL_LIST.map((m) => ({
         label: m.label,
         value: m.value,
-        description: m.value === model ? "Currently selected" : undefined,
+        emoji: { name: m.emoji },
+        description: m.value === model ? `Currently selected · ${m.description}` : m.description,
       }))),
   );
   const thinkingRow = new ActionRowBuilder().addComponents(

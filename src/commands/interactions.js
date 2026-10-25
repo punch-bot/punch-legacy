@@ -1822,7 +1822,7 @@ export function registerInteractions(client) {
               .setCustomId("model_name")
               .setLabel("Model identifier")
               .setStyle(TextInputStyle.Short)
-              .setPlaceholder("provider/model-name (e.g. anthropic/claude-sonnet-4)")
+              .setPlaceholder("provider/model-name (e.g. openrouter/anthropic/claude-opus-5.5)")
               .setRequired(true),
           ],
         });
