@@ -523,7 +523,7 @@ export function handleGeneralRoutes(req, res, url) {
 export function handlePigeonRelay(req, res, url) {
   if (req.method === "POST" && url.pathname === "/pigeon") {
     let body = "";
-    req.on("data", c => body += c);
+    req.on("data", c => { body += c; if (body.length > 64 * 1024) req.destroy(); });
     req.on("end", async () => {
       try {
         const { from: bodyFrom, text, agent, hop } = JSON.parse(body);
