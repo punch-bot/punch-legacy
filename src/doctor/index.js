@@ -1,3 +1,5 @@
+import { supervisorPasswordForUrl } from "../sandbox-manager.js";
+
 const STATUSES = new Set(["pass", "warn", "fail", "info"]);
 const CHECK_TIMEOUT_MS = 5_000;
 
@@ -40,9 +42,9 @@ function envValue(env, key) {
   return env?.[key];
 }
 
-function authHeaders(env, doctorToken) {
+function authHeaders(env, doctorToken, baseUrl) {
   const username = envValue(env, "PI_SERVER_USERNAME") || "pi";
-  const password = envValue(env, "PI_SERVER_PASSWORD") || "";
+  const password = supervisorPasswordForUrl(baseUrl) ?? (envValue(env, "PI_SERVER_PASSWORD") || "");
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` };
   if (doctorToken) headers["x-punch-doctor-token"] = doctorToken;
   return headers;
@@ -147,7 +149,7 @@ async function fetchCheck({ id, title, baseUrl, path, fetchImpl, env, doctorToke
   try {
     const target = new URL(path, `${String(baseUrl).replace(/\/$/, "")}/`);
     const response = await withTimeout(() => fetchImpl(target, {
-      headers: authHeaders(env, doctorToken),
+      headers: authHeaders(env, doctorToken, baseUrl),
       signal: AbortSignal.timeout(timeoutMs),
     }), timeoutMs + 250);
     if (!response?.ok) throw new Error(`HTTP ${response?.status ?? "error"}`);

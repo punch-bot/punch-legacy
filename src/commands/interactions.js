@@ -78,7 +78,7 @@ import {
 } from "./models-menu.js";
 
 async function modelsSupervisor(uid, path, body) {
-  const auth = supervisorAuth();
+  const auth = supervisorAuth(apiUrlFor(uid));
   const res = await fetch(`${apiUrlFor(uid)}${path}`, body === undefined
     ? { headers: { authorization: auth } }
     : { method: "POST", headers: { "content-type": "application/json", authorization: auth }, body: JSON.stringify(body) });
@@ -111,7 +111,7 @@ const CHATGPT_POLL_MS = 5_000;
 const INTERACTION_TOKEN_TTL_MS = 14.5 * 60_000;
 
 async function chatgptSupervisor(uid, method, path) {
-  const res = await fetch(`${apiUrlFor(uid)}${path}`, { method, headers: { authorization: supervisorAuth() } });
+  const res = await fetch(`${apiUrlFor(uid)}${path}`, { method, headers: { authorization: supervisorAuth(apiUrlFor(uid)) } });
   const data = await res.json().catch(() => ({}));
   if (res.status === 404) throw new Error("Your sandbox predates ChatGPT sign-in. Ask the bot owner to recreate it.");
   if (!res.ok) throw new Error(data.error || `supervisor API ${res.status}`);
@@ -232,7 +232,7 @@ export function registerInteractions(client) {
         } else {
           const apiUrl = apiUrlFor(mapping.userId);
           if (!apiUrl) throw new Error("Sandbox supervisor URL is unavailable");
-          const auth = supervisorAuth();
+          const auth = supervisorAuth(apiUrl);
           const response = await fetch(`${apiUrl}/doctor/fix`, {
             method: "POST",
             headers: {
@@ -608,7 +608,7 @@ export function registerInteractions(client) {
       const sub = interaction.options.getSubcommand();
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       if (!url) {
         await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
         return;
@@ -660,7 +660,7 @@ export function registerInteractions(client) {
       const sub = interaction.options.getSubcommand();
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       if (!url) {
         await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral });
         return;
@@ -704,7 +704,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "workers") {
       const uid = interaction.user.id;
       const url = apiUrlFor(uid);
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       if (!url) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       const sub = interaction.options.getSubcommand();
       try {
@@ -775,7 +775,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "apikey") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       const provider = interaction.options.getString("provider", true).toLowerCase();
       const key = interaction.options.getString("key");
       if (!PROVIDER_NAMES.includes(provider)) {
@@ -835,7 +835,7 @@ export function registerInteractions(client) {
     if (interaction.commandName === "provider") {
       const uid = interaction.user.id;
       const apiUrl = apiUrlFor(uid);
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       const sub = interaction.options.getSubcommand();
       const group = interaction.options.getSubcommandGroup();
 
@@ -1385,7 +1385,7 @@ export function registerInteractions(client) {
         await interaction.reply({ content: "No sandbox assigned. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
         return;
       }
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       const sub = interaction.options.getSubcommand();
       await interaction.deferReply({ ephemeral: true });
       try {
@@ -1539,7 +1539,7 @@ export function registerInteractions(client) {
 
     if (interaction.commandName === "tailscale") {
       const uid = interaction.user.id;
-      const auth = supervisorAuth();
+      const auth = supervisorAuth(apiUrlFor(uid));
       const url = apiUrlFor(uid);
       if (!url) {
         await interaction.reply({ content: "No sandbox found. Create one with `/sandbox create` first.", flags: MessageFlags.Ephemeral });
@@ -1786,7 +1786,7 @@ export function registerInteractions(client) {
     if (!interaction.isStringSelectMenu() || interaction.customId !== "skill_remove") return;
     const name = interaction.values[0];
     const uid = interaction.user.id;
-    const auth = supervisorAuth();
+    const auth = supervisorAuth(apiUrlFor(uid));
     try {
       const res = await fetch(`${apiUrlFor(uid)}/tools/remove`, {
         method: "POST",
@@ -1882,7 +1882,7 @@ export function registerInteractions(client) {
     const model = parts.slice(2).join(":");
 
     const uid = interaction.user.id;
-    const auth = supervisorAuth();
+    const auth = supervisorAuth(apiUrlFor(uid));
     const apiUrl = apiUrlFor(uid);
 
     const name = interaction.fields.getTextInputValue("edit_name").trim() || undefined;

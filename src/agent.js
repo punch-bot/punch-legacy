@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
 import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
+import { supervisorAuth } from "./core/config.js";
 
 const DEFAULT_SERVER = (process.env.PI_SERVER_URL || "").replace(/\/$/, "");
 const DEFAULT_API_URL = (() => {
@@ -16,8 +17,6 @@ const DEFAULT_API_URL = (() => {
 const MODEL = process.env.PI_MODEL || "opencode/big-pickle";
 const [PROVIDER_ID, ...rest] = MODEL.split("/");
 const MODEL_ID = rest.join("/");
-const USER = process.env.PI_SERVER_USERNAME || "pi";
-const PASS = process.env.PI_SERVER_PASSWORD || "";
 const DIR_BASE = process.env.PI_REMOTE_DIR || "/work";
 const TIMEOUT_MS = (Number(process.env.PI_TIMEOUT) || 1800) * 1000;
 
@@ -89,13 +88,8 @@ if (!DEFAULT_SERVER && (process.env.PUNCH_REQUIRE_PI_URL === "1")) {
   throw new Error("PI_SERVER_URL is not set but PUNCH_REQUIRE_PI_URL=1; Punch uses dynamic /sandbox create instead");
 }
 
-function headers() {
-  const h = { "content-type": "application/json" };
-  if (PASS) {
-     h.authorization =
-        "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64");
-  }
-  return h;
+function headers(url) {
+  return { "content-type": "application/json", authorization: supervisorAuth(url) };
 }
 
 function userDir(userId) {
@@ -125,7 +119,7 @@ async function api(path, body, baseUrl, signal = null) {
      try {
         res = await fetch(url, {
           method: "POST",
-          headers: headers(),
+          headers: headers(url),
           body: JSON.stringify(body ?? {}),
           signal: signal || AbortSignal.timeout(TIMEOUT_MS),
         });
@@ -166,8 +160,7 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
   const baseUrl = serverFor(userId);
   if (!name || !apiUrl) return false;
   try {
-    const auth =
-      "Basic " + Buffer.from(`${USER}:${PASS}`).toString("base64");
+    const auth = supervisorAuth(apiUrl);
     const res = await fetch(`${apiUrl}/doctor/fix`, {
       method: "POST",
       headers: {
@@ -188,7 +181,7 @@ export async function restartPiGateway(userId, reason = "stuck turn") {
         await abortableSleep(500);
         try {
           const health = await fetch(`${baseUrl}/health`, {
-            headers: headers(),
+            headers: headers(baseUrl),
             signal: AbortSignal.timeout(2_000),
           });
           if (health.ok) {
@@ -232,7 +225,7 @@ async function consumeEvents(sid, signal, onEvent, baseUrl, userId, onReady = nu
   const srv = baseUrl;
   let res;
   try {
-     res = await fetch(`${srv}/event`, { headers: headers(), signal });
+     res = await fetch(`${srv}/event`, { headers: headers(srv), signal });
   } catch {
      ready(false);
      return;
@@ -435,7 +428,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
       try {
         res = await fetch(url, {
           method: "POST",
-          headers: headers(),
+          headers: headers(url),
           body: JSON.stringify(body ?? {}),
           signal: postAC.signal,
         });
@@ -571,7 +564,7 @@ async function latestAssistantOutput(sid, userId) {
   if (!srv) return "";
   const dir = userDir(userId);
   const q = `?directory=${encodeURIComponent(dir)}`;
-  const res = await fetch(`${srv}/session/${sid}/message${q}`, { headers: headers() });
+  const res = await fetch(`${srv}/session/${sid}/message${q}`, { headers: headers(srv) });
   if (!res.ok) return "";
   const msgs = await res.json();
   for (let i = msgs.length - 1; i >= 0; i--) {
@@ -599,7 +592,7 @@ async function fetchActiveModel(userId, signal = null) {
   if (!apiUrl) return active;
   try {
     const res = await fetch(`${apiUrl}/model`, {
-      headers: headers(),
+      headers: headers(apiUrl),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(2000)]) : AbortSignal.timeout(2000),
     });
     if (res.ok) {
@@ -629,7 +622,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
   let sysPrompt = "";
   try {
     const res = await fetch(`${srv}/file/content?path=${encodeURIComponent(systemPath)}&directory=${encodeURIComponent("/work")}`, {
-      headers: headers(),
+      headers: headers(srv),
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -706,7 +699,7 @@ export async function getFile(filePath, userId) {
   const srv = serverFor(userId);
   const dir = userDir(userId);
   const q = `?path=${encodeURIComponent(filePath)}&directory=${encodeURIComponent(dir)}`;
-  const res = await fetch(`${srv}/file/content${q}`, { headers: headers() });
+  const res = await fetch(`${srv}/file/content${q}`, { headers: headers(srv) });
   if (!res.ok) {
      const t = await res.text().catch(() => "");
      throw new Error(`pi getFile API ${res.status}: ${t.slice(0, 200)}`);
@@ -728,7 +721,7 @@ export async function steerSession(sessionId, text, userId) {
   try {
     const res = await fetch(`${srv}/session/${encodeURIComponent(sid)}/steer${q}`, {
       method: "POST",
-      headers: headers(),
+      headers: headers(srv),
       body: JSON.stringify({ parts: [{ type: "text", text: String(text ?? "") }] }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -754,7 +747,7 @@ export async function abortSession(sessionId, userId) {
          : `/abort${q}`;
       const res = await fetch(`${srv}${path}`, {
          method: "POST",
-         headers: headers(),
+         headers: headers(srv),
          body: "{}",
          signal: AbortSignal.timeout(5000),
       });
@@ -778,7 +771,7 @@ export function apiUrlFor(userId) {
 
 export async function listBackgroundTasks(userId) {
   const url = `${apiUrlFor(userId)}/tasks`;
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetch(url, { headers: headers(url) });
   if (!res.ok) {
      const t = await res.text().catch(() => "");
      throw new Error(`listBackgroundTasks API ${res.status}: ${t.slice(0, 200)}`);
@@ -790,7 +783,7 @@ export async function killBackgroundTask(pid, userId) {
   const url = `${apiUrlFor(userId)}/tasks/kill`;
   const res = await fetch(url, {
      method: "POST",
-     headers: headers(),
+     headers: headers(url),
      body: JSON.stringify({ pid }),
   });
   if (!res.ok) {
@@ -804,7 +797,7 @@ export async function runBackgroundTask(command, userId) {
   const url = `${apiUrlFor(userId)}/tasks/run`;
   const res = await fetch(url, {
      method: "POST",
-     headers: headers(),
+     headers: headers(url),
      body: JSON.stringify({ command }),
   });
   if (!res.ok) {
@@ -818,7 +811,7 @@ export async function execCommand(command, timeout = 30000, userId) {
   const url = `${apiUrlFor(userId)}/tasks/exec`;
   const res = await fetch(url, {
      method: "POST",
-     headers: headers(),
+     headers: headers(url),
      body: JSON.stringify({ command, timeout }),
      signal: AbortSignal.timeout(timeout + 5000),
   });
@@ -833,7 +826,7 @@ export async function setSecret(key, value, userId) {
   const url = `${apiUrlFor(userId)}/secrets`;
   const res = await fetch(url, {
      method: "POST",
-     headers: { ...headers(), "Content-Type": "application/json" },
+     headers: { ...headers(url), "Content-Type": "application/json" },
      body: JSON.stringify({ key, value }),
   });
   if (!res.ok) {
@@ -845,7 +838,7 @@ export async function setSecret(key, value, userId) {
 
 export async function getSecrets(userId) {
   const url = `${apiUrlFor(userId)}/secrets`;
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetch(url, { headers: headers(url) });
   if (!res.ok) {
      const t = await res.text().catch(() => "");
      throw new Error(`getSecrets API ${res.status}: ${t.slice(0, 200)}`);
@@ -857,7 +850,7 @@ export async function setEnv(key, value, userId) {
   const url = `${apiUrlFor(userId)}/env`;
   const res = await fetch(url, {
      method: "POST",
-     headers: { ...headers(), "Content-Type": "application/json" },
+     headers: { ...headers(url), "Content-Type": "application/json" },
      body: JSON.stringify({ key, value }),
   });
   if (!res.ok) {
@@ -873,7 +866,7 @@ export async function syncWorkerCap(userId) {
   const cap = getUserSettings(userId).multitaskWorkersCap;
   const res = await fetch(`${url}/workers/settings`, {
     method: "POST",
-    headers: { ...headers(), "Content-Type": "application/json" },
+    headers: { ...headers(url), "Content-Type": "application/json" },
     body: JSON.stringify({ cap }),
   });
   if (res.status === 404) return null;
@@ -888,7 +881,7 @@ export async function syncWorkerCap(userId) {
 export async function getWorkerSettings(userId) {
   const url = apiUrlFor(userId);
   if (!url) return null;
-  const res = await fetch(`${url}/workers/settings`, { headers: headers() });
+  const res = await fetch(`${url}/workers/settings`, { headers: headers(url) });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`workers settings API ${res.status}: ${text.slice(0, 200)}`);
@@ -916,7 +909,7 @@ export async function summarizeSession(sessionId, userId, signal = null) {
 
 export async function getEnv(userId, signal = null) {
   const url = `${apiUrlFor(userId)}/env`;
-  const res = await fetch(url, { headers: headers(), signal });
+  const res = await fetch(url, { headers: headers(url), signal });
   if (!res.ok) {
      const t = await res.text().catch(() => "");
      throw new Error(`getEnv API ${res.status}: ${t.slice(0, 200)}`);

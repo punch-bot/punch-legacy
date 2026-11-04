@@ -6,12 +6,16 @@ import { migrateMcpApiKeyEnvVars } from "/usr/local/lib/mcp-config.mjs";
 import {
   API_PORT,
   ENV_FILE,
+  LOCAL_PASSWORD,
   MCP_FILE,
   MODEL_DEFAULT,
+  SANDBOX_PASSWORD,
   TOOL_DIRS,
   WORK,
+  basicAuth,
   loadJSON,
   log,
+  safeEqual,
   saveJSON,
   state,
 } from "./supervisor/state.mjs";
@@ -96,14 +100,22 @@ setupSignalHandlers();
   }, 2000);
 })();
 
+function isLoopback(address) {
+  return /^(?:::ffff:)?127\./.test(address || "") || address === "::1";
+}
+
+function authorized(req) {
+  const header = req.headers.authorization || "";
+  if (safeEqual(header, basicAuth(SANDBOX_PASSWORD))) return true;
+  return isLoopback(req.socket.remoteAddress) && safeEqual(header, basicAuth(LOCAL_PASSWORD));
+}
+
 const apiServer = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (handlePigeonRelay(req, res, url)) return;
 
-  const authHeader = req.headers.authorization || "";
-  const expectedAuth = "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
-  if (authHeader !== expectedAuth) {
+  if (!authorized(req)) {
     res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Sandbox API"' });
     res.end("Unauthorized");
     return;

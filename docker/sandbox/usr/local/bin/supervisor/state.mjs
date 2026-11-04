@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 
 export const TOOL_DIRS = ["/work/.pi/extensions"];
@@ -18,13 +18,27 @@ export const HEALTHY_MS = 8000;
 export const WORK = "/work";
 export const PROBE_URL = "http://127.0.0.1:4096/health";
 export const PI_MODELS_URL = "http://127.0.0.1:4096/models";
+
+export const SANDBOX_PASSWORD = process.env.PI_SERVER_PASSWORD || "";
+export const LOCAL_PASSWORD = randomBytes(32).toString("base64url");
+export const BOT_TOKEN = process.env.PUNCH_BOT_TOKEN || "";
+export const DOCTOR_TOKEN = process.env.PUNCH_DOCTOR_TOKEN || "";
+delete process.env.PUNCH_BOT_TOKEN;
+delete process.env.PUNCH_DOCTOR_TOKEN;
+process.env.PI_SERVER_PASSWORD = LOCAL_PASSWORD;
+
+export function basicAuth(password) {
+  return "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${password}`).toString("base64");
+}
+
+export function safeEqual(received, expected) {
+  const a = Buffer.from(String(received || ""));
+  const b = Buffer.from(String(expected || ""));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 export function probeAuth() {
-  return (
-    "Basic " +
-    Buffer.from(
-      `${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`,
-    ).toString("base64")
-  );
+  return basicAuth(SANDBOX_PASSWORD);
 }
 export const EXT_DISABLED_FILE = "/data/pi/extensions-disabled.json";
 

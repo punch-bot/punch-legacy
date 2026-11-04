@@ -9,6 +9,7 @@ const DATA_DIR = process.env.DATA_DIR || "/data";
 export const USERS_FILE = `${DATA_DIR}/sandbox_users.json`;
 const DOCTOR_TOKENS_FILE = `${DATA_DIR}/sandbox_doctor_tokens.json`;
 const BOT_TOKENS_FILE = `${DATA_DIR}/sandbox_bot_tokens.json`;
+const SUPERVISOR_PASSWORDS_FILE = `${DATA_DIR}/sandbox_supervisor_passwords.json`;
 const MAIN_COMPOSE = "/punch/docker-compose.yml";
 const STACK = process.env.PUNCH_STACK_NAME || "punch";
 const NETWORK = `${STACK}_edge`;
@@ -43,55 +44,63 @@ function saveUsers(users) {
   writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
-function loadDoctorTokens() {
+function loadSecretMap(file) {
   try {
-    const tokens = JSON.parse(readFileSync(DOCTOR_TOKENS_FILE, "utf8"));
-    return tokens && typeof tokens === "object" && !Array.isArray(tokens) ? tokens : {};
+    const secrets = JSON.parse(readFileSync(file, "utf8"));
+    return secrets && typeof secrets === "object" && !Array.isArray(secrets) ? secrets : {};
   } catch {
     return {};
   }
 }
 
-function saveDoctorTokens(tokens) {
-  writeFileSync(DOCTOR_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+function saveSecretMap(file, secrets) {
+  writeFileSync(file, JSON.stringify(secrets, null, 2), { mode: 0o600 });
 }
 
-function loadBotTokens() {
-  try {
-    const tokens = JSON.parse(readFileSync(BOT_TOKENS_FILE, "utf8"));
-    return tokens && typeof tokens === "object" && !Array.isArray(tokens) ? tokens : {};
-  } catch {
-    return {};
+function secretFor(file, name) {
+  validateSandboxName(name);
+  const secrets = loadSecretMap(file);
+  if (!secrets[name]) {
+    secrets[name] = randomBytes(32).toString("base64url");
+    saveSecretMap(file, secrets);
   }
+  return secrets[name];
 }
 
-function saveBotTokens(tokens) {
-  writeFileSync(BOT_TOKENS_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+function deleteSecret(file, name) {
+  const secrets = loadSecretMap(file);
+  if (!secrets[name]) return;
+  delete secrets[name];
+  saveSecretMap(file, secrets);
 }
 
 export function doctorTokenFor(name) {
-  validateSandboxName(name);
-  const tokens = loadDoctorTokens();
-  if (!tokens[name]) {
-    tokens[name] = randomBytes(32).toString("base64url");
-    saveDoctorTokens(tokens);
-  }
-  return tokens[name];
+  return secretFor(DOCTOR_TOKENS_FILE, name);
 }
 
 export function botTokenFor(name) {
-  validateSandboxName(name);
-  const tokens = loadBotTokens();
-  if (!tokens[name]) {
-    tokens[name] = randomBytes(32).toString("base64url");
-    saveBotTokens(tokens);
+  return secretFor(BOT_TOKENS_FILE, name);
+}
+
+export function supervisorPasswordFor(name) {
+  return secretFor(SUPERVISOR_PASSWORDS_FILE, name);
+}
+
+export function supervisorPasswordForUrl(url) {
+  let hostname;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return null;
   }
-  return tokens[name];
+  const match = hostname.match(/^sandbox-(.+)$/);
+  if (!match || !isValidSandboxName(match[1])) return null;
+  return loadSecretMap(SUPERVISOR_PASSWORDS_FILE)[match[1]] || null;
 }
 
 export function resolveBotToken(token) {
   if (!token) return null;
-  const tokens = loadBotTokens();
+  const tokens = loadSecretMap(BOT_TOKENS_FILE);
   const name = Object.keys(tokens).find((n) => tokens[n] === token);
   if (!name) return null;
   const user = loadUsers().find((u) => u.name === name);
@@ -116,16 +125,9 @@ export function removeUser(name) {
   if (idx < 0) return { ok: false, error: `User "${name}" not found.` };
   const removed = users.splice(idx, 1)[0];
   saveUsers(users);
-  const tokens = loadDoctorTokens();
-  if (tokens[name]) {
-    delete tokens[name];
-    saveDoctorTokens(tokens);
-  }
-  const botTokens = loadBotTokens();
-  if (botTokens[name]) {
-    delete botTokens[name];
-    saveBotTokens(botTokens);
-  }
+  deleteSecret(DOCTOR_TOKENS_FILE, name);
+  deleteSecret(BOT_TOKENS_FILE, name);
+  deleteSecret(SUPERVISOR_PASSWORDS_FILE, name);
   return { ok: true, removed };
 }
 
@@ -135,7 +137,7 @@ function userEnvArgs(name) {
     "--env", `SANDBOX_NAME=${name}`,
     "--env", `SANDBOX_USER_ID=${user?.userId || ""}`,
     "--env", `PI_SERVER_USERNAME=${process.env.PI_SERVER_USERNAME || "pi"}`,
-    "--env", `PI_SERVER_PASSWORD=${process.env.PI_SERVER_PASSWORD || ""}`,
+    "--env", `PI_SERVER_PASSWORD=${supervisorPasswordFor(name)}`,
     "--env", `PI_MODEL=${process.env.PI_MODEL || "opencode/big-pickle"}`,
     "--env", `PUNCH_DOCTOR_TOKEN=${doctorTokenFor(name)}`,
     "--env", `PUNCH_BOT_TOKEN=${botTokenFor(name)}`,

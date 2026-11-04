@@ -1,7 +1,8 @@
 import { getWorkerSettings, listWorkers, setWorkerCap, startWorker, stopWorker, workerLogs } from "/usr/local/lib/worker-manager.mjs";
+import { BOT_TOKEN } from "./state.mjs";
 
 function botAuth() {
-  return "Bearer " + (process.env.PUNCH_BOT_TOKEN || "");
+  return "Bearer " + BOT_TOKEN;
 }
 
 function notifyBot(path, progress) {
