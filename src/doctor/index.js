@@ -112,9 +112,13 @@ async function containerCheck({ sandboxName, sandbox }) {
       if (!mount.rw) return [`${destination} is read-only`];
       return [];
     });
-    const hasTun = details.devices?.includes("/dev/net/tun");
-    const hasNetAdmin = details.capabilities?.includes("NET_ADMIN");
+    const networkPrivileges = [
+      details.devices?.includes("/dev/net/tun") && "the /dev/net/tun device",
+      details.capabilities?.includes("NET_ADMIN") && "NET_ADMIN",
+      !details.droppedCapabilities?.includes("NET_RAW") && "NET_RAW",
+    ].filter(Boolean);
     const unexpectedCapabilities = (details.capabilities || []).filter((capability) => capability !== "NET_ADMIN");
+    const isolatedNetwork = details.networks?.length === 1 && details.networks[0] === details.expectedNetwork;
     const checks = [
       details.running
         ? check("container", "pass", "Sandbox container", `Running (${details.status}${details.health ? `, health ${details.health}` : ""}).`, duration)
@@ -125,12 +129,12 @@ async function containerCheck({ sandboxName, sandbox }) {
       mountProblems.length === 0
         ? check("container-mounts", "pass", "Persistent storage", "Expected writable work, data, home, and Tailscale volumes are attached.", duration)
         : check("container-mounts", "fail", "Persistent storage", `Mount problems: ${mountProblems.join("; ")}.`, duration, "Recreate the sandbox after verifying volume configuration."),
-      hasTun && hasNetAdmin
-        ? check("container-tailscale", "pass", "Tailscale container access", "TUN device and NET_ADMIN capability are present.", duration)
-        : check("container-tailscale", "fail", "Tailscale container access", `Missing ${[!hasTun && "/dev/net/tun", !hasNetAdmin && "NET_ADMIN"].filter(Boolean).join(" and ")}.`, duration, "Recreate the sandbox with Tailscale device access."),
-      details.networks?.includes(details.expectedNetwork)
-        ? check("container-network", "pass", "Docker network", `Attached to ${details.expectedNetwork}.`, duration)
-        : check("container-network", "fail", "Docker network", `Not attached to expected network ${details.expectedNetwork}.`, duration, "Recreate the sandbox on the Nightly edge network."),
+      networkPrivileges.length === 0
+        ? check("container-network-privileges", "pass", "Network privileges", "No TUN device, NET_ADMIN, or NET_RAW; Tailscale runs in userspace.", duration)
+        : check("container-network-privileges", "fail", "Network privileges", `Sandbox still has ${networkPrivileges.join(", ")}.`, duration, "Recreate the sandbox with /sandbox restart-all recreate:true."),
+      isolatedNetwork
+        ? check("container-network", "pass", "Docker network", `Attached only to ${details.expectedNetwork}.`, duration)
+        : check("container-network", "fail", "Docker network", `Attached to ${(details.networks || []).join(", ") || "no network"}; expected only ${details.expectedNetwork}.`, duration, "Recreate the sandbox on its own network."),
     ];
     if (details.oomKilled) checks.push(check("container-oom", "fail", "Container memory", "Last process exit was caused by an OOM kill.", duration, "Inspect workload memory use before restarting."));
     else checks.push(check("container-oom", "pass", "Container memory", "No OOM kill recorded.", duration));

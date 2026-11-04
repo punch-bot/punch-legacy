@@ -2,7 +2,7 @@
 set -e
 
 mkdir -p /var/run/tailscale /var/lib/tailscale
-tailscaled --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 2>&1 &
+tailscaled --tun=userspace-networking --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 --state=/var/lib/tailscale/tailscaled.state >/var/log/tailscaled.log 2>&1 &
 tailscale set --accept-dns=false 2>/dev/null || true
 
 node /usr/local/lib/pi-runtime-migration.mjs
