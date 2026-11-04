@@ -5,6 +5,11 @@ import * as sandbox from "./sandbox-manager.js";
 const FILE = "/data/collabs.json";
 const ID_PATTERN = /^col_[a-f0-9]{12}$/;
 const SHA_PATTERN = /^[a-f0-9]{40,64}$/;
+const REPO_ROOT = "/data/collab";
+
+function repoPathFor(id) {
+  return `${REPO_ROOT}/${id}.git`;
+}
 
 function load() {
   try {
@@ -23,6 +28,7 @@ function collabOrThrow(id) {
   if (!ID_PATTERN.test(String(id || ""))) throw new Error("Invalid collaboration ID.");
   const collab = load().find((record) => record.id === id);
   if (!collab) throw new Error("Collaboration not found.");
+  if (collab.repo !== repoPathFor(collab.id)) throw new Error("Collaboration uses retired shared storage. Start a new collaboration.");
   return collab;
 }
 
@@ -52,6 +58,11 @@ async function bareHead(collab, branch) {
   return stdout.toLowerCase();
 }
 
+async function syncRef(collab, from, to, ref) {
+  const { stdout: bundle } = await sandbox.gitInSandbox(from, ["--git-dir", collab.repo, "bundle", "create", "-", ref], { binary: true });
+  await sandbox.fetchBundleInSandbox(to, collab.repo, bundle, `+${ref}:${ref}`);
+}
+
 export function listFor(actor) {
   return load().filter((collab) => collab.participants.includes(actor));
 }
@@ -67,7 +78,7 @@ export async function create({ owner, reviewer, workspace }) {
   if (!sandbox.loadUsers().some((user) => user.name === reviewer)) throw new Error("Reviewer sandbox is not registered.");
   const source = safeWorkspace(workspace);
   const id = `col_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  const repo = `/collab/${id}.git`;
+  const repo = repoPathFor(id);
   const clonePath = `/work/collab/${id}`;
   let hasRepository = true;
   try {
@@ -95,8 +106,10 @@ export async function create({ owner, reviewer, workspace }) {
   await sandbox.gitInSandbox(owner, ["--git-dir", repo, "update-ref", "refs/heads/main", base]);
   await sandbox.gitInSandbox(owner, ["-C", source, "remote", "remove", "punch-collab"]).catch(() => {});
   await sandbox.gitInSandbox(owner, ["-C", source, "remote", "add", "punch-collab", repo]);
-  await sandbox.gitInSandbox(reviewer, ["clone", repo, clonePath]);
   const collab = { id, owner, participants: [owner, reviewer], repo, baseRef: "main", base: base.toLowerCase(), workspaces: { [owner]: source, [reviewer]: clonePath }, proposal: null, createdAt: Date.now(), updatedAt: Date.now() };
+  await sandbox.gitInSandbox(reviewer, ["init", "--bare", "--initial-branch=main", repo]);
+  await syncRef(collab, owner, reviewer, "refs/heads/main");
+  await sandbox.gitInSandbox(reviewer, ["clone", repo, clonePath]);
   const records = load();
   records.push(collab);
   save(records);
@@ -108,11 +121,13 @@ export async function propose({ id, actor, head }) {
   requireParticipant(collab, actor);
   if (!SHA_PATTERN.test(String(head || ""))) throw new Error("Head must be a full Git SHA.");
   const branch = `changes/${id}`;
+  const reviewer = collab.participants.find((name) => name !== actor);
+  try { await syncRef(collab, actor, reviewer, `refs/heads/${branch}`); }
+  catch { throw new Error(`Push ${branch} to punch-collab before proposing.`); }
   const remoteHead = await bareHead(collab, branch);
   if (remoteHead !== head.toLowerCase()) throw new Error("Proposal SHA is not current collaboration branch head.");
   try { await sandbox.gitInSandbox(collab.owner, ["--git-dir", collab.repo, "merge-base", "--is-ancestor", collab.base, remoteHead]); }
   catch { throw new Error("Proposal does not descend from canonical main."); }
-  const reviewer = collab.participants.find((name) => name !== actor);
   collab.proposal = { branch, author: actor, reviewer, head: remoteHead, authorApprovedAt: Date.now(), reviewerApprovedAt: null, reviewedHead: null, reviewNotes: "", status: "pending_review" };
   collab.updatedAt = Date.now();
   write(collab);
@@ -150,5 +165,7 @@ export async function mergeIfApproved(collab) {
   proposal.mergedAt = Date.now();
   collab.updatedAt = Date.now();
   write(collab);
+  const peer = collab.participants.find((name) => name !== collab.owner);
+  await syncRef(collab, collab.owner, peer, "refs/heads/main").catch(() => {});
   return true;
 }

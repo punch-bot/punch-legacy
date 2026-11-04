@@ -151,7 +151,6 @@ function volumeArgs(name) {
     "--volume", `${vol("sandbox_work_" + name)}:/work`,
     "--volume", `${vol("octl_data_" + name)}:/data`,
     "--volume", `${vol("ts_state_" + name)}:/var/lib/tailscale`,
-    "--volume", `${vol("collab")}:/collab`,
   ];
 }
 
@@ -202,7 +201,6 @@ export function getContainerDiagnostics(name) {
       "/work": vol("sandbox_work_" + name),
       "/data": vol("octl_data_" + name),
       "/var/lib/tailscale": vol("ts_state_" + name),
-      "/collab": vol("collab"),
     },
     devices,
     capabilities,
@@ -247,22 +245,44 @@ export function getContainerLogs(name, tail = 50) {
   throw new Error(message);
 }
 
-export async function gitInSandbox(name, args, { cwd } = {}) {
+const UNTRUSTED_GIT_CONFIG = ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"];
+const GIT_TRANSFER_MAX_BYTES = 256 * 1024 * 1024;
+
+async function execInSandbox(name, argv, { cwd, input, binary = false } = {}) {
   validateSandboxName(name);
-  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
-    throw new Error("Git arguments must be strings.");
-  }
   const container = containerForSandbox(name);
   if (!container) throw new Error(`Sandbox "${name}" is not running.`);
   const command = ["exec"];
+  if (input) command.push("--interactive");
   if (cwd) command.push("--workdir", cwd);
-  command.push(container, "git", ...args);
+  command.push(container, ...argv);
+  const pending = execFileAsync("docker", command, {
+    timeout: 120000,
+    maxBuffer: GIT_TRANSFER_MAX_BYTES,
+    encoding: binary ? "buffer" : "utf8",
+  });
+  if (input) pending.child.stdin.end(input);
   try {
-    const { stdout, stderr } = await execFileAsync("docker", command, { timeout: 30000 });
-    return { stdout: stdout.trim(), stderr: stderr.trim() };
+    const { stdout, stderr } = await pending;
+    return { stdout: binary ? stdout : stdout.trim(), stderr: String(stderr).trim() };
   } catch (error) {
-    throw new Error(error.stderr?.trim() || error.message || "Git command failed.");
+    throw new Error(String(error.stderr || "").trim() || error.message || "Git command failed.");
   }
+}
+
+export async function gitInSandbox(name, args, { cwd, binary } = {}) {
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
+    throw new Error("Git arguments must be strings.");
+  }
+  return execInSandbox(name, ["git", ...UNTRUSTED_GIT_CONFIG, ...args], { cwd, binary });
+}
+
+export async function fetchBundleInSandbox(name, gitDir, bundle, refspec) {
+  if (typeof gitDir !== "string" || typeof refspec !== "string" || !Buffer.isBuffer(bundle) || bundle.length === 0) {
+    throw new Error("Invalid Git bundle transfer.");
+  }
+  const script = 'bundle=$(mktemp) && cat > "$bundle" && git -c core.hooksPath=/dev/null -c core.fsmonitor=false --git-dir "$1" fetch --quiet "$bundle" "$2"; status=$?; rm -f "$bundle"; exit $status';
+  return execInSandbox(name, ["sh", "-c", script, "sh", gitDir, refspec], { input: bundle });
 }
 
 async function removeContainer(name) {
@@ -301,7 +321,7 @@ export async function buildSandboxImage() {
 }
 
 async function runSandboxContainer(name) {
-  const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name, "collab"];
+  const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name];
   for (const volumeName of volumeNames) {
     await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
   }
