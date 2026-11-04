@@ -31,6 +31,7 @@ export function buildSlashCommands() {
   }, {
     name: "sandbox",
     description: "Manage sandbox users (create/list/remove)",
+    default_member_permissions: "0",
     options: [
       { type: 1, name: "create", description: "Create a new sandbox for a user",
         options: [
