@@ -5,7 +5,9 @@ import { join } from "node:path";
 import {
   DEBOUNCE_MS,
   HEALTHY_MS,
+  LOCAL_PASSWORD,
   PROBE_URL,
+  SANDBOX_PASSWORD,
   TOOL_DIRS,
   WORK,
   log,
@@ -68,13 +70,12 @@ export function start() {
   const gen = ++state.generation;
   state.loadedHash = toolSetHash();
   log("starting: pi-gateway (model", state.CURRENT_MODEL + ")");
-  const gatewayEnv = { ...process.env };
-  delete gatewayEnv.PUNCH_DOCTOR_TOKEN;
-  delete gatewayEnv.PUNCH_BOT_TOKEN;
   const child = spawn("node", ["/usr/local/bin/pi-gateway.mjs"], {
     stdio: "inherit",
     env: {
-      ...gatewayEnv,
+      ...process.env,
+      PI_SERVER_PASSWORD: LOCAL_PASSWORD,
+      PI_GATEWAY_PASSWORD: SANDBOX_PASSWORD,
       PI_DEFAULT_MODEL: state.CURRENT_MODEL,
       PI_MODEL: state.CURRENT_MODEL,
       PI_EXTENSIONS_DIR: "/opt/pi/extensions",

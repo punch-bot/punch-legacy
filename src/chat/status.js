@@ -20,7 +20,7 @@ async function listActiveWorkers(uid) {
   const url = apiUrlFor(uid);
   if (!url) return [];
   try {
-    const res = await fetch(`${url}/workers`, { headers: { authorization: supervisorAuth() } });
+    const res = await fetch(`${url}/workers`, { headers: { authorization: supervisorAuth(url) } });
     if (!res.ok) return [];
     const { workers } = await res.json();
     return (workers || []).filter((worker) => worker.active || ["queued", "running"].includes(worker.status));

@@ -42,7 +42,8 @@ const PI_SETTINGS_FILES = [
   join(WORK, ".pi", "settings.json"),
 ];
 const USER = process.env.PI_SERVER_USERNAME || "pi";
-const PASS = process.env.PI_SERVER_PASSWORD || "";
+const PASS = process.env.PI_GATEWAY_PASSWORD || "";
+delete process.env.PI_GATEWAY_PASSWORD;
 let MODEL =
   process.env.PI_DEFAULT_MODEL ||
   process.env.PI_MODEL ||

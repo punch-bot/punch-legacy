@@ -1,3 +1,5 @@
+import { supervisorPasswordForUrl } from "../sandbox-manager.js";
+
 export const TOKEN = process.env.DISCORD_TOKEN;
 export const PREFIX = process.env.PREFIX || "!";
 export const DOCTOR_REPAIR_TTL_MS = 10 * 60_000;
@@ -56,6 +58,7 @@ export const THINKING_LEVEL_LIST = [
 
 export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia"];
 
-export function supervisorAuth() {
-  return "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
+export function supervisorAuth(url) {
+  const password = supervisorPasswordForUrl(url) ?? (process.env.PI_SERVER_PASSWORD || "");
+  return "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${password}`).toString("base64");
 }

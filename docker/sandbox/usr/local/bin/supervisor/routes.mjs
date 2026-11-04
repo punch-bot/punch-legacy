@@ -1,6 +1,5 @@
 import { exec, execFile } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { resolvePeerSandbox } from "/usr/local/lib/pigeon-peer.js";
 import { repairSandboxDoctor, runSandboxDoctor } from "/usr/local/lib/doctor.mjs";
@@ -9,6 +8,8 @@ import { PROVIDER_ENV_MAP, mirrorGoogleGemini, syncAuthProvider } from "./models
 import { forceRestart } from "./gateway.mjs";
 import {
   AUTH_FILE,
+  BOT_TOKEN,
+  DOCTOR_TOKEN,
   ENV_FILE,
   EXT_DISABLED_FILE,
   PROBE_URL,
@@ -17,6 +18,7 @@ import {
   log,
   loadJSON,
   probeAuth,
+  safeEqual,
   saveJSON,
   state,
 } from "./state.mjs";
@@ -68,10 +70,7 @@ export function parseTaskBody(raw, contentType = "") {
 }
 
 function validDoctorToken(req) {
-  const expected = process.env.PUNCH_DOCTOR_TOKEN || "";
-  const received = String(req.headers["x-punch-doctor-token"] || "");
-  if (!expected || received.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+  return Boolean(DOCTOR_TOKEN) && safeEqual(req.headers["x-punch-doctor-token"], DOCTOR_TOKEN);
 }
 
 function loadDisabledExts() {
@@ -149,7 +148,7 @@ export async function handleBotProxy(req, res, url) {
       method: req.method,
       headers: {
         "content-type": req.headers["content-type"] || "application/json",
-        authorization: "Bearer " + (process.env.PUNCH_BOT_TOKEN || ""),
+        authorization: "Bearer " + BOT_TOKEN,
       },
       body: ["GET", "HEAD"].includes(req.method) ? undefined : bodyBuf.length ? bodyBuf : undefined,
     });
@@ -553,7 +552,7 @@ export function handlePigeonRelay(req, res, url) {
         saveJSON("/data/pigeon.json", msgs);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ success: true, delivery: agentFlag ? "agent task queued" : "notification delivered", from, recipient: process.env.SANDBOX_NAME || null }));
-        const botAuth = "Bearer " + (process.env.PUNCH_BOT_TOKEN || "");
+        const botAuth = "Bearer " + BOT_TOKEN;
         const notifyBody = { recipientId: process.env.SANDBOX_USER_ID || "", from, text };
         if (agentFlag) {
           notifyBody.agent = true;

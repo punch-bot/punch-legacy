@@ -7,7 +7,7 @@ export async function ensureUserSandbox(userId) {
   try {
     const res = await fetch(`${apiUrl}/env`, {
       headers: {
-        authorization: supervisorAuth(),
+        authorization: supervisorAuth(apiUrl),
       },
     });
     if (!res.ok) throw new Error(`sandbox reachability check failed: ${res.status}`);
