@@ -99,7 +99,7 @@ setupSignalHandlers();
 const apiServer = createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  if (handlePigeonRelay(req, res, url)) return;
+  if (req.method === "POST" && handlePigeonRelay(req, res, url)) return;
 
   const authHeader = req.headers.authorization || "";
   const expectedAuth = "Basic " + Buffer.from(`${process.env.PI_SERVER_USERNAME || "pi"}:${process.env.PI_SERVER_PASSWORD || ""}`).toString("base64");
@@ -109,6 +109,7 @@ const apiServer = createServer(async (req, res) => {
     return;
   }
 
+  if (handlePigeonRelay(req, res, url)) return;
   if (await handleBotProxy(req, res, url)) return;
   if (handleGeneralRoutes(req, res, url)) return;
   if (handleProviderRoutes(req, res, url)) return;
