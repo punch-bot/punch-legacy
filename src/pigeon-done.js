@@ -16,17 +16,8 @@ function truncate(text, max = SUMMARY_MAX) {
 }
 
 async function postPigeonToSandbox(targetSandbox, body) {
-  const url = `http://sandbox-${targetSandbox}:4097/pigeon`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    throw new Error(`pigeon POST ${res.status}: ${t.slice(0, 120)}`);
-  }
+  const res = await sandbox.sendPigeonToSandbox(targetSandbox, body);
+  if (!res.ok) throw new Error(`pigeon POST ${res.status}: ${res.text.slice(0, 120)}`);
 }
 
 export async function notifyPigeonDone({

@@ -12,7 +12,8 @@ const BOT_TOKENS_FILE = `${DATA_DIR}/sandbox_bot_tokens.json`;
 const SUPERVISOR_PASSWORDS_FILE = `${DATA_DIR}/sandbox_supervisor_passwords.json`;
 const MAIN_COMPOSE = "/punch/docker-compose.yml";
 const STACK = process.env.PUNCH_STACK_NAME || "punch";
-const NETWORK = `${STACK}_edge`;
+const SANDBOX_NETWORK = (name) => `${STACK}_sandbox-${name}`;
+const SANDBOX_NETWORK_PEERS = ["bot", "searxng"];
 const VOL_PREFIX = `${STACK}_`;
 const SANDBOX_IMAGE = process.env.PUNCH_SANDBOX_IMAGE || "punch-sandbox:latest";
 
@@ -183,6 +184,7 @@ export function getContainerDiagnostics(name) {
   }));
   const devices = (container.HostConfig?.Devices || []).map((device) => device.PathOnHost);
   const capabilities = container.HostConfig?.CapAdd || [];
+  const droppedCapabilities = container.HostConfig?.CapDrop || [];
   const networks = Object.keys(container.NetworkSettings?.Networks || {});
   return {
     name: container.Name?.replace(/^\//, "") || CONTAINER_NAME(name),
@@ -206,8 +208,9 @@ export function getContainerDiagnostics(name) {
     },
     devices,
     capabilities,
+    droppedCapabilities,
     networks,
-    expectedNetwork: NETWORK,
+    expectedNetwork: SANDBOX_NETWORK(name),
   };
 }
 
@@ -322,11 +325,78 @@ export async function buildSandboxImage() {
   }
 }
 
+function composeServiceContainers(service) {
+  return execFileAsync("docker", [
+    "ps", "--quiet",
+    "--filter", `label=com.docker.compose.project=${STACK}`,
+    "--filter", `label=com.docker.compose.service=${service}`,
+  ], { timeout: 10000 }).then(({ stdout }) => stdout.split("\n").map((id) => id.trim()).filter(Boolean));
+}
+
+async function ensureSandboxNetwork(name) {
+  const network = SANDBOX_NETWORK(name);
+  try {
+    await execFileAsync("docker", ["network", "inspect", network], { timeout: 10000 });
+  } catch {
+    await execFileAsync("docker", [
+      "network", "create",
+      "--driver", "bridge",
+      "--label", `com.docker.compose.project=${STACK}`,
+      "--label", `punch.sandbox=${name}`,
+      network,
+    ], { timeout: 10000 });
+  }
+  for (const service of SANDBOX_NETWORK_PEERS) {
+    const containers = await composeServiceContainers(service);
+    if (service === "bot" && containers.length === 0) {
+      throw new Error(`No running ${STACK} bot container found to attach to ${network}.`);
+    }
+    for (const container of containers) {
+      try {
+        await execFileAsync("docker", ["network", "connect", "--alias", service, network, container], { timeout: 10000 });
+      } catch (err) {
+        const message = err.stderr?.trim() || err.message || "";
+        if (!/already exists|already attached/i.test(message)) throw err;
+      }
+    }
+  }
+  return network;
+}
+
+async function removeSandboxNetwork(name) {
+  const network = SANDBOX_NETWORK(name);
+  let attached;
+  try {
+    const { stdout } = await execFileAsync("docker", [
+      "network", "inspect", "--format", "{{range $id, $c := .Containers}}{{$id}} {{end}}", network,
+    ], { timeout: 10000 });
+    attached = stdout.split(/\s+/).filter(Boolean);
+  } catch {
+    return;
+  }
+  for (const container of attached) {
+    await execFileAsync("docker", ["network", "disconnect", "--force", network, container], { timeout: 10000 }).catch(() => {});
+  }
+  await execFileAsync("docker", ["network", "rm", network], { timeout: 10000 }).catch(() => {});
+}
+
+export async function sendPigeonToSandbox(name, body) {
+  validateSandboxName(name);
+  const res = await fetch(`http://sandbox-${name}:4097/pigeon`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-punch-pigeon-token": botTokenFor(name) },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10000),
+  });
+  return { ok: res.ok, status: res.status, text: await res.text().catch(() => "") };
+}
+
 async function runSandboxContainer(name) {
   const volumeNames = ["sandbox_home_" + name, "sandbox_work_" + name, "octl_data_" + name, "ts_state_" + name];
   for (const volumeName of volumeNames) {
     await execFileAsync("docker", ["volume", "create", vol(volumeName)], { timeout: 10000 });
   }
+  await ensureSandboxNetwork(name);
   const { stdout } = await execFileAsync("docker", sandboxRunArgs(name), { timeout: 60000 });
   return { ok: true, output: stdout.trim() };
 }
@@ -336,11 +406,10 @@ export function sandboxRunArgs(name) {
   return [
     "run", "--detach",
     "--name", CONTAINER_NAME(name),
-    "--network", NETWORK,
+    "--network", SANDBOX_NETWORK(name),
     "--network-alias", `sandbox-${name}`,
     ...userEnvArgs(name),
-    "--device", "/dev/net/tun",
-    "--cap-add", "NET_ADMIN",
+    "--cap-drop", "NET_RAW",
     "--pids-limit", "512",
     "--memory", "4g",
     "--cpus", "3",
@@ -399,6 +468,7 @@ export async function composeDown(name) {
   try {
     validateSandboxName(name);
     const { stdout } = await removeContainer(name);
+    await removeSandboxNetwork(name);
     return { ok: true, output: stdout.trim() };
   } catch (err) {
     return { ok: false, error: err.stderr?.trim() || err.message };

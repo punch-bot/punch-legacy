@@ -5,7 +5,7 @@ Punch is a personal assistant that lives in Discord and, optionally, iMessage vi
 ## Branches and stacks
 
 - `main` is the only long-lived branch. The `nightly` branch no longer exists, so open every PR against `main`.
-- `.env` sets the stack identity. `PUNCH_STACK_NAME` (`punch` or `punch-nightly`) determines the compose project, network, volume prefix, and sandbox image name. No host ports are published: the bot and sandboxes talk over the compose network. Before you run `docker compose`, check which stack the current checkout drives.
+- `.env` sets the stack identity. `PUNCH_STACK_NAME` (`punch` or `punch-nightly`) determines the compose project, network, volume prefix, and sandbox image name. No host ports are published. The bot and searxng share the compose `edge` network, and each sandbox gets its own `<stack>_sandbox-<name>` network that only the bot and searxng join, so sandboxes cannot reach each other. Sandboxes run without `NET_ADMIN`, `NET_RAW`, or `/dev/net/tun` (Tailscale uses userspace networking), and pigeons between sandboxes are relayed by the bot (`/pigeon/relay`) with the recipient's bot token. Before you run `docker compose`, check which stack the current checkout drives.
 
 ## Commands
 

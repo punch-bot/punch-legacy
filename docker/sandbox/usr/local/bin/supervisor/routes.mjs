@@ -73,6 +73,13 @@ function validDoctorToken(req) {
   return Boolean(DOCTOR_TOKEN) && safeEqual(req.headers["x-punch-doctor-token"], DOCTOR_TOKEN);
 }
 
+function validPigeonToken(req) {
+  const expected = process.env.PUNCH_BOT_TOKEN || "";
+  const received = String(req.headers["x-punch-pigeon-token"] || "");
+  if (!expected || received.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+}
+
 function loadDisabledExts() {
   try { return JSON.parse(readFileSync(EXT_DISABLED_FILE, "utf8")); } catch { return {}; }
 }
@@ -247,17 +254,17 @@ export function handleGeneralRoutes(req, res, url) {
         if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(to)) {
           res.writeHead(400); res.end(JSON.stringify({ error: "Invalid to" })); return;
         }
-        const from = process.env.SANDBOX_NAME;
-        if (!from) { res.writeHead(500); res.end(JSON.stringify({ error: "SANDBOX_NAME not configured" })); return; }
-        const payload = { text };
+        const payload = { to, text };
         if (agent) {
           payload.agent = true;
           payload.hop = Number(hop) || 0;
         }
-        const target = `http://sandbox-${to}:4097/pigeon`;
-        const fwd = await fetch(target, {
+        const fwd = await fetch("http://bot:4098/pigeon/relay", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer " + (process.env.PUNCH_BOT_TOKEN || ""),
+          },
           body: JSON.stringify(payload),
         });
         const fwdText = await fwd.text().catch(() => "");
@@ -527,19 +534,13 @@ export function handlePigeonRelay(req, res, url) {
       try {
         const { from: bodyFrom, text, agent, hop } = JSON.parse(body);
         if (!text) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing text" })); return; }
-        const peer = await resolvePeerSandbox(req);
-        let from;
-        if (!peer) {
+        if (!validPigeonToken(req)) {
           res.writeHead(403); res.end(JSON.stringify({ error: "Could not verify pigeon sender" })); return;
         }
-        if (peer.peer === "sandbox") {
-          from = peer.name;
-        } else if (peer.peer === "bot") {
-          if (!bodyFrom) { res.writeHead(400); res.end(JSON.stringify({ error: "Missing from" })); return; }
-          from = bodyFrom;
-        } else {
-          res.writeHead(403); res.end(JSON.stringify({ error: "Could not verify pigeon sender" })); return;
+        if (typeof bodyFrom !== "string" || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(bodyFrom)) {
+          res.writeHead(400); res.end(JSON.stringify({ error: "Missing from" })); return;
         }
+        const from = bodyFrom;
         const agentFlag = !!agent;
         const hopNum = agentFlag ? (Number(hop) || 0) : undefined;
         const entry = { from, text, ts: Date.now() };

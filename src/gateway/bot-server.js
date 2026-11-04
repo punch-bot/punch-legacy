@@ -367,6 +367,25 @@ const botHttpServer = createServer(async (req, res) => {
   }
 
   try {
+    if (req.method === "POST" && url.pathname === "/pigeon/relay") {
+      const { to, text, agent, hop } = body;
+      if (!to || !text) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Missing to or text" }));
+      }
+      if (!isRegisteredSandboxName(to, sandbox.loadUsers())) {
+        res.writeHead(404, { "content-type": "application/json" });
+        return void res.end(JSON.stringify({ error: "Unknown recipient sandbox" }));
+      }
+      const payload = { from: req.sandboxIdentity.name, text };
+      if (agent) {
+        payload.agent = true;
+        payload.hop = Number(hop) || 0;
+      }
+      const delivered = await sandbox.sendPigeonToSandbox(to, payload);
+      res.writeHead(delivered.status, { "content-type": "application/json" });
+      return void res.end(delivered.text);
+    }
     if (req.method === "POST" && url.pathname === "/pigeon/notify") {
       const { recipientId, from, text, agent, hop } = body;
       if (!recipientId || !from || !text) {

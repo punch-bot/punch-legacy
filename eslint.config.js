@@ -37,4 +37,13 @@ export default [
       }],
     },
   },
+  {
+    files: ["src/sandbox-manager.js"],
+    rules: {
+      "no-restricted-syntax": ["error", {
+        selector: "Literal[value=/^(--cap-add|--device|--privileged|NET_ADMIN|\\/dev\\/net\\/tun)$/]",
+        message: "Sandboxes must not get extra devices or capabilities; they share the bot's networks and could spoof its address.",
+      }],
+    },
+  },
 ];

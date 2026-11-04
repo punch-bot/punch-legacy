@@ -42,10 +42,8 @@ services:
       PI_MODEL: ${PI_MODEL:-opencode/big-pickle}
     networks:
       - edge
-    devices:
-      - /dev/net/tun
-    cap_add:
-      - NET_ADMIN
+    cap_drop:
+      - NET_RAW
     pids_limit: 512
     mem_limit: 4g
     cpus: 3
