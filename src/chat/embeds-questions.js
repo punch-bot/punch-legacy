@@ -220,6 +220,16 @@ export async function sendQuestion(channel, q, fromUserId) {
 const CV2_RE = /<cv2\b([^>]*)>([\s\S]*?)<\/cv2>/gi;
 const HEX_COLOR_RE = /^#?([0-9a-f]{6})$/i;
 
+// Answered V2 cards keep their content: re-render the non-interactive spec
+// items plus a note TextDisplay. Exported for commands/questions.js.
+export function buildV2AnsweredComponents(specItems, accent, note) {
+  const { top, has } = v2SpecToComponents((specItems || []).filter((i) => i && i.type !== "buttons"), v2AccentToNumber(accent), [], true, null);
+  if (has && top.length && note) {
+    top[0].addTextDisplayComponents(new TextDisplayBuilder().setContent(String(note).slice(0, 4000)));
+  }
+  return top.length ? top : [new TextDisplayBuilder().setContent(String(note || "✅ answered"))];
+}
+
 function v2AccentToNumber(accent, fallback = 0x5865f2) {
   if (typeof accent !== "string") return fallback;
   const m = accent.match(HEX_COLOR_RE);
@@ -309,17 +319,20 @@ function v2SpecToComponents(items, accentNumber, files, interactive, messageId) 
       container.addSeparatorComponents(sep);
     } else if (item.type === "buttons" && Array.isArray(item.options)) {
       has = true;
-      const options = item.options.map((o) => String(o)).slice(0, 25);
+      // options may be plain strings or {label, style} (primary/secondary/success/danger)
+      const STYLE_NAMES = { primary: ButtonStyle.Primary, secondary: ButtonStyle.Secondary, success: ButtonStyle.Success, danger: ButtonStyle.Danger, link: ButtonStyle.Link };
+      const options = item.options.map((o) =>
+        typeof o === "object" && o !== null ? { label: String(o.label || o.text || "?"), style: STYLE_NAMES[String(o.style || "primary").toLowerCase()] ?? ButtonStyle.Primary } : { label: String(o), style: ButtonStyle.Primary },
+      ).slice(0, 25);
       const input = item.input ? String(item.input).split(";").map((x) => x.trim()).filter(Boolean).slice(0, 5) : [];
       if (interactive && messageId) {
         const row = new ActionRowBuilder();
-        options.slice(0, 5).forEach((label, i) => {
-          row.addComponents(
-            new ButtonBuilder()
-              .setCustomId(`qbtn:${messageId}:${i}`)
-              .setLabel(label.slice(0, 80))
-              .setStyle(ButtonStyle.Primary),
-          );
+        options.slice(0, 5).forEach((o, i) => {
+          const b = new ButtonBuilder()
+            .setCustomId(`qbtn:${messageId}:${i}`)
+            .setLabel(o.label.slice(0, 80))
+            .setStyle(o.style);
+          row.addComponents(b);
         });
         const hasOther = input.length > 0 || options.length > 5;
         if (hasOther) {
@@ -334,7 +347,7 @@ function v2SpecToComponents(items, accentNumber, files, interactive, messageId) 
       }
       // stashed on both passes; consumed by registerQuestionState after send
       rows.options = rows.options || [];
-      rows.options.push(...options);
+      rows.options.push(...options.map((o) => o.label));
       rows.input = rows.input || [];
       rows.input.push(...input);
       rows.titles = rows.titles || [];
@@ -375,6 +388,11 @@ export async function sendV2(channel, spec, fromUserId, files = []) {
       multi: false,
       input: second.rows.input || [],
       fromUserId,
+      // keep the card on answer: the handler re-renders the spec without its
+      // button rows plus an answer note, instead of wiping components
+      v2: true,
+      specItems: spec.items.filter((i) => i && i.type !== "buttons"),
+      accent,
     });
   }
   return msg.id;
