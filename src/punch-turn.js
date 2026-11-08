@@ -19,7 +19,7 @@ const NO_SANDBOX_MSG =
   "and map your Discord user ID, then set SPECTRUM_DEFAULT_USER_ID (or SPECTRUM_USER_MAP) to that user ID.";
 
 const DISCORD_TAG_RE =
-  /<(?:react|remember|forget|embed|question)\b[^>]*>[\s\S]*?<\/(?:react|remember|forget|embed|question)>/gi;
+  /<(?:react|remember|forget|embed|question|cv2)\b[^>]*>[\s\S]*?<\/(?:react|remember|forget|embed|question|cv2)>/gi;
 const DISCORD_SELF_CLOSING_RE =
   /<(?:react|forget)\b[^>]*\/?>/gi;
 
@@ -35,7 +35,7 @@ function spectrumTurnInstructions() {
   return promptBlock(
     "This turn",
     "The message below arrived via Spectrum (iMessage/terminal). Reply in plain text suitable for that channel. " +
-      "Do not emit Discord-only tags (<react>, <embed>, <question>).",
+      "Do not emit Discord-only tags (<react>, <embed>, <question>, <cv2>).",
     "this turn",
   );
 }

@@ -9,6 +9,14 @@ import {
   TextInputStyle,
   CheckboxGroupBuilder,
   LabelBuilder,
+  ContainerBuilder,
+  SectionBuilder,
+  TextDisplayBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
+  SeparatorBuilder,
+  ThumbnailBuilder,
+  MessageFlags,
 } from "discord.js";
 import { registry } from "../core/registry.js";
 import { escapeStrayMarkdown, truncateMarkdown } from "../discord-markdown.js";
@@ -196,4 +204,178 @@ export async function sendQuestion(channel, q, fromUserId) {
     input: (q.input || []).slice(0, 5),
     fromUserId,
   });
+}
+
+// --- Components V2 -------------------------------------------------------
+// The model emits <cv2 accent="#RRGGBB">{json spec}</cv2>. V2 messages render
+// rich card layouts (text, sections, galleries, separators) with real
+// interactive buttons inside — the thing classic embeds physically cannot do.
+// Spec item shapes:
+//   {"type":"text", "content":"..."}
+//   {"type":"section", "text":"...", "thumbnail":{"url":"attachment://x.png","description":"..."}}
+//   {"type":"gallery", "items":[{"url":"...","description":"..."}]}
+//   {"type":"separator", "spacing":1|2, "divider":true|false}
+//   {"type":"buttons", "title":"...", "options":["..."], "input":"Field;Another"}
+
+const CV2_RE = /<cv2\b([^>]*)>([\s\S]*?)<\/cv2>/gi;
+const HEX_COLOR_RE = /^#?([0-9a-f]{6})$/i;
+
+function v2AccentToNumber(accent, fallback = 0x5865f2) {
+  if (typeof accent !== "string") return fallback;
+  const m = accent.match(HEX_COLOR_RE);
+  return m ? parseInt(m[1], 16) : fallback;
+}
+
+export function extractV2(textIn) {
+  const v2 = [];
+  const errors = [];
+  const text = String(textIn || "").replace(CV2_RE, (_m, attrs, body) => {
+    const accentMatch = attrs.match(/accent="([^"]*)"/i);
+    try {
+      const json = JSON.parse(body.trim());
+      const items = Array.isArray(json) ? json : Array.isArray(json.components) ? json.components : null;
+      if (!items || items.length === 0) return "";
+      v2.push({ accent: String(accentMatch?.[1] || json.accent || ""), items });
+    } catch (err) {
+      errors.push(`cv2 JSON error: ${err.message}`);
+    }
+    return "";
+  }).trim();
+  return { clean: text, v2, errors: errors };
+}
+
+function resolveAttachmentUrl(url, files) {
+  if (!url || !String(url).startsWith("attachment://")) return url || null;
+  const name = String(url).slice("attachment://".length);
+  const hit = (files || []).find((f) => f && f.name === name);
+  return hit ? `attachment://${hit.name}` : null;
+}
+
+// Interactive button rows need the message id, which only exists after send:
+// first pass renders layout without rows (interactive=false), then we edit the
+// message with rows built against its own id (interactive=true, messageId set).
+function v2SpecToComponents(items, accentNumber, files, interactive, messageId) {
+  const top = [];
+  const rows = []; // interactive rows are rendered after the container
+  let has = false;
+  const container = new ContainerBuilder().setAccentColor(accentNumber);
+  for (const item of (items || []).slice(0, 38)) {
+    if (!item || typeof item !== "object") continue;
+    if (item.type === "text" && item.content != null) {
+      has = true;
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(String(item.content).slice(0, 4000)),
+      );
+    } else if (item.type === "section" && item.text != null) {
+      has = true;
+      const texts = (Array.isArray(item.text) ? item.text : [item.text])
+        .map((t) => String(t).slice(0, 4000));
+      const section = new SectionBuilder();
+      section.addTextDisplayComponents(...texts.map((t) => new TextDisplayBuilder().setContent(t)));
+      if (item.thumbnail && typeof item.thumbnail === "object") {
+        const url = resolveAttachmentUrl(item.thumbnail.url, files);
+        if (url) {
+          const thumb = new ThumbnailBuilder().setURL(url);
+          if (item.thumbnail.description) thumb.setDescription(String(item.thumbnail.description).slice(0, 1024));
+          section.setThumbnailAccessory(thumb);
+        }
+      }
+      container.addSectionComponents(section);
+    } else if (item.type === "gallery" && Array.isArray(item.items)) {
+      const itemsG = item.items.slice(0, 10)
+        .map((g) => ({
+          url: resolveAttachmentUrl(g && g.url, files),
+          description: g && g.description ? String(g.description).slice(0, 1024) : undefined,
+        }))
+        .filter((g) => g.url);
+      if (itemsG.length) {
+        has = true;
+        container.addMediaGalleryComponents(
+          new MediaGalleryBuilder().addItems(
+            ...itemsG.map((g) => {
+              const b = new MediaGalleryItemBuilder().setURL(g.url);
+              if (g.description) b.setDescription(g.description);
+              return b;
+            }),
+          ),
+        );
+      }
+    } else if (item.type === "separator") {
+      has = true;
+      const sep = new SeparatorBuilder();
+      const spacing = Number(item.spacing);
+      if (spacing === 1 || spacing === 2) sep.setSpacing(spacing);
+      if (typeof item.divider === "boolean") sep.setDivider(item.divider);
+      container.addSeparatorComponents(sep);
+    } else if (item.type === "buttons" && Array.isArray(item.options)) {
+      has = true;
+      const options = item.options.map((o) => String(o)).slice(0, 25);
+      const input = item.input ? String(item.input).split(";").map((x) => x.trim()).filter(Boolean).slice(0, 5) : [];
+      if (interactive && messageId) {
+        const row = new ActionRowBuilder();
+        options.slice(0, 5).forEach((label, i) => {
+          row.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`qbtn:${messageId}:${i}`)
+              .setLabel(label.slice(0, 80))
+              .setStyle(ButtonStyle.Primary),
+          );
+        });
+        const hasOther = input.length > 0 || options.length > 5;
+        if (hasOther) {
+          row.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`qans:${messageId}`)
+              .setLabel("✏️ Other…")
+              .setStyle(ButtonStyle.Secondary),
+          );
+        }
+        rows.push(row);
+      }
+      // stashed on both passes; consumed by registerQuestionState after send
+      rows.options = rows.options || [];
+      rows.options.push(...options);
+      rows.input = rows.input || [];
+      rows.input.push(...input);
+      rows.titles = rows.titles || [];
+      rows.titles.push(item.title || "");
+    }
+  }
+  if (has) top.push(container);
+  return { top, rows, has };
+}
+
+// Sends a Components V2 message. Returns the message id + question state so the
+// caller can react to clicks exactly like classic questions (reused handlers).
+export async function sendV2(channel, spec, fromUserId, files = []) {
+  if (!spec || !Array.isArray(spec.items) || !spec.items.length) return null;
+  const accent = v2AccentToNumber(spec.accent);
+  const first = v2SpecToComponents(spec.items, accent, files, false, null);
+  if (!first.has) return null;
+  const payload = {
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
+  const sendableFiles = (files || []).filter(Boolean).map((f) => ({
+    attachment: f.attachment || f.buffer, name: f.name,
+  })).filter((f) => f.attachment && f.name);
+  if (sendableFiles.length) payload.files = sendableFiles;
+  if (first.top.length) payload.components = first.top;
+  const msg = await channel.send(payload).catch(() => null);
+  if (!msg) return null;
+  // Re-render with question rows wired to this message id.
+  const second = v2SpecToComponents(spec.items, accent, files, true, msg.id);
+  if (second.has) {
+    const merged = [...second.top];
+    if (second.rows && second.rows.length) merged.push(...second.rows);
+    await msg.edit({ components: merged }).catch(() => {});
+    registerQuestionState(msg.id, {
+      title: second.rows.titles?.find(Boolean) || "Options",
+      options: second.rows.options || [],
+      multi: false,
+      input: second.rows.input || [],
+      fromUserId,
+    });
+  }
+  return msg.id;
 }
