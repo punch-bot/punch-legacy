@@ -96,6 +96,8 @@ const PROVIDER_MODELS = {
 
 const DISCOVERY_TTL_MS = 30 * 60_000;
 const discovery = new Map();
+const inflight = new Map();
+const runs = new Map();
 
 export function discoveryCommand(provider) {
   const spec = PROVIDER_MODELS[provider];
@@ -128,18 +130,32 @@ export async function discoverProviderModels(apiUrl, provider, { force = false, 
   if (!spec) return null;
   const cacheKey = `${apiUrl}:${provider}`;
   const cached = discovery.get(cacheKey);
-  if (!force && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.models;
+  if (!force && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.models.length ? cached.models : null;
+  const pending = inflight.get(cacheKey);
+  if (pending && !force) return pending;
+  const runId = (runs.get(cacheKey) || 0) + 1;
+  runs.set(cacheKey, runId);
+  const run = (async () => {
+    try {
+      const out = await runner(apiUrl, spec.command, spec.timeout);
+      if (out?.exitCode !== undefined && out.exitCode !== 0) throw new Error(`exec exit ${out.exitCode}`);
+      const models = parseModelList(provider, JSON.parse(out.stdout || "{}"));
+      if (!models.length) throw new Error("no models in response");
+      if (runs.get(cacheKey) === runId) discovery.set(cacheKey, { at: Date.now(), models });
+      return models;
+    } catch (err) {
+      console.error(`[catalog] discovery failed for ${provider}: ${err.message}`);
+      const latest = discovery.get(cacheKey);
+      const keep = latest?.models?.length ? latest.models : (cached?.models ?? []);
+      if (runs.get(cacheKey) === runId) discovery.set(cacheKey, { at: Date.now(), models: keep });
+      return keep.length ? keep : null;
+    }
+  })();
+  inflight.set(cacheKey, run);
   try {
-    const out = await runner(apiUrl, spec.command, spec.timeout);
-    if (out?.exitCode !== undefined && out.exitCode !== 0) throw new Error(`exec exit ${out.exitCode}`);
-    const models = parseModelList(provider, JSON.parse(out.stdout || "{}"));
-    if (!models.length) throw new Error("no models in response");
-    discovery.set(cacheKey, { at: Date.now(), models });
-    return models;
-  } catch (err) {
-    console.error(`[catalog] discovery failed for ${provider}: ${err.message}`);
-    discovery.set(cacheKey, { at: Date.now(), models: cached?.models ?? [] });
-    return cached?.models ?? null;
+    return await run;
+  } finally {
+    if (inflight.get(cacheKey) === run) inflight.delete(cacheKey);
   }
 }
 

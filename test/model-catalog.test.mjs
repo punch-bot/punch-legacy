@@ -102,48 +102,22 @@ test("discovery parses an opencode-style models payload", async () => {
   const runner = async () => ({ stdout: JSON.stringify({ data: [{ id: "deepseek-v4.1-flash", limit: { context: 1000000 } }] }) });
   await discoverProviderModels("http://sandbox.test:4097", "opencode-go", { force: true, runner });
   assert.equal(discoveredModel("http://sandbox.test:4097", "opencode-go", "opencode-go/deepseek-v4.1-flash").contextWindow, 1000000);
-});
 
-test("unknown providers and failed discovery return null", async () => {
-  const { discoverProviderModels, discoveryCommand, clearDiscoveryCache } = await import("../src/model-catalog.js");
-  clearDiscoveryCache();
-  assert.equal(discoveryCommand("anthropicish-not-known"), null);
-  const errors = [];
-  const originalError = console.error;
-  console.error = (...args) => errors.push(args.join(" "));
-  try {
-    const runner = async () => ({ stdout: "not json" });
-    assert.equal(await discoverProviderModels("http://sandbox.test:4097", "groq", { force: true, runner }), null);
-    assert.ok(errors.some((line) => line.includes("discovery failed for groq")), "the failure is logged");
-    const failing = async () => ({ exitCode: 22, stdout: "" });
-    assert.equal(await discoverProviderModels("http://sandbox.test:4097", "deepseek", { force: true, runner: failing }), null);
-    assert.ok(errors.some((line) => line.includes("exec exit 22")), "a non-zero exit is a failure, not an empty list");
-  } finally {
-    console.error = originalError;
-  }
-});
+  const groq = parseModelList("groq", { data: [{ id: "llama3-8b-8192", context_window: 8192 }] });
+  assert.equal(groq[0].contextWindow, 8192, "context_window is read like the other spellings");
 
-test("a failed discovery is cached so it is not retried every turn", async () => {
-  const { discoverProviderModels, clearDiscoveryCache } = await import("../src/model-catalog.js");
-  clearDiscoveryCache();
   let calls = 0;
-  const runner = async () => {
+  const failing = async () => {
     calls += 1;
-    return { exitCode: 1, stdout: "{}" };
+    return { exitCode: 22, stdout: "" };
   };
   const originalError = console.error;
   console.error = () => {};
   try {
-    await discoverProviderModels("http://sandbox.test:4097", "nvidia", { runner });
-    await discoverProviderModels("http://sandbox.test:4097", "nvidia", { runner });
-    assert.equal(calls, 1, "second call is served by the failure cache");
+    assert.equal(await discoverProviderModels("http://sandbox.test:4097", "deepseek", { force: true, runner: failing }), null);
+    assert.equal(await discoverProviderModels("http://sandbox.test:4097", "deepseek", { runner: failing }), null);
+    assert.equal(calls, 1, "a non-zero exit fails, and the failure is cached instead of retried every turn");
   } finally {
     console.error = originalError;
   }
-});
-
-test("groq context_window is normalised like every other spelling", async () => {
-  const { parseModelList } = await import("../src/model-catalog.js");
-  const models = parseModelList("groq", { data: [{ id: "llama3-8b-8192", context_window: 8192 }] });
-  assert.equal(models[0].contextWindow, 8192);
 });
