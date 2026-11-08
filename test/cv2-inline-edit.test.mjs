@@ -1,8 +1,8 @@
-// Tests for cv2 inline continuation: an answered card gets EDITED in place
+// Tests for cv2 inline continuation + parser error recovery.
 // instead of spawning a new message (juniper's "not a new message every time").
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { editV2, buildV2AnsweredComponents } from "../src/chat/embeds-questions.js";
+import { editV2, buildV2AnsweredComponents, extractV2 } from "../src/chat/embeds-questions.js";
 
 function fakeCard(id = "mcard", attachments = []) {
   const calls = [];
@@ -82,4 +82,26 @@ test("answered card keeps its content plus an answer note", () => {
   const json = JSON.stringify(comps.map((c) => c.toJSON()));
   assert.ok(json.includes("exhibit 2"), "original content stays");
   assert.ok(json.includes("answered: **waste**"), "note is appended");
+});
+
+test("extractV2 salvages a spec with a stray trailing brace", () => {
+  const items = [{ type: "text", content: "exhibit 3" }, { type: "buttons", options: ["a"] }];
+  const broken = `${JSON.stringify(items)}}`; // one brace too many: the 04:13 prod failure
+  const r = extractV2(`<cv2 accent="#58b65c">${broken}</cv2>`);
+  assert.equal(r.v2.length, 1, "card survives instead of vanishing");
+  assert.equal(r.v2[0].items.length, 2);
+  assert.ok(r.errors.some((e) => e.includes("repaired")), "repair is reported, not silent");
+});
+
+test("extractV2 still refuses genuinely invalid JSON", () => {
+  const r = extractV2(`<cv2>[{"type":"text","content":}]</cv2>`);
+  assert.equal(r.v2.length, 0);
+  assert.ok(r.errors.length > 0);
+});
+
+test("extractV2 does not truncate on braces inside strings", () => {
+  const items = [{ type: "text", content: 'spec looks like {"a":1} inside' }];
+  const r = extractV2(`<cv2>${JSON.stringify(items)}}</cv2>`);
+  assert.equal(r.v2.length, 1);
+  assert.equal(r.v2[0].items[0].content, items[0].content);
 });

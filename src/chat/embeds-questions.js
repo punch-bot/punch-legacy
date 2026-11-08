@@ -271,13 +271,55 @@ function v2AccentToNumber(accent, fallback = 0x5865f2) {
   return m ? parseInt(m[1], 16) : fallback;
 }
 
+// Salvage a spec whose JSON has trailing junk after a complete value (the model
+// writes a balanced array and then a stray brace). Walk the string tracking
+// depth + string state and return the prefix ending where depth hits zero.
+function balancedJsonPrefix(raw) {
+  const s = String(raw || "").trim();
+  const start = s.search(/[[{]/);
+  if (start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") {
+      depth--;
+      if (depth === 0) {
+        const prefix = s.slice(start, i + 1);
+        return prefix.length < s.length ? prefix : null;
+      }
+    }
+  }
+  return null;
+}
+
 export function extractV2(textIn) {
   const v2 = [];
   const errors = [];
   const text = String(textIn || "").replace(CV2_RE, (_m, attrs, body) => {
     const accentMatch = attrs.match(/accent="([^"]*)"/i);
+    let candidate = String(body || "").trim();
+    let salvaged = false;
     try {
-      const json = JSON.parse(body.trim());
+      try {
+        JSON.parse(candidate);
+      } catch (firstErr) {
+        const prefix = balancedJsonPrefix(candidate);
+        if (!prefix) throw firstErr;
+        candidate = prefix;
+        salvaged = true;
+      }
+      const json = JSON.parse(candidate);
+      if (salvaged) errors.push("cv2 JSON repaired: trailing characters ignored");
       const items = Array.isArray(json) ? json : Array.isArray(json.components) ? json.components : null;
       if (!items || items.length === 0) return "";
       v2.push({ accent: String(accentMatch?.[1] || json.accent || ""), items });
