@@ -8,6 +8,9 @@ export const registry = {
   userRunChains: new Map(),
   userQueueDraining: new Set(),
   questionState: new Map(),
+  // channelId:userId -> { messageId, answeredAt }: the newest cv2 card, so the
+  // next spec can edit it in place even if the click state was lost
+  recentV2Cards: new Map(),
   spectrumHandle: null,
   spectrumShuttingDown: false,
   spectrumSignalsBound: false,

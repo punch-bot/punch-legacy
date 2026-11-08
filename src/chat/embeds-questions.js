@@ -250,6 +250,7 @@ export async function editV2(cardMessage, spec, fromUserId) {
   const sendable = files.filter((f) => f.attachment && f.name);
   if (sendable.length) editPayload.files = sendable;
   await cardMessage.edit(editPayload);
+  rememberV2Card(cardMessage.channelId || (cardMessage.channel && cardMessage.channel.id), fromUserId, cardMessage.id);
   const rows = built.rows || {};
   registerQuestionState(cardMessage.id, {
     title: rows.titles?.find(Boolean) || "Options",
@@ -437,6 +438,32 @@ function v2SpecToComponents(items, accentNumber, files, interactive, messageId) 
   return { top, rows, has };
 }
 
+// Track the newest cv2 card so a follow-up spec can rewrite it in place even
+// when the click state is gone (older build, lost registry entry, steered turn).
+export function rememberV2Card(channelId, userId, messageId) {
+  if (!channelId || !messageId) return;
+  registry.recentV2Cards.set(`${channelId}:${userId || "anon"}`, {
+    messageId,
+    at: Date.now(),
+    answeredAt: 0,
+  });
+}
+
+export function markV2CardAnswered(channelId, userId, messageId) {
+  const key = `${channelId}:${userId || "anon"}`;
+  const cur = registry.recentV2Cards.get(key);
+  if (cur && cur.messageId === messageId) cur.answeredAt = Date.now();
+  else registry.recentV2Cards.set(key, { messageId, at: Date.now(), answeredAt: Date.now() });
+}
+
+export function peekV2Card(channelId, userId, maxAgeMs = 60 * 60 * 1000) {
+  const cur = registry.recentV2Cards.get(`${channelId}:${userId || "anon"}`);
+  if (!cur) return null;
+  const age = Date.now() - (cur.answeredAt || cur.at);
+  if (age > maxAgeMs) return null;
+  return cur.messageId;
+}
+
 // Sends a Components V2 message. Returns the message id + question state so the
 // caller can react to clicks exactly like classic questions (reused handlers).
 export async function sendV2(channel, spec, fromUserId, files = []) {
@@ -477,5 +504,6 @@ export async function sendV2(channel, spec, fromUserId, files = []) {
       accent,
     });
   }
+  rememberV2Card(channel.id, fromUserId, msg.id);
   return msg.id;
 }

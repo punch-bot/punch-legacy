@@ -105,3 +105,24 @@ test("extractV2 does not truncate on braces inside strings", () => {
   assert.equal(r.v2.length, 1);
   assert.equal(r.v2[0].items[0].content, items[0].content);
 });
+
+test("rememberV2Card/peekV2Card track the newest card per channel+user", async () => {
+  const { rememberV2Card, peekV2Card, markV2CardAnswered } = await import("../src/chat/embeds-questions.js");
+  rememberV2Card("chan1", "u1", "card-a");
+  assert.equal(peekV2Card("chan1", "u1"), "card-a");
+  assert.equal(peekV2Card("chan1", "u2"), null, "scoped per user");
+  assert.equal(peekV2Card("chan2", "u1"), null, "scoped per channel");
+  rememberV2Card("chan1", "u1", "card-b");
+  assert.equal(peekV2Card("chan1", "u1"), "card-b", "newest wins");
+  markV2CardAnswered("chan1", "u1", "card-b");
+  assert.equal(peekV2Card("chan1", "u1"), "card-b");
+});
+
+test("peekV2Card expires a stale card so it never edits an old message", async () => {
+  const { rememberV2Card, peekV2Card } = await import("../src/chat/embeds-questions.js");
+  rememberV2Card("chan3", "u9", "old-card");
+  const entry = (await import("../src/core/registry.js")).registry.recentV2Cards.get("chan3:u9");
+  entry.at = Date.now() - 2 * 60 * 60 * 1000;
+  entry.answeredAt = 0;
+  assert.equal(peekV2Card("chan3", "u9"), null, "2h old card is not reused");
+});
