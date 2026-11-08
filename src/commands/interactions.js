@@ -125,9 +125,10 @@ async function providerChoices(apiUrl) {
   discoverable.forEach((provider, index) => {
     if (!counts.has(provider)) counts.set(provider, new Map());
     for (const model of discovered[index] || []) bump(provider, { label: model.label, value: model.value, contextWindow: model.contextWindow });
+    if (!discovered[index] && !counts.get(provider).size) counts.set(provider, null);
   });
   return [...counts.entries()]
-    .map(([name, models]) => ({ name, count: models.size }))
+    .map(([name, models]) => ({ name, count: models ? models.size : null }))
     .sort((a, b) => ((b.count || 0) - (a.count || 0)) || a.name.localeCompare(b.name));
 }
 
@@ -837,16 +838,17 @@ export function registerInteractions(client) {
     if (interaction.commandName === "models") {
       const uid = interaction.user.id;
       if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
         const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
         const providers = await providerChoices(apiUrlFor(uid));
-        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt, providers }), flags: MessageFlags.Ephemeral });
+        await interaction.editReply(renderModelsMenu({ model, thinkingLevel, expiresAt, providers }));
         setTimeout(() => {
           interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
         }, MODELS_MENU_TTL_MS).unref();
       } catch (err) {
-        await interaction.reply({ content: `⚠️ Error fetching model: ${err.message}`, flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: `⚠️ Error fetching model: ${err.message}` });
       }
       return;
     }

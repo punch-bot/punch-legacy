@@ -6,6 +6,7 @@ import {
   filterByVendor,
   formatContext,
   modelPage,
+  vendorOf,
   modelsMenuCustomId,
   parseModelsMenuCustomId,
   renderProviderMenu,
@@ -60,13 +61,12 @@ test("a provider page shows custom model first, vendors and paging", () => {
     model: "openrouter/anthropic/claude-sonnet",
     thinkingLevel: "high",
   });
-  const [navRow, modelRow, thinkingRow2, sep, pageRow] = menu.components;
+  const [navRow, modelRow, thinkingRow2, pageRow] = menu.components;
   assert.equal(navRow.components[0].data.label, "← Back to providers");
   assert.equal(navRow.components[1].data.disabled, true);
   assert.equal(modelRow.components[0].options[0].data.value, "__custom__");
   assert.equal(modelRow.components[0].options.length, MODELS_PER_PAGE + 1);
   assert.equal(thinkingRow2.components[0].data.placeholder, "Reasoning: High");
-  assert.equal(sep.data.type, 14);
   assert.equal(pageRow.components[1].data.label, "Page 2 / 3");
   const parsed = parseModelsMenuCustomId(pageRow.components[2].data.custom_id);
   assert.equal(parsed.base, "model_page");
@@ -88,11 +88,15 @@ test("vendors are derived from model ids and filter the list", () => {
     { name: "anthropic", count: 1 },
   ]);
   assert.equal(filterByVendor(mixed, "openrouter", "openai").length, 2);
+  assert.equal(vendorOf("openrouter/bare-model", "openrouter"), "", "a model without a vendor segment has no vendor");
+  assert.ok(vendorChoices([{ value: "nvidia/nvidia/llama-3" }], "nvidia").some((v) => v.name === "nvidia"), "a vendor named like its provider is still selectable");
   assert.equal(filterByVendor(mixed, "openrouter", "-").length, 4);
   const menu = renderProviderModels({ provider: "openrouter", models: mixed, expiresAt: Date.now() + 60_000, model: "openrouter/openai/gpt-6", vendor: "openai" });
   const vendorRow = menu.components[1];
   assert.equal(vendorRow.components[0].data.placeholder, "Vendor: openai");
   assert.equal(vendorRow.components[0].options[0].data.value, "-");
+  const rendered = menu.components[2].components[0].options.slice(1).map((o) => o.data.value);
+  assert.deepEqual(rendered, ["openrouter/openai/gpt-6", "openrouter/openai/gpt-6-mini"], "only the selected vendor's models render");
 });
 
 test("context sizes read like a person wrote them", () => {

@@ -2,7 +2,6 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  SeparatorBuilder,
   StringSelectMenuBuilder,
 } from "discord.js";
 
@@ -85,7 +84,7 @@ export function modelPage(models, page, pageSize = MODELS_PER_PAGE) {
 
 export function vendorOf(value, provider) {
   const rest = String(value || "").slice(String(provider || "").length + 1);
-  return rest.includes("/") ? rest.split("/")[0] : String(provider || "");
+  return rest.includes("/") ? rest.split("/")[0] : "";
 }
 
 export function vendorChoices(models, provider) {
@@ -95,7 +94,7 @@ export function vendorChoices(models, provider) {
     counts.set(vendor, (counts.get(vendor) || 0) + 1);
   }
   return [...counts.entries()]
-    .filter(([vendor]) => vendor && vendor !== provider)
+    .filter(([vendor]) => vendor)
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
 }
@@ -276,7 +275,6 @@ export function renderProviderModels({
   ));
 
   rows.push(thinkingRow(thinkingLevel, expiresAt));
-  rows.push(new SeparatorBuilder().setSpacing(1));
 
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder()
