@@ -183,7 +183,6 @@ function describeCurrentModel(apiUrl, provider, models, model) {
   const catalogEntry = catalogModel(apiUrl, model);
   return {
     modelLabel: match?.label || staticEntry?.label || catalogEntry?.label || null,
-    modelDescription: match?.description || catalogEntry?.description || null,
     modelContextWindow: match?.contextWindow || catalogEntry?.contextWindow || null,
   };
 }

@@ -135,14 +135,24 @@ function expiresLine(expiresAt) {
   return `-# expires <t:${Math.floor(expiresAt / 1000)}:R>`;
 }
 
-function currentBlock({ model, label, provider, contextWindow, description }) {
+function currentBlock({ model, label, provider, contextWindow }) {
   const head = label && label !== model ? label : `\`${model}\``;
   const meta = [provider || "unknown provider", contextWindow ? `${formatContext(contextWindow)} context` : null].filter(Boolean).join(" · ");
   return [
     `### Current model: ${head}`,
     `-# ${meta}`,
-    description ? description : null,
   ].filter(Boolean).join("\n");
+}
+
+const OPTION_DESCRIPTION_MAX = 100;
+
+export function modelOptionDescription(model, currentValue) {
+  const context = model?.contextWindow ? `${formatContext(model.contextWindow)} context` : "";
+  const suffix = model?.value === currentValue ? "current" : "";
+  const tail = [context, suffix].filter(Boolean).join(" · ");
+  const body = model?.description ? String(model.description).replace(/\s+/g, " ").trim() : "";
+  const text = body ? (tail ? `${body} · ${suffix || context}`.trim() : body) : tail;
+  return text.replace(/\s+·\s*$/, "").slice(0, OPTION_DESCRIPTION_MAX) || undefined;
 }
 
 export function modelsMenuOptions(extraModels = [], log = console.log) {
@@ -228,7 +238,6 @@ export function renderProviderModels({
   expiresAt,
   model,
   modelLabel,
-  modelDescription,
   modelContextWindow,
   thinkingLevel,
   notice = "",
@@ -249,7 +258,6 @@ export function renderProviderModels({
       label: modelLabel,
       provider: String(model || "").split("/")[0],
       contextWindow: modelContextWindow,
-      description: modelDescription,
     }),
     vendor !== ALL_VENDORS ? `-# showing ${provider} / ${vendor}` : null,
   ].filter(Boolean).join("\n");
@@ -289,7 +297,7 @@ export function renderProviderModels({
         ...slice.map((m) => ({
           label: String(m.label || m.value).slice(0, 100),
           value: m.value,
-          description: [formatContext(m.contextWindow) ? `${formatContext(m.contextWindow)} context` : null, m.value === model ? "current" : null].filter(Boolean).join(" · ") || undefined,
+          description: modelOptionDescription(m, model),
         })),
       ].slice(0, 25)),
   ));

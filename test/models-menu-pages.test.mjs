@@ -67,7 +67,6 @@ test("a provider page shows custom model first, vendors and paging", () => {
     model: "openrouter/anthropic/claude-sonnet",
     modelLabel: "Claude Sonnet",
     modelContextWindow: 200000,
-    modelDescription: "Long-context reasoning model.",
     thinkingLevel: "high",
   });
   const [navRow, modelRow, thinkingRow2, pageRow] = menu.components;
@@ -77,6 +76,9 @@ test("a provider page shows custom model first, vendors and paging", () => {
   assert.equal(navRow.components[1].data.disabled, true);
   assert.equal(modelRow.components[0].options[0].data.value, "__custom__");
   assert.equal(modelRow.components[0].options.length, MODELS_PER_PAGE + 1);
+  assert.doesNotMatch(menu.content, /Long-context reasoning model/, "the header describes the current model, not the browsed provider");
+  const described = modelRow.components[0].options.slice(1).map((o) => o.data.description);
+  assert.ok(described.every((d) => !d || d.includes("context") || d.includes("current")), "each option carries its own description");
   assert.equal(thinkingRow2.components[0].data.placeholder, "Reasoning: High");
   assert.equal(pageRow.components[1].data.label, "Page 2 / 3 · 40 models");
   const parsed = parseModelsMenuCustomId(pageRow.components[2].data.custom_id);
