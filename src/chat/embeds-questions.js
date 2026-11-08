@@ -230,6 +230,41 @@ export function buildV2AnsweredComponents(specItems, accent, note) {
   return top.length ? top : [new TextDisplayBuilder().setContent(String(note || "✅ answered"))];
 }
 
+// Inline-continuation: instead of spawning a fresh message for every cv2
+// answer, agent chat can EDIT the original card with the next spec (channels
+// render one evolving guide). Files fall back to the card's own attachments so
+// galleries survive the edit.
+export async function editV2(cardMessage, spec, fromUserId) {
+  if (!spec || !Array.isArray(spec.items) || !spec.items.length) return false;
+  let files = [];
+  try {
+    const atts = [...(cardMessage.attachments?.values?.() || [])];
+    files = atts.map((a) => ({ attachment: a.url, name: a.name }));
+  } catch {
+    files = [];
+  }
+  const accent = v2AccentToNumber(spec.accent);
+  const built = v2SpecToComponents(spec.items, accent, files, true, cardMessage.id);
+  if (!built.has) return false;
+  const editPayload = { components: built.top };
+  const sendable = files.filter((f) => f.attachment && f.name);
+  if (sendable.length) editPayload.files = sendable;
+  await cardMessage.edit(editPayload);
+  const rows = built.rows || {};
+  registerQuestionState(cardMessage.id, {
+    title: rows.titles?.find(Boolean) || "Options",
+    options: rows.options || [],
+    multi: false,
+    input: rows.input || [],
+    fromUserId,
+    v2: true,
+    specItems: spec.items.filter((i) => i && i.type !== "buttons"),
+    accent: spec.accent || "",
+    inline: true,
+  });
+  return true;
+}
+
 function v2AccentToNumber(accent, fallback = 0x5865f2) {
   if (typeof accent !== "string") return fallback;
   const m = accent.match(HEX_COLOR_RE);
