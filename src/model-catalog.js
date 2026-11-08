@@ -6,16 +6,18 @@ const cache = new Map();
 function normalizeModel(name, provider, model) {
   const id = String(model?.id || "").trim();
   if (!id) return null;
-  const fullId = id.includes("/") ? id : `${name}/${id}`;
-  const contextWindow = Number(model?.contextWindow) || 0;
+  const fullId = `${name}/${id}`;
+  const contextWindow = Number(
+    model?.contextWindow ?? model?.context_length ?? model?.context ?? model?.limit?.context ?? 0,
+  ) || 0;
   return {
     provider: name,
     id,
     value: fullId,
     label: String(model?.name || id),
     contextWindow,
-    maxTokens: Number(model?.maxTokens) || 0,
-    reasoning: Boolean(model?.reasoning),
+    maxTokens: Number(model?.maxTokens ?? model?.max_tokens ?? model?.limit?.output ?? 0) || 0,
+    reasoning: Boolean(model?.reasoning ?? model?.capabilities?.reasoning?.supported),
     input: Array.isArray(model?.input) ? model.input : ["text"],
     remote: Boolean(provider?.baseUrl),
   };

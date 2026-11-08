@@ -26,13 +26,20 @@ export function thinkingLevelLabel(level) {
   return (THINKING_LEVEL_LIST.find((l) => l.value === (level || "default")) || { label: level }).label;
 }
 
-export function modelsMenuOptions(extraModels = []) {
+export function modelsMenuOptions(extraModels = [], log = console.log) {
   const custom = MODEL_LIST.filter((m) => m.value === "__custom__");
-  const builtin = MODEL_LIST.filter((m) => m.value !== "__custom__");
-  const seen = new Set(builtin.map((m) => m.value));
-  const extras = (extraModels || []).filter((m) => m && m.value && !seen.has(m.value));
+  const incoming = (extraModels || []).filter((m) => m && m.value);
+  const providerOf = (value) => String(value).split("/")[0];
+  const catalogProviders = new Set(incoming.map((m) => providerOf(m.value)));
+  const builtin = MODEL_LIST.filter((m) => m.value !== "__custom__" && !catalogProviders.has(providerOf(m.value)));
+  const shownValues = new Set(builtin.map((m) => m.value));
+  const extras = incoming.filter((m) => !shownValues.has(m.value));
   const room = Math.max(0, 25 - builtin.length - custom.length);
-  const options = [...builtin, ...extras.slice(0, room), ...custom];
+  const shown = extras.slice(0, room);
+  if (shown.length < extras.length) {
+    log(`[models] catalog truncated: ${extras.length - shown.length} model(s) do not fit in the select menu`);
+  }
+  const options = [...builtin, ...shown, ...custom];
   return options.map((m) => ({
     label: m.label,
     value: m.value,

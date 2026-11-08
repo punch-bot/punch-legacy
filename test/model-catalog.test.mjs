@@ -36,6 +36,33 @@ test("normalizeCatalog ignores models without an id and tolerates missing custom
   assert.deepEqual(normalizeCatalog(null).names, []);
 });
 
+test("limits are read from whichever key the provider uses", () => {
+  const catalog = normalizeCatalog({
+    providers: [],
+    custom: {
+      opencode: { baseUrl: "https://opencode.ai/inference/go/v1", models: [{ id: "m-go", context: 1000000, max_tokens: 384000 }] },
+      openrouter: { baseUrl: "https://openrouter.ai/api/v1", models: [{ id: "big", context_length: 1048576, capabilities: { reasoning: { supported: true } } }] },
+      openaiish: { baseUrl: "https://example.test/v1", models: [{ id: "nested", limit: { context: 262144, output: 32768 } }] },
+    },
+  });
+  assert.equal(catalog.byValue.get("opencode/m-go").contextWindow, 1000000);
+  assert.equal(catalog.byValue.get("opencode/m-go").maxTokens, 384000);
+  assert.equal(catalog.byValue.get("openrouter/big").contextWindow, 1048576);
+  assert.equal(catalog.byValue.get("openrouter/big").reasoning, true);
+  assert.equal(catalog.byValue.get("openaiish/nested").contextWindow, 262144);
+  assert.equal(catalog.byValue.get("openaiish/nested").maxTokens, 32768);
+});
+
+test("a catalog model replaces the static entries for its provider", () => {
+  const catalog = normalizeCatalog({
+    providers: [],
+    custom: { poolside: { baseUrl: "https://inference.poolside.ai/v1", models: [{ id: "poolside/laguna-m.1", contextWindow: 262144 }] } },
+  });
+  const options = modelsMenuOptions(catalogOptions(catalog), () => {});
+  assert.ok(options.some((o) => o.value === "poolside/poolside/laguna-m.1"));
+  assert.equal(options.filter((o) => o.value.startsWith("poolside/")).length, 1);
+});
+
 test("options keep custom providers from overflowing Discord's 25 option limit", () => {
   const catalog = normalizeCatalog({
     providers: [],
@@ -43,8 +70,10 @@ test("options keep custom providers from overflowing Discord's 25 option limit",
       busy: { baseUrl: "https://example.test/v1", models: Array.from({ length: 40 }, (_, i) => ({ id: `m${i}`, contextWindow: 1000 })) },
     },
   });
-  const options = modelsMenuOptions(catalogOptions(catalog));
+  const truncated = [];
+  const options = modelsMenuOptions(catalogOptions(catalog), (msg) => truncated.push(msg));
   assert.equal(options.length, 25);
+  assert.ok(truncated.some((m) => m.includes("truncated")), "truncation is logged, not silent");
   assert.equal(options[options.length - 1].value, "__custom__");
   assert.ok(options.some((o) => o.value === "busy/m0"));
 });
