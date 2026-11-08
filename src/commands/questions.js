@@ -67,6 +67,7 @@ async function handleQuestionInteraction(interaction) {
     speakerUsername: clicker.username,
     repliedTo,
     forceQueue: true,
+    cv2EditMessageId: state.inline ? interaction.message.id : undefined,
   });
 }
 
@@ -137,6 +138,7 @@ async function handleQuestionModalSubmit(interaction) {
     speakerUsername: clicker.username,
     repliedTo,
     forceQueue: true,
+    cv2EditMessageId: state.inline ? interaction.message.id : undefined,
   });
 }
 
@@ -208,6 +210,7 @@ async function handleQuestionCheckboxSubmit(interaction) {
     speakerUsername: clicker.username,
     repliedTo: answered,
     forceQueue: true,
+    cv2EditMessageId: state.inline ? interaction.message.id : undefined,
   });
 }
 

@@ -53,7 +53,7 @@ import {
   extractAttachments,
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
-import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2 } from "./embeds-questions.js";
+import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2 } from "./embeds-questions.js";
 import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
@@ -374,9 +374,20 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         await sendQuestion(message.channel, q, uid);
       }
       // Components V2 messages must be standalone (no content/embeds), sent
-      // after the settled text so the layout reads as its own block. This
-      // holds for both plain and progress-settled turns.
-      for (const spec of v2) {
+      // after the settled text so the layout reads as its own block. When the
+      // turn is an answer to an inline cv2 card (interaction state passes
+      // opts.cv2EditMessageId), the FIRST spec edits that card in place and
+      // later cards send as new messages.
+      for (let i = 0; i < v2.length; i++) {
+        const spec = v2[i];
+        if (i === 0 && opts.cv2EditMessageId) {
+          try {
+            const card = await message.channel.messages.fetch(opts.cv2EditMessageId);
+            if (card && await editV2(card, spec, uid)) continue;
+          } catch (err) {
+            console.error("[cv2] inline edit failed, falling back to new message:", err.message);
+          }
+        }
         await sendV2(message.channel, spec, uid, sendable);
       }
     }
