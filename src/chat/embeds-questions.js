@@ -428,6 +428,9 @@ export async function sendV2(channel, spec, fromUserId, files = []) {
       // keep the card on answer: the handler re-renders the spec without its
       // button rows plus an answer note, instead of wiping components
       v2: true,
+      // cv2 cards continue in place by default: the answered card keeps its
+      // content, and the agent's next spec edits this same message
+      inline: true,
       specItems: spec.items.filter((i) => i && i.type !== "buttons"),
       accent,
     });
