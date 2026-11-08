@@ -3,6 +3,7 @@ import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
 import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
 import { supervisorAuth } from "./core/config.js";
+import { catalogModel, loadCatalog } from "./model-catalog.js";
 
 const DEFAULT_SERVER = (process.env.PI_SERVER_URL || "").replace(/\/$/, "");
 const DEFAULT_API_URL = (() => {
@@ -494,8 +495,10 @@ const CONTEXT_LIMITS = {
 };
 const DEFAULT_CONTEXT_LIMIT = Number(process.env.PI_CONTEXT_LIMIT) || 128000;
 
-export function contextLimitFor(model) {
+export function contextLimitFor(model, apiUrl = null) {
   if (!model) return DEFAULT_CONTEXT_LIMIT;
+  const reported = apiUrl ? catalogModel(apiUrl, model) : null;
+  if (reported?.contextWindow) return reported.contextWindow;
   if (CONTEXT_LIMITS[model]) return CONTEXT_LIMITS[model];
   const [prov] = model.split("/");
   const prefixHit = Object.entries(CONTEXT_LIMITS).find(([k]) => model.startsWith(k) || k.startsWith(model));
@@ -507,7 +510,7 @@ export function contextLimitFor(model) {
   return DEFAULT_CONTEXT_LIMIT;
 }
 
-function extractContextUsage(info, model) {
+function extractContextUsage(info, model, apiUrl = null) {
   const t = info?.tokens;
   if (!t) return null;
   const input = Number(t.input) || 0;
@@ -516,7 +519,7 @@ function extractContextUsage(info, model) {
   const cacheRead = Number(t.cache?.read) || 0;
   const cacheWrite = Number(t.cache?.write) || 0;
   const used = input + cacheRead + cacheWrite;
-  const limit = contextLimitFor(model);
+  const limit = contextLimitFor(model, apiUrl);
   if (!used && !output) return null;
   return {
     used,
@@ -674,7 +677,9 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       }
 
       const cost = Number(msg.info?.cost) || 0;
-      const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`);
+      const catalogUrl = apiUrlFor(userId);
+      await loadCatalog(catalogUrl).catch(() => null);
+      const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`, catalogUrl);
       const tokenUsage = msg.info?.tokens || null;
       return {
         text: out,

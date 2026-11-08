@@ -37,6 +37,7 @@ import {
 } from "../agent.js";
 
 import { PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
+import { catalogOptions, loadCatalog } from "../model-catalog.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -90,7 +91,8 @@ async function modelsSupervisor(uid, path, body) {
 async function modelsMenuFor(uid, expiresAt, notice) {
   try {
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
-    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice });
+    const catalog = await loadCatalog(apiUrlFor(uid));
+    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice, extraModels: catalogOptions(catalog) });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching model: ${err.message}`].filter(Boolean).join("\n"), components: [] };
   }
@@ -762,7 +764,8 @@ export function registerInteractions(client) {
       try {
         const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
         const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
-        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt }), flags: MessageFlags.Ephemeral });
+        const catalog = await loadCatalog(apiUrlFor(uid));
+        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt, extraModels: catalogOptions(catalog) }), flags: MessageFlags.Ephemeral });
         setTimeout(() => {
           interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
         }, MODELS_MENU_TTL_MS).unref();
