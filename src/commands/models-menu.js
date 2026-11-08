@@ -26,7 +26,21 @@ export function thinkingLevelLabel(level) {
   return (THINKING_LEVEL_LIST.find((l) => l.value === (level || "default")) || { label: level }).label;
 }
 
-export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "", now = Date.now() }) {
+export function modelsMenuOptions(extraModels = []) {
+  const custom = MODEL_LIST.filter((m) => m.value === "__custom__");
+  const builtin = MODEL_LIST.filter((m) => m.value !== "__custom__");
+  const seen = new Set(builtin.map((m) => m.value));
+  const extras = (extraModels || []).filter((m) => m && m.value && !seen.has(m.value));
+  const room = Math.max(0, 25 - builtin.length - custom.length);
+  const options = [...builtin, ...extras.slice(0, room), ...custom];
+  return options.map((m) => ({
+    label: m.label,
+    value: m.value,
+    description: m.value === undefined ? undefined : (m.description || undefined),
+  }));
+}
+
+export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "", now = Date.now(), extraModels = [] }) {
   if (modelsMenuExpired(expiresAt, now)) {
     return { content: [notice, MODELS_MENU_EXPIRED].filter(Boolean).join("\n"), components: [] };
   }
@@ -41,10 +55,10 @@ export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "",
     new StringSelectMenuBuilder()
       .setCustomId(modelsMenuCustomId(MODEL_SELECT_ID, expiresAt))
       .setPlaceholder(`Model: ${model}`.slice(0, 150))
-      .addOptions(MODEL_LIST.map((m) => ({
+      .addOptions(modelsMenuOptions(extraModels).map((m) => ({
         label: m.label,
         value: m.value,
-        description: m.value === model ? "Currently selected" : undefined,
+        description: m.value === model ? "Currently selected" : m.description,
       }))),
   );
   const thinkingRow = new ActionRowBuilder().addComponents(
