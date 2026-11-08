@@ -343,7 +343,9 @@ function v2SpecToComponents(items, accentNumber, files, interactive, messageId) 
               .setStyle(ButtonStyle.Secondary),
           );
         }
-        rows.push(row);
+        // rows live INSIDE the container so the buttons render within the
+        // card boundary (juniper's "WE NEED INLINE BUTTONS", 2026-11-08)
+        container.addActionRowComponents(row);
       }
       // stashed on both passes; consumed by registerQuestionState after send
       rows.options = rows.options || [];
@@ -379,9 +381,9 @@ export async function sendV2(channel, spec, fromUserId, files = []) {
   // Re-render with question rows wired to this message id.
   const second = v2SpecToComponents(spec.items, accent, files, true, msg.id);
   if (second.has) {
-    const merged = [...second.top];
-    if (second.rows && second.rows.length) merged.push(...second.rows);
-    await msg.edit({ components: merged }).catch(() => {});
+    // interactive rows are added inside the container by the builder, so the
+    // card is the single merged component block
+    await msg.edit({ components: second.top }).catch(() => {});
     registerQuestionState(msg.id, {
       title: second.rows.titles?.find(Boolean) || "Options",
       options: second.rows.options || [],
