@@ -447,6 +447,17 @@ function v2SpecToComponents(items, accentNumber, files, interactive, messageId) 
   return { top, rows, has };
 }
 
+// Put the turn's footer (tool count, context usage) inside the card instead of
+// a second message, keeping the button row last so the layout stays intact.
+export function foldFooterIntoSpec(spec, footer) {
+  if (!spec || !Array.isArray(spec.items) || !footer) return spec?.items || [];
+  const buttons = spec.items.filter((i) => i && i.type === "buttons");
+  const rest = spec.items.filter((i) => !(i && i.type === "buttons"));
+  const items = [...rest, { type: "text", content: String(footer).slice(0, 4000) }, ...buttons];
+  spec.items = items;
+  return items;
+}
+
 // True when a spec's gallery/thumbnail points at one of the turn's pending
 // attachments, which means the file belongs to the card, not the text message.
 export function specUsesAttachment(spec, name) {

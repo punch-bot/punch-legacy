@@ -152,3 +152,17 @@ test("editV2 keeps the card's own media when the turn brings no new files", asyn
   assert.equal(card.calls[0].files[0].name, "keep.png");
   assert.equal(card.calls[0].attachments, undefined, "no attachment reset when nothing new arrives");
 });
+
+test("footer folds into the card before the button row", async () => {
+  const { foldFooterIntoSpec } = await import("../src/chat/embeds-questions.js");
+  const s = {
+    items: [
+      { type: "text", content: "body" },
+      { type: "gallery", items: [{ url: "attachment://a.png" }] },
+      { type: "buttons", title: "next", options: ["a"] },
+    ],
+  };
+  const out = foldFooterIntoSpec(s, "_ctx 12%_");
+  assert.deepEqual(out.map((i) => i.type), ["text", "gallery", "text", "buttons"]);
+  assert.equal(out[2].content, "_ctx 12%_");
+});
