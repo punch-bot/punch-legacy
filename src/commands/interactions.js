@@ -189,8 +189,12 @@ async function providerModelsMenuFor(uid, provider, page, expiresAt, notice, ven
   const apiUrl = apiUrlFor(uid);
   try {
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
-    const models = await modelsForProvider(apiUrl, provider);
-    const meta = describeCurrentModel(apiUrl, provider, models, model);
+    const currentProvider = String(model || "").split("/")[0];
+    const [models, currentModels] = await Promise.all([
+      modelsForProvider(apiUrl, provider),
+      currentProvider ? modelsForProvider(apiUrl, currentProvider) : Promise.resolve([]),
+    ]);
+    const meta = describeCurrentModel(apiUrl, currentProvider, currentModels, model);
     return renderProviderModels({ provider, models, page, vendor, expiresAt, model, thinkingLevel, notice, ...meta });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching models for \`${provider}\`: ${err.message}`].filter(Boolean).join("\n"), components: [] };
