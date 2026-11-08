@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import { registry } from "../core/registry.js";
 import { enqueueChat } from "../chat/queue.js";
-import { buildV2AnsweredComponents, markV2CardAnswered } from "../chat/embeds-questions.js";
+import { buildV2AnsweredComponents, markV2CardAnswered, stateFromMessage, registerQuestionState } from "../chat/embeds-questions.js";
 
 // Answered cards keep their content: V2 questions re-render their spec without
 // button rows plus an answer note, since wiping components would delete the
@@ -25,7 +25,13 @@ async function settleAnswerInteraction(interaction, state, note) {
 }
 
 async function handleQuestionInteraction(interaction) {
-  const state = registry.questionState.get(interaction.message.id);
+  let state = registry.questionState.get(interaction.message.id);
+  if (!state) {
+    // The card outlived the state (restart, eviction). Rebuild it from the
+    // message's own buttons rather than refusing the click.
+    state = stateFromMessage(interaction.message, interaction.user);
+    if (state) registerQuestionState(interaction.message.id, state);
+  }
   if (!state) {
     await interaction.reply({ content: "That question is no longer active.", flags: MessageFlags.Ephemeral }).catch(() => {});
     return;

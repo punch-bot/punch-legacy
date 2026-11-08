@@ -18,6 +18,7 @@ import {
   ThumbnailBuilder,
   MessageFlags,
 } from "discord.js";
+import { readFileSync, writeFileSync } from "node:fs";
 import { registry } from "../core/registry.js";
 import { escapeStrayMarkdown, truncateMarkdown } from "../discord-markdown.js";
 
@@ -177,12 +178,87 @@ function buildQuestionComponents(q, messageId) {
   return rows;
 }
 
+// Question state lives in memory, so every rebuild (the host now rebuilds on
+// git pull) used to turn live cards into "that question is no longer active".
+// Persist it to /data and reload on boot so cards survive restarts.
+const QUESTION_STATE_FILE = "/data/question-state.json";
+const QUESTION_STATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+let questionStateSaveTimer = null;
+let questionStateLoaded = false;
+
+export function loadQuestionState() {
+  if (questionStateLoaded) return;
+  questionStateLoaded = true;
+  try {
+    const raw = JSON.parse(readFileSync(QUESTION_STATE_FILE, "utf8"));
+    if (!raw || typeof raw !== "object") return;
+    const now = Date.now();
+    for (const [id, entry] of Object.entries(raw)) {
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.savedAt && now - entry.savedAt > QUESTION_STATE_TTL_MS) continue;
+      delete entry.savedAt;
+      registry.questionState.set(id, entry);
+    }
+  } catch {
+    // no file yet, or unreadable: start empty
+  }
+}
+
+function saveQuestionStateSoon() {
+  if (questionStateSaveTimer) return;
+  questionStateSaveTimer = setTimeout(() => {
+    questionStateSaveTimer = null;
+    try {
+      const out = {};
+      const now = Date.now();
+      for (const [id, state] of registry.questionState.entries()) out[id] = { ...state, savedAt: now };
+      writeFileSync(QUESTION_STATE_FILE, JSON.stringify(out), { mode: 0o600 });
+    } catch {
+      // persistence is best effort; the in-memory map still works
+    }
+  }, 250);
+  if (typeof questionStateSaveTimer.unref === "function") questionStateSaveTimer.unref();
+}
+
 export function registerQuestionState(messageId, state) {
+  loadQuestionState();
   registry.questionState.set(messageId, state);
   if (registry.questionState.size > 500) {
     const firstKey = registry.questionState.keys().next().value;
     if (firstKey) registry.questionState.delete(firstKey);
   }
+  saveQuestionStateSoon();
+}
+
+// Rebuild click state from the card itself, so a card whose state was lost
+// (restart, eviction) still answers instead of saying "no longer active".
+export function stateFromMessage(message, clicker) {
+  const options = [];
+  const walk = (list) => {
+    for (const c of list || []) {
+      const json = typeof c?.toJSON === "function" ? c.toJSON() : c;
+      if (!json) continue;
+      if (json.type === 1) {
+        for (const b of json.components || []) if (b && b.label) options.push(String(b.label));
+      } else if (Array.isArray(json.components)) {
+        walk(json.components);
+      }
+    }
+  };
+  walk(message?.components);
+  if (!options.length) return null;
+  return {
+    title: "Options",
+    options,
+    multi: false,
+    input: [],
+    fromUserId: clicker?.id,
+    v2: true,
+    inline: true,
+    restored: true,
+    specItems: [],
+    accent: "",
+  };
 }
 
 export async function sendQuestion(channel, q, fromUserId) {

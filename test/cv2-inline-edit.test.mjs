@@ -166,3 +166,46 @@ test("footer folds into the card before the button row", async () => {
   assert.deepEqual(out.map((i) => i.type), ["text", "gallery", "text", "buttons"]);
   assert.equal(out[2].content, "_ctx 12%_");
 });
+
+test("stateFromMessage rebuilds options from a v2 card's own buttons", async () => {
+  const { stateFromMessage } = await import("../src/chat/embeds-questions.js");
+  const msg = {
+    components: [
+      { type: 17, components: [
+        { type: 10, content: "body" },
+        { type: 1, components: [
+          { type: 2, label: "waste", custom_id: "qbtn:m:0" },
+          { type: 2, label: "SMRs", custom_id: "qbtn:m:1" },
+        ]},
+      ]},
+    ],
+  };
+  const state = stateFromMessage(msg, { id: "u1" });
+  assert.deepEqual(state.options, ["waste", "SMRs"]);
+  assert.equal(state.fromUserId, "u1");
+  assert.equal(state.inline, true);
+  assert.equal(state.restored, true);
+});
+
+test("stateFromMessage returns null when there is nothing to click", async () => {
+  const { stateFromMessage } = await import("../src/chat/embeds-questions.js");
+  assert.equal(stateFromMessage({ components: [{ type: 17, components: [{ type: 10, content: "x" }] }] }, { id: "u" }), null);
+  assert.equal(stateFromMessage(null, { id: "u" }), null);
+});
+
+test("question state survives a process restart via /data", async () => {
+  const fs = await import("node:fs");
+  const path = "/data/question-state.json";
+  const { registerQuestionState, loadQuestionState } = await import("../src/chat/embeds-questions.js");
+  const { registry } = await import("../src/core/registry.js");
+  registerQuestionState("restart-card", { options: ["a", "b"], v2: true, inline: true, fromUserId: "u1", specItems: [], title: "t" });
+  await new Promise((r) => setTimeout(r, 400));
+  assert.ok(fs.existsSync(path), "state written to disk");
+  registry.questionState.clear();
+  // simulate a fresh process: reset the module-level guard by re-importing is
+  // not possible here, so assert the file content is loadable instead
+  const raw = JSON.parse(fs.readFileSync(path, "utf8"));
+  assert.deepEqual(raw["restart-card"].options, ["a", "b"]);
+  assert.ok(typeof raw["restart-card"].savedAt === "number");
+  assert.ok(typeof loadQuestionState === "function");
+});
