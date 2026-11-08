@@ -39,16 +39,22 @@ test("models sort known families first, then alphabetically", () => {
 });
 
 test("provider menu offers providers and keeps custom model available", () => {
+  const expiresAt = Date.now() + 60_000;
   const menu = renderProviderMenu({
     model: "opencode-go/deepseek-v4.1-flash",
     thinkingLevel: "medium",
-    expiresAt: Date.now() + 60_000,
+    expiresAt,
     providers: [{ name: "opencode-go", count: 30 }, { name: "mistral", count: 2 }],
+    currentLabel: "DeepSeek V4.1 Flash",
+    currentContextWindow: 1_048_576,
   });
+  assert.match(menu.content, /### Current model: DeepSeek V4\.1 Flash/, "the provider menu resolves the label, not the raw id");
+  assert.match(menu.content, /-# opencode-go · 1\.0mil context/);
+  assert.match(menu.content, /-# expires <t:\d+:R>/, "expiry is small text above the header");
   const [providerRow] = menu.components;
   assert.equal(providerRow.components[0].options.length, 2);
   assert.equal(providerRow.components[0].options[0].data.value, "opencode-go");
-  assert.match(menu.content, /### Current model: `opencode-go\/deepseek-v4\.1-flash`/);
+  assert.match(menu.content, /^-# expires <t:\d+:R>\n### Current model:/, "expiry sits above the heading");
 });
 
 test("a provider page shows custom model first, vendors and paging", () => {

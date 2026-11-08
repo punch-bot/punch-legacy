@@ -131,6 +131,10 @@ function thinkingRow(level, expiresAt) {
   );
 }
 
+function expiresLine(expiresAt) {
+  return `-# expires <t:${Math.floor(expiresAt / 1000)}:R>`;
+}
+
 function currentBlock({ model, label, provider, contextWindow, description }) {
   const head = label && label !== model ? label : `\`${model}\``;
   const meta = [provider || "unknown provider", contextWindow ? `${formatContext(contextWindow)} context` : null].filter(Boolean).join(" · ");
@@ -175,16 +179,25 @@ export function flatModelRow({ model, expiresAt, extraModels = [] }) {
   );
 }
 
-export function renderProviderMenu({ model, thinkingLevel, expiresAt, providers = [], notice = "", now = Date.now() }) {
+export function renderProviderMenu({
+  model,
+  thinkingLevel,
+  expiresAt,
+  providers = [],
+  currentLabel,
+  currentContextWindow,
+  notice = "",
+  now = Date.now(),
+}) {
   if (modelsMenuExpired(expiresAt, now)) {
     return { content: [notice, MODELS_MENU_EXPIRED].filter(Boolean).join("\n"), components: [] };
   }
   const currentProvider = String(model || "").split("/")[0];
-  const currentLabel = (MODEL_LIST.find((m) => m.value === model) || {}).label;
+  const label = currentLabel || (MODEL_LIST.find((m) => m.value === model) || {}).label;
   const content = [
     notice,
-    currentBlock({ model, label: currentLabel, provider: currentProvider }),
-    providers.length ? `-# Pick a provider, then a vendor and model if it offers one. Expires <t:${Math.floor(expiresAt / 1000)}:R>.` : `-# Pick a model. Expires <t:${Math.floor(expiresAt / 1000)}:R>.`,
+    expiresLine(expiresAt),
+    currentBlock({ model, label, provider: currentProvider, contextWindow: currentContextWindow }),
   ].filter(Boolean).join("\n");
   if (!providers.length) {
     return { content, components: [flatModelRow({ model, expiresAt }), thinkingRow(thinkingLevel, expiresAt)] };
@@ -230,6 +243,7 @@ export function renderProviderModels({
   const { page: safePage, pages, slice } = modelPage(sorted, page);
   const content = [
     notice,
+    expiresLine(expiresAt),
     currentBlock({
       model,
       label: modelLabel,
@@ -237,7 +251,7 @@ export function renderProviderModels({
       contextWindow: modelContextWindow,
       description: modelDescription,
     }),
-    `-# ${vendor !== ALL_VENDORS ? `${provider} / ${vendor} · ` : ""}expires <t:${Math.floor(expiresAt / 1000)}:R>.`,
+    vendor !== ALL_VENDORS ? `-# showing ${provider} / ${vendor}` : null,
   ].filter(Boolean).join("\n");
 
   const rows = [
@@ -303,6 +317,6 @@ export function renderProviderModels({
   return { content, components: rows };
 }
 
-export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "", now = Date.now(), providers = [] }) {
-  return renderProviderMenu({ model, thinkingLevel, expiresAt, providers, notice, now });
+export function renderModelsMenu({ model, thinkingLevel, expiresAt, notice = "", now = Date.now(), providers = [], currentLabel, currentContextWindow }) {
+  return renderProviderMenu({ model, thinkingLevel, expiresAt, providers, notice, now, currentLabel, currentContextWindow });
 }

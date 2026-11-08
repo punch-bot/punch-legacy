@@ -158,7 +158,17 @@ async function modelsMenuFor(uid, expiresAt, notice) {
     const apiUrl = apiUrlFor(uid);
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
     const providers = await providerChoices(apiUrl);
-    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice, providers });
+    const currentProvider = String(model || "").split("/")[0];
+    const meta = currentProvider ? describeCurrentModel(apiUrl, currentProvider, await modelsForProvider(apiUrl, currentProvider), model) : {};
+    return renderModelsMenu({
+      model,
+      thinkingLevel,
+      expiresAt,
+      notice,
+      providers,
+      currentLabel: meta.modelLabel,
+      currentContextWindow: meta.modelContextWindow,
+    });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching model: ${err.message}`].filter(Boolean).join("\n"), components: [] };
   }
@@ -855,7 +865,16 @@ export function registerInteractions(client) {
         const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
         const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
         const providers = await providerChoices(apiUrlFor(uid));
-        await interaction.editReply(renderModelsMenu({ model, thinkingLevel, expiresAt, providers }));
+        const currentProvider = String(model || "").split("/")[0];
+        const meta = currentProvider ? describeCurrentModel(apiUrlFor(uid), currentProvider, await modelsForProvider(apiUrlFor(uid), currentProvider), model) : {};
+        await interaction.editReply(renderModelsMenu({
+          model,
+          thinkingLevel,
+          expiresAt,
+          providers,
+          currentLabel: meta.modelLabel,
+          currentContextWindow: meta.modelContextWindow,
+        }));
         setTimeout(() => {
           interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
         }, MODELS_MENU_TTL_MS).unref();
