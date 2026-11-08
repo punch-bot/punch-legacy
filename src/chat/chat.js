@@ -53,7 +53,7 @@ import {
   extractAttachments,
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
-import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2, peekV2Card } from "./embeds-questions.js";
+import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2, peekV2Card, specUsesAttachment } from "./embeds-questions.js";
 import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
@@ -348,10 +348,17 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (notes.length) out += (out ? "\n\n" : "") + notesFooter(notes);
 
     const sendable = filesToSend.filter((f) => !f.oversize);
+    // Files a cv2 spec points at (attachment://name) belong inside the card, not
+    // strapped to the text message. Otherwise the chart lands twice.
+    const hasV2Early = v2.length > 0;
+    const cardFiles = hasV2Early
+      ? sendable.filter((f) => v2.some((spec) => specUsesAttachment(spec, f.name)))
+      : [];
+    const textFiles = sendable.filter((f) => !cardFiles.includes(f));
     if (sendable.length > 1) console.log(`[attach-debug] WARNING: ${sendable.length} files in sendable: ${sendable.map((f) => `${f.name}(${f.attachment?.length})`).join(", ")}`);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
-    const hasV2 = v2.length > 0;
+    const hasV2 = hasV2Early;
     const reactionOnly =
       !hasText && !hasNotes && sendable.length === 0 &&
       reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0 && !hasV2;
@@ -360,15 +367,18 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     const activityStatus = res.activity?.status || "completed";
 
     const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0 || hasV2;
-    if (hasResult) {
+    // A card can carry the whole reply: no prose, no embeds, no loose files.
+    // Posting an empty text message next to it just leaves a ghost bubble.
+    const skipTextMessage = !out.trim() && embeds.length === 0 && textFiles.length === 0 && hasV2 && !progressRenderer;
+    if (hasResult && !skipTextMessage) {
       if (progressRenderer) {
         const [primary = "", ...overflow] = chunk(out, 1_650);
-        await finalizeProgress(res.activity, activityStatus, primary, { files: sendable, embeds });
+        await finalizeProgress(res.activity, activityStatus, primary, { files: textFiles, embeds });
         for (const [i, part] of overflow.entries()) {
           await settle(message, i === overflow.length - 1 ? part + label : part);
         }
       } else {
-        await settle(message, out + label, sendable, { embeds });
+        await settle(message, out + label, textFiles, { embeds });
       }
       for (const q of questions) {
         await sendQuestion(message.channel, q, uid);
@@ -389,12 +399,12 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
         if (editId) {
           try {
             const card = await message.channel.messages.fetch(editId);
-            if (card && await editV2(card, spec, uid)) continue;
+            if (card && await editV2(card, spec, uid, cardFiles)) continue;
           } catch (err) {
             console.error("[cv2] inline edit failed, falling back to new message:", err.message);
           }
         }
-        await sendV2(message.channel, spec, uid, sendable);
+        await sendV2(message.channel, spec, uid, cardFiles);
       }
     }
     if (!hasResult || !progressRenderer) {

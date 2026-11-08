@@ -234,21 +234,30 @@ export function buildV2AnsweredComponents(specItems, accent, note) {
 // answer, agent chat can EDIT the original card with the next spec (channels
 // render one evolving guide). Files fall back to the card's own attachments so
 // galleries survive the edit.
-export async function editV2(cardMessage, spec, fromUserId) {
+export async function editV2(cardMessage, spec, fromUserId, newFiles = []) {
   if (!spec || !Array.isArray(spec.items) || !spec.items.length) return false;
-  let files = [];
-  try {
-    const atts = [...(cardMessage.attachments?.values?.() || [])];
-    files = atts.map((a) => ({ attachment: a.url, name: a.name }));
-  } catch {
-    files = [];
+  // Prefer the files that came with this turn (a fresh chart for the gallery);
+  // otherwise re-use the card's own attachments so its media survives the edit.
+  let files = (newFiles || []).filter((f) => f && f.attachment && f.name);
+  const replacing = files.length > 0;
+  if (!files.length) {
+    try {
+      const atts = [...(cardMessage.attachments?.values?.() || [])];
+      files = atts.map((a) => ({ attachment: a.url, name: a.name }));
+    } catch {
+      files = [];
+    }
   }
   const accent = v2AccentToNumber(spec.accent);
   const built = v2SpecToComponents(spec.items, accent, files, true, cardMessage.id);
   if (!built.has) return false;
   const editPayload = { components: built.top };
   const sendable = files.filter((f) => f.attachment && f.name);
-  if (sendable.length) editPayload.files = sendable;
+  if (sendable.length) {
+    editPayload.files = sendable;
+    // new media replaces the old media instead of stacking a second image
+    if (replacing) editPayload.attachments = [];
+  }
   await cardMessage.edit(editPayload);
   rememberV2Card(cardMessage.channelId || (cardMessage.channel && cardMessage.channel.id), fromUserId, cardMessage.id);
   const rows = built.rows || {};
@@ -436,6 +445,18 @@ function v2SpecToComponents(items, accentNumber, files, interactive, messageId) 
   }
   if (has) top.push(container);
   return { top, rows, has };
+}
+
+// True when a spec's gallery/thumbnail points at one of the turn's pending
+// attachments, which means the file belongs to the card, not the text message.
+export function specUsesAttachment(spec, name) {
+  if (!spec || !name || !Array.isArray(spec.items)) return false;
+  const needle = `attachment://${name}`;
+  try {
+    return JSON.stringify(spec.items).includes(needle);
+  } catch {
+    return false;
+  }
 }
 
 // Track the newest cv2 card so a follow-up spec can rewrite it in place even

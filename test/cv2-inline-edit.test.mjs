@@ -126,3 +126,29 @@ test("peekV2Card expires a stale card so it never edits an old message", async (
   entry.answeredAt = 0;
   assert.equal(peekV2Card("chan3", "u9"), null, "2h old card is not reused");
 });
+
+test("specUsesAttachment spots a gallery file so it lands in the card", async () => {
+  const { specUsesAttachment } = await import("../src/chat/embeds-questions.js");
+  const spec = { items: [{ type: "gallery", items: [{ url: "attachment://chart.png" }] }] };
+  assert.equal(specUsesAttachment(spec, "chart.png"), true);
+  assert.equal(specUsesAttachment(spec, "other.png"), false);
+  assert.equal(specUsesAttachment(null, "chart.png"), false);
+});
+
+test("editV2 puts the new chart inside the card and drops the old media", async () => {
+  const card = fakeCard("m3", [{ url: "https://cdn.example/old.png", name: "old.png" }]);
+  const chart = { attachment: Buffer.from("png"), name: "new.png" };
+  const spec2 = { accent: "#58b65c", items: [{ type: "gallery", items: [{ url: "attachment://new.png" }] }] };
+  await editV2(card, spec2, "u1", [chart]);
+  const payload = card.calls[0];
+  assert.equal(payload.files.length, 1);
+  assert.equal(payload.files[0].name, "new.png");
+  assert.deepEqual(payload.attachments, [], "old attachment cleared so two images don't stack");
+});
+
+test("editV2 keeps the card's own media when the turn brings no new files", async () => {
+  const card = fakeCard("m4", [{ url: "https://cdn.example/keep.png", name: "keep.png" }]);
+  await editV2(card, spec, "u1", []);
+  assert.equal(card.calls[0].files[0].name, "keep.png");
+  assert.equal(card.calls[0].attachments, undefined, "no attachment reset when nothing new arrives");
+});
