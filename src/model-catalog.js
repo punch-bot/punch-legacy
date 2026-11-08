@@ -58,6 +58,40 @@ export async function loadCatalog(apiUrl, { force = false } = {}) {
   }
 }
 
+const gatewayCache = new Map();
+
+export async function loadGatewayModels(apiUrl, { force = false } = {}) {
+  if (!apiUrl) return [];
+  const cached = gatewayCache.get(apiUrl);
+  if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.models;
+  const base = String(apiUrl).replace(/:\d+$/, ":4096");
+  try {
+    const res = await fetch(`${base}/models`, {
+      headers: { authorization: supervisorAuth(apiUrl) },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`gateway API ${res.status}`);
+    const payload = await res.json();
+    const models = (payload.models || [])
+      .filter((m) => m && m.provider && m.id)
+      .map((m) => ({
+        provider: String(m.provider),
+        id: String(m.id),
+        label: String(m.name || m.id),
+        value: `${m.provider}/${m.id}`,
+      }));
+    gatewayCache.set(apiUrl, { at: Date.now(), models });
+    return models;
+  } catch (err) {
+    console.error(`[catalog] failed to load the gateway model list: ${err.message}`);
+    return cached?.models ?? [];
+  }
+}
+
+export function clearGatewayCache() {
+  gatewayCache.clear();
+}
+
 export function catalogModel(apiUrl, model) {
   const catalog = cache.get(apiUrl)?.catalog;
   if (!catalog || !model) return null;

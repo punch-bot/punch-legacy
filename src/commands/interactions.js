@@ -37,7 +37,7 @@ import {
 } from "../agent.js";
 
 import { MODEL_LIST, PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
-import { catalogModel, catalogOptions, discoverProviderModels, discoverableProviders, loadCatalog } from "../model-catalog.js";
+import { catalogModel, catalogOptions, discoverProviderModels, discoverableProviders, loadCatalog, loadGatewayModels } from "../model-catalog.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -111,11 +111,11 @@ async function providerChoices(apiUrl) {
     if (!counts.has(provider)) counts.set(provider, new Map());
     counts.get(provider).set(model.value, model);
   };
+  const gatewayModels = await loadGatewayModels(apiUrl);
+  for (const model of gatewayModels) bump(model.provider, model);
   for (const m of MODEL_LIST) {
     if (m.value === "__custom__") continue;
-    const provider = m.value.split("/")[0];
-    if (provider === "openai-codex") continue;
-    bump(provider, { label: m.label, value: m.value });
+    bump(m.value.split("/")[0], { label: m.label, value: m.value });
   }
   for (const model of catalogOptions(catalog)) {
     bump(model.value.split("/")[0], model);
@@ -133,7 +133,7 @@ async function providerChoices(apiUrl) {
 }
 
 async function modelsForProvider(apiUrl, provider) {
-  const catalog = await loadCatalog(apiUrl);
+  const [catalog, gatewayModels] = await Promise.all([loadCatalog(apiUrl), loadGatewayModels(apiUrl)]);
   const merged = new Map();
   const add = (model, fresh = false) => {
     if (!model?.value) return;
@@ -144,12 +144,15 @@ async function modelsForProvider(apiUrl, provider) {
     }
     merged.set(model.value, { ...existing, ...model });
   };
-  for (const model of staticModelsFor(provider)) add(model);
+  for (const model of gatewayModels.filter((m) => m.provider === provider)) add(model);
   for (const model of (catalog?.models || []).filter((m) => m.provider === provider)) {
     add({ label: model.label, value: model.value, contextWindow: model.contextWindow }, true);
   }
+  for (const model of staticModelsFor(provider)) add(model);
   const discovered = await discoverProviderModels(apiUrl, provider).catch(() => null);
-  for (const model of discovered || []) add({ label: model.label, value: model.value, contextWindow: model.contextWindow }, true);
+  for (const model of discovered || []) {
+    add({ label: model.label, value: model.value, contextWindow: model.contextWindow, description: model.description }, true);
+  }
   return sortModelsForMenu([...merged.values()]);
 }
 
