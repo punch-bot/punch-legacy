@@ -9,6 +9,19 @@ import {
 } from "discord.js";
 import { registry } from "../core/registry.js";
 import { enqueueChat } from "../chat/queue.js";
+import { buildV2AnsweredComponents } from "../chat/embeds-questions.js";
+
+// Answered cards keep their content: V2 questions re-render their spec without
+// button rows plus an answer note, since wiping components would delete the
+// card's genuinely useful payload along with the interactivity.
+async function settleAnswerInteraction(interaction, state, note) {
+  if (!state.v2) {
+    await interaction.update({ components: [] }).catch(() => {});
+    return;
+  }
+  const components = buildV2AnsweredComponents(state.specItems, state.accent, note);
+  await interaction.update({ components }).catch(() => {});
+}
 
 async function handleQuestionInteraction(interaction) {
   const state = registry.questionState.get(interaction.message.id);
@@ -37,7 +50,7 @@ async function handleQuestionInteraction(interaction) {
     await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
-  await interaction.update({ components: [] }).catch(() => {});
+  await settleAnswerInteraction(interaction, state, `> answered: **${chosen.map((c) => String(c).slice(0, 80)).join(", ")}**`);
 
   const clicker = interaction.user;
   const label = clicker.displayName || clicker.username;
@@ -180,8 +193,6 @@ async function handleQuestionCheckboxSubmit(interaction) {
     await interaction.reply({ content: "That question was already answered.", flags: MessageFlags.Ephemeral }).catch(() => {});
     return;
   }
-  await interaction.update({ components: [] }).catch(() => {});
-
   const clicker = interaction.user;
   const label = clicker.displayName || clicker.username;
   const answered = [
@@ -189,6 +200,7 @@ async function handleQuestionCheckboxSubmit(interaction) {
     `[${state.title || "Question"}]: ${chosen.map((c) => `"${c}"`).join(", ")} (answered by ${label})`,
     "--- End ---",
   ].join("\n");
+  await settleAnswerInteraction(interaction, state, `> answered: **${chosen.map((c) => String(c).slice(0, 80)).join(", ")}**`);
 
   await enqueueChat(interaction.message, `I chose: ${chosen.join(", ")}`, [], {
     userId: state.fromUserId,
