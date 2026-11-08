@@ -36,8 +36,8 @@ import {
   syncWorkerCap,
 } from "../agent.js";
 
-import { PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
-import { catalogOptions, loadCatalog } from "../model-catalog.js";
+import { MODEL_LIST, PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
+import { catalogOptions, discoverProviderModels, discoverableProviders, loadCatalog } from "../model-catalog.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -67,14 +67,19 @@ import { runApprovedAgentPigeon, handleAgentPigeon, notifyPigeonDM } from "../ga
 
 import {
   CUSTOM_MODEL_MODAL_ID,
+  MODEL_BACK_ID,
+  MODEL_PAGE_ID,
   MODELS_MENU_EXPIRED,
   MODELS_MENU_TTL_MS,
   MODEL_SELECT_ID,
+  PROVIDER_SELECT_ID,
   THINKING_SELECT_ID,
   modelsMenuCustomId,
   modelsMenuExpired,
   parseModelsMenuCustomId,
   renderModelsMenu,
+  renderProviderModels,
+  sortModelsForMenu,
   thinkingLevelLabel,
 } from "./models-menu.js";
 
@@ -88,13 +93,77 @@ async function modelsSupervisor(uid, path, body) {
   return data;
 }
 
+const DISCOVERABLE_PROVIDERS = new Set(discoverableProviders());
+
+function staticModelsFor(provider) {
+  return MODEL_LIST.filter((m) => m.value !== "__custom__" && m.value.split("/")[0] === provider)
+    .map((m) => ({ label: m.label, value: m.value }));
+}
+
+async function providerChoices(apiUrl) {
+  const catalog = await loadCatalog(apiUrl);
+  const counts = new Map();
+  const bump = (provider, model) => {
+    if (!counts.has(provider)) counts.set(provider, new Map());
+    counts.get(provider).set(model.value, model);
+  };
+  for (const m of MODEL_LIST) {
+    if (m.value === "__custom__") continue;
+    const provider = m.value.split("/")[0];
+    if (provider === "openai-codex") continue;
+    bump(provider, { label: m.label, value: m.value });
+  }
+  for (const model of catalogOptions(catalog)) {
+    bump(model.value.split("/")[0], model);
+  }
+  for (const provider of DISCOVERABLE_PROVIDERS) {
+    if (!counts.has(provider)) counts.set(provider, new Map());
+  }
+  return [...counts.entries()]
+    .map(([name, models]) => ({ name, count: models.size || (DISCOVERABLE_PROVIDERS.has(name) ? null : 0) }))
+    .sort((a, b) => ((b.count || 0) - (a.count || 0)) || a.name.localeCompare(b.name));
+}
+
+async function modelsForProvider(apiUrl, provider) {
+  const catalog = await loadCatalog(apiUrl);
+  const merged = new Map();
+  const add = (model, fresh = false) => {
+    if (!model?.value) return;
+    const existing = merged.get(model.value);
+    if (existing && !fresh) {
+      if (!existing.contextWindow && model.contextWindow) merged.set(model.value, { ...existing, contextWindow: model.contextWindow });
+      return;
+    }
+    merged.set(model.value, { ...existing, ...model });
+  };
+  for (const model of staticModelsFor(provider)) add(model);
+  for (const model of (catalog?.models || []).filter((m) => m.provider === provider)) {
+    add({ label: model.label, value: model.value, contextWindow: model.contextWindow }, true);
+  }
+  const discovered = await discoverProviderModels(apiUrl, provider).catch(() => null);
+  for (const model of discovered || []) add({ label: model.label, value: model.value, contextWindow: model.contextWindow }, true);
+  return sortModelsForMenu([...merged.values()]);
+}
+
 async function modelsMenuFor(uid, expiresAt, notice) {
   try {
+    const apiUrl = apiUrlFor(uid);
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
-    const catalog = await loadCatalog(apiUrlFor(uid));
-    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice, extraModels: catalogOptions(catalog) });
+    const providers = await providerChoices(apiUrl);
+    return renderModelsMenu({ model, thinkingLevel, expiresAt, notice, providers });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching model: ${err.message}`].filter(Boolean).join("\n"), components: [] };
+  }
+}
+
+async function providerModelsMenuFor(uid, provider, page, expiresAt, notice) {
+  const apiUrl = apiUrlFor(uid);
+  try {
+    const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
+    const models = await modelsForProvider(apiUrl, provider);
+    return renderProviderModels({ provider, models, page, expiresAt, model, thinkingLevel, notice });
+  } catch (err) {
+    return { content: [notice, `⚠️ Error fetching models for \`${provider}\`: ${err.message}`].filter(Boolean).join("\n"), components: [] };
   }
 }
 
@@ -764,8 +833,8 @@ export function registerInteractions(client) {
       try {
         const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
         const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
-        const catalog = await loadCatalog(apiUrlFor(uid));
-        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt, extraModels: catalogOptions(catalog) }), flags: MessageFlags.Ephemeral });
+        const providers = await providerChoices(apiUrlFor(uid));
+        await interaction.reply({ ...renderModelsMenu({ model, thinkingLevel, expiresAt, providers }), flags: MessageFlags.Ephemeral });
         setTimeout(() => {
           interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
         }, MODELS_MENU_TTL_MS).unref();
@@ -1803,6 +1872,44 @@ export function registerInteractions(client) {
       await interaction.update({ content: `✅ Removed skill **${name}**. The sandbox supervisor will reload tools.`, components: [] });
     } catch (err) {
       await interaction.update({ content: `⚠️ Failed to remove skill: ${err.message}`, components: [] });
+    }
+  });
+
+  client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isStringSelectMenu()) return;
+    const { base, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== PROVIDER_SELECT_ID) return;
+    if (modelsMenuExpired(expiresAt)) {
+      await interaction.update({ content: MODELS_MENU_EXPIRED, components: [] });
+      return;
+    }
+    await interaction.deferUpdate();
+    const provider = interaction.values[0];
+    try {
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, 0, expiresAt));
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ Could not load models for \`${provider}\`: ${err.message}`, components: [] }).catch(() => {});
+    }
+  });
+
+  client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isButton()) return;
+    const { base, args, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== MODEL_PAGE_ID && base !== MODEL_BACK_ID) return;
+    if (modelsMenuExpired(expiresAt)) {
+      await interaction.update({ content: MODELS_MENU_EXPIRED, components: [] });
+      return;
+    }
+    await interaction.deferUpdate();
+    try {
+      if (base === MODEL_BACK_ID) {
+        await interaction.editReply(await modelsMenuFor(interaction.user.id, expiresAt));
+        return;
+      }
+      const [provider, page] = args;
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, Number(page) || 0, expiresAt));
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ Could not update the model menu: ${err.message}`, components: [] }).catch(() => {});
     }
   });
 

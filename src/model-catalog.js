@@ -94,6 +94,17 @@ const PROVIDER_MODELS = {
   mistral: { url: "https://api.mistral.ai/v1/models", key: "MISTRAL_API_KEY" },
 };
 
+export function discoverableProviders() {
+  const seenUrls = new Set();
+  const names = [];
+  for (const [name, spec] of Object.entries(PROVIDER_MODELS)) {
+    if (seenUrls.has(spec.url)) continue;
+    seenUrls.add(spec.url);
+    names.push(name);
+  }
+  return names;
+}
+
 const DISCOVERY_TTL_MS = 30 * 60_000;
 const discovery = new Map();
 const inflight = new Map();
