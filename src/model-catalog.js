@@ -127,7 +127,10 @@ export function parseModelList(provider, payload) {
 export async function discoverProviderModels(apiUrl, provider, { force = false, runner = runSandboxCommand } = {}) {
   if (!apiUrl || !provider) return null;
   const spec = discoveryCommand(provider);
-  if (!spec) return null;
+  if (!spec) {
+    console.log(`[catalog] no models endpoint known for provider ${provider}`);
+    return null;
+  }
   const cacheKey = `${apiUrl}:${provider}`;
   const cached = discovery.get(cacheKey);
   if (!force && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.models.length ? cached.models : null;

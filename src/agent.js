@@ -681,7 +681,12 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       const cost = Number(msg.info?.cost) || 0;
       const catalogUrl = apiUrlFor(userId);
       await loadCatalog(catalogUrl).catch(() => null);
-      void discoverProviderModels(catalogUrl, activeProvider).catch(() => null);
+      const discovery = discoverProviderModels(catalogUrl, activeProvider).catch(() => null);
+      const discoveryDeadline = new Promise((resolve) => {
+        const timer = setTimeout(resolve, 4000);
+        if (typeof timer.unref === "function") timer.unref();
+      });
+      await Promise.race([discovery, discoveryDeadline]);
       const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`, catalogUrl);
       const tokenUsage = msg.info?.tokens || null;
       return {
