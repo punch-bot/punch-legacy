@@ -37,7 +37,7 @@ import {
 } from "../agent.js";
 
 import { MODEL_LIST, PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
-import { catalogOptions, discoverProviderModels, loadCatalog } from "../model-catalog.js";
+import { catalogOptions, discoverProviderModels, discoverableProviders, loadCatalog } from "../model-catalog.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -93,7 +93,7 @@ async function modelsSupervisor(uid, path, body) {
   return data;
 }
 
-const DISCOVERABLE_PROVIDERS = new Set(["opencode-go", "openrouter", "nvidia", "nim", "deepseek", "groq", "together", "openai", "poolside", "mistral"]);
+const DISCOVERABLE_PROVIDERS = new Set(discoverableProviders());
 
 function staticModelsFor(provider) {
   return MODEL_LIST.filter((m) => m.value !== "__custom__" && m.value.split("/")[0] === provider)
@@ -120,26 +120,29 @@ async function providerChoices(apiUrl) {
     if (!counts.has(provider)) counts.set(provider, new Map());
   }
   return [...counts.entries()]
-    .map(([name, models]) => ({ name, count: models.size }))
-    .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+    .map(([name, models]) => ({ name, count: models.size || (DISCOVERABLE_PROVIDERS.has(name) ? null : 0) }))
+    .sort((a, b) => ((b.count || 0) - (a.count || 0)) || a.name.localeCompare(b.name));
 }
 
 async function modelsForProvider(apiUrl, provider) {
   const catalog = await loadCatalog(apiUrl);
-  const seen = new Set();
-  const models = [];
-  const add = (model) => {
-    if (!model?.value || seen.has(model.value)) return;
-    seen.add(model.value);
-    models.push(model);
+  const merged = new Map();
+  const add = (model, fresh = false) => {
+    if (!model?.value) return;
+    const existing = merged.get(model.value);
+    if (existing && !fresh) {
+      if (!existing.contextWindow && model.contextWindow) merged.set(model.value, { ...existing, contextWindow: model.contextWindow });
+      return;
+    }
+    merged.set(model.value, { ...existing, ...model });
   };
   for (const model of staticModelsFor(provider)) add(model);
-  for (const model of catalogOptions(catalog)) {
-    if (model.value.split("/")[0] === provider) add(model);
+  for (const model of (catalog?.models || []).filter((m) => m.provider === provider)) {
+    add({ label: model.label, value: model.value, contextWindow: model.contextWindow }, true);
   }
   const discovered = await discoverProviderModels(apiUrl, provider).catch(() => null);
-  for (const model of discovered || []) add({ label: model.label, value: model.value, contextWindow: model.contextWindow });
-  return sortModelsForMenu(models);
+  for (const model of discovered || []) add({ label: model.label, value: model.value, contextWindow: model.contextWindow }, true);
+  return sortModelsForMenu([...merged.values()]);
 }
 
 async function modelsMenuFor(uid, expiresAt, notice) {
@@ -155,9 +158,13 @@ async function modelsMenuFor(uid, expiresAt, notice) {
 
 async function providerModelsMenuFor(uid, provider, page, expiresAt, notice) {
   const apiUrl = apiUrlFor(uid);
-  const { model } = await modelsSupervisor(uid, "/model");
-  const models = await modelsForProvider(apiUrl, provider);
-  return renderProviderModels({ provider, models, page, expiresAt, model, notice });
+  try {
+    const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
+    const models = await modelsForProvider(apiUrl, provider);
+    return renderProviderModels({ provider, models, page, expiresAt, model, thinkingLevel, notice });
+  } catch (err) {
+    return { content: [notice, `⚠️ Error fetching models for \`${provider}\`: ${err.message}`].filter(Boolean).join("\n"), components: [] };
+  }
 }
 
 async function setModelNotice(uid, model) {

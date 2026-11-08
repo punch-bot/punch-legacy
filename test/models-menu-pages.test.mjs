@@ -48,12 +48,14 @@ test("provider menu offers providers and keeps custom model available", () => {
 });
 
 test("a provider page shows custom model first and pages at fifteen", () => {
+  const expiresAt = Date.now() + 60_000;
   const menu = renderProviderModels({
     provider: "openrouter",
     models,
     page: 1,
-    expiresAt: Date.now() + 60_000,
+    expiresAt,
     model: "openrouter/model-0",
+    thinkingLevel: "high",
   });
   const [modelRow, buttons] = menu.components;
   assert.equal(modelRow.components[0].options[0].data.value, "__custom__");
@@ -61,7 +63,14 @@ test("a provider page shows custom model first and pages at fifteen", () => {
   assert.equal(buttons.components.length, 3);
   assert.match(menu.content, /page 2\/3/);
   const next = buttons.components[1];
-  assert.equal(next.data.custom_id, modelsMenuCustomId("model_page", parseModelsMenuCustomId(next.data.custom_id).expiresAt, "openrouter", "2"));
+  const parsed = parseModelsMenuCustomId(next.data.custom_id);
+  assert.equal(parsed.base, "model_page");
+  assert.deepEqual(parsed.args, ["openrouter", "2"]);
+  assert.equal(parsed.expiresAt, expiresAt);
+  const rendered = modelRow.components[0].options.slice(1).map((o) => o.data.value);
+  assert.deepEqual(rendered, sortModelsForMenu(models).slice(15, 30).map((m) => m.value), "page 2 renders indexes 15 to 29");
+  const [, thinkingRow] = [null, menu.components[2]];
+  assert.match(thinkingRow.components[0].data.placeholder, /Reasoning: High/, "the saved level is shown on provider pages");
 });
 
 test("paging clamps past the ends and never returns an empty slice", () => {

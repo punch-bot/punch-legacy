@@ -61,8 +61,8 @@ export function sortModelsForMenu(models) {
   });
 }
 
-export function pageCount(total) {
-  return Math.max(1, Math.ceil(total / MODELS_PER_PAGE));
+export function pageCount(total, pageSize = MODELS_PER_PAGE) {
+  return Math.max(1, Math.ceil(total / pageSize));
 }
 
 export function modelPage(models, page, pageSize = MODELS_PER_PAGE) {
@@ -130,7 +130,9 @@ export function renderProviderMenu({ model, thinkingLevel, expiresAt, providers 
     notice,
     `**Model:** \`${model}\``,
     `**Reasoning:** ${thinkingLevelLabel(thinkingLevel || "default")}`,
-    `-# Pick a provider, then a model. Custom model... is always first, and known families sort to the top. Menu expires <t:${Math.floor(expiresAt / 1000)}:R>.`,
+    providers.length
+      ? `-# Pick a provider, then a model. Custom model... comes first, known families sort to the top. Menu expires <t:${Math.floor(expiresAt / 1000)}:R>.`
+      : `-# Pick a model. Menu expires <t:${Math.floor(expiresAt / 1000)}:R>.`,
   ].filter(Boolean).join("\n");
   const rows = [];
   if (!providers.length) {
@@ -146,7 +148,7 @@ export function renderProviderMenu({ model, thinkingLevel, expiresAt, providers 
         .addOptions(providers.slice(0, 25).map((p) => ({
           label: p.name,
           value: p.name,
-          description: `${p.count} model${p.count === 1 ? "" : "s"}`,
+          description: p.count == null ? undefined : `${p.count} model${p.count === 1 ? "" : "s"}`,
         }))),
     ));
   }
@@ -154,7 +156,7 @@ export function renderProviderMenu({ model, thinkingLevel, expiresAt, providers 
   return { content, components: rows };
 }
 
-export function renderProviderModels({ provider, models, page = 0, expiresAt, model, notice = "", now = Date.now() }) {
+export function renderProviderModels({ provider, models, page = 0, expiresAt, model, thinkingLevel, notice = "", now = Date.now() }) {
   if (modelsMenuExpired(expiresAt, now)) {
     return { content: [notice, MODELS_MENU_EXPIRED].filter(Boolean).join("\n"), components: [] };
   }
@@ -209,7 +211,7 @@ export function renderProviderModels({ provider, models, page = 0, expiresAt, mo
         .setStyle(ButtonStyle.Secondary),
     ));
   }
-  rows.push(thinkingRow(undefined, expiresAt));
+  rows.push(thinkingRow(thinkingLevel, expiresAt));
   return { content, components: rows };
 }
 
