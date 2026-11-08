@@ -1885,8 +1885,11 @@ export function registerInteractions(client) {
     }
     await interaction.deferUpdate();
     const provider = interaction.values[0];
-    const menu = await providerModelsMenuFor(interaction.user.id, provider, 0, expiresAt);
-    await interaction.editReply(menu);
+    try {
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, 0, expiresAt));
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ Could not load models for \`${provider}\`: ${err.message}`, components: [] }).catch(() => {});
+    }
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -1898,13 +1901,16 @@ export function registerInteractions(client) {
       return;
     }
     await interaction.deferUpdate();
-    if (base === MODEL_BACK_ID) {
-      await interaction.editReply(await modelsMenuFor(interaction.user.id, expiresAt));
-      return;
+    try {
+      if (base === MODEL_BACK_ID) {
+        await interaction.editReply(await modelsMenuFor(interaction.user.id, expiresAt));
+        return;
+      }
+      const [provider, page] = args;
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, Number(page) || 0, expiresAt));
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ Could not update the model menu: ${err.message}`, components: [] }).catch(() => {});
     }
-    const [provider, page] = args;
-    const menu = await providerModelsMenuFor(interaction.user.id, provider, Number(page) || 0, expiresAt);
-    await interaction.editReply(menu);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {

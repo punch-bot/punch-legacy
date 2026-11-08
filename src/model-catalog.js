@@ -95,7 +95,14 @@ const PROVIDER_MODELS = {
 };
 
 export function discoverableProviders() {
-  return Object.keys(PROVIDER_MODELS);
+  const seenUrls = new Set();
+  const names = [];
+  for (const [name, spec] of Object.entries(PROVIDER_MODELS)) {
+    if (seenUrls.has(spec.url)) continue;
+    seenUrls.add(spec.url);
+    names.push(name);
+  }
+  return names;
 }
 
 const DISCOVERY_TTL_MS = 30 * 60_000;

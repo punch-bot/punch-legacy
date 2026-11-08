@@ -73,6 +73,13 @@ test("a provider page shows custom model first and pages at fifteen", () => {
   assert.match(thinkingRow.components[0].data.placeholder, /Reasoning: High/, "the saved level is shown on provider pages");
 });
 
+test("discoverable providers are deduplicated by endpoint", async () => {
+  const { discoverableProviders } = await import("../src/model-catalog.js");
+  const names = discoverableProviders();
+  assert.equal(names.filter((n) => n === "nim" || n === "nvidia").length, 1, "nvidia and nim share an endpoint, so only one is offered");
+  assert.ok(names.includes("opencode-go"));
+});
+
 test("paging clamps past the ends and never returns an empty slice", () => {
   assert.equal(modelPage(models, 99).page, 2);
   assert.equal(modelPage(models, -5).page, 0);
