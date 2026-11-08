@@ -53,7 +53,7 @@ import {
   extractAttachments,
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
-import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2, peekV2Card, specUsesAttachment } from "./embeds-questions.js";
+import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2, peekV2Card, specUsesAttachment, foldFooterIntoSpec } from "./embeds-questions.js";
 import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
@@ -345,7 +345,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
     if (embedAllErrors.length) notes.push(embedAllErrors.join("; "));
-    if (notes.length) out += (out ? "\n\n" : "") + notesFooter(notes);
+    const proseBeforeNotes = out;
+    const footerText = notes.length ? notesFooter(notes) : "";
+    if (footerText) out += (out ? "\n\n" : "") + footerText;
 
     const sendable = filesToSend.filter((f) => !f.oversize);
     // Files a cv2 spec points at (attachment://name) belong inside the card, not
@@ -356,6 +358,19 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       : [];
     const textFiles = sendable.filter((f) => !cardFiles.includes(f));
     if (sendable.length > 1) console.log(`[attach-debug] WARNING: ${sendable.length} files in sendable: ${sendable.map((f) => `${f.name}(${f.attachment?.length})`).join(", ")}`);
+    // If the card is the whole reply, the stats/context footer belongs inside it.
+    // Otherwise it becomes a second message that only repeats the tool count.
+    if (
+      hasV2Early &&
+      !proseBeforeNotes.trim() &&
+      embeds.length === 0 &&
+      textFiles.length === 0 &&
+      footerText &&
+      Array.isArray(v2[0]?.items)
+    ) {
+      foldFooterIntoSpec(v2[0], footerText);
+      out = "";
+    }
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
     const hasV2 = hasV2Early;
