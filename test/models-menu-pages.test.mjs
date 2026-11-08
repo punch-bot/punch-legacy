@@ -3,12 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   MODELS_PER_PAGE,
+  filterByVendor,
+  formatContext,
   modelPage,
   modelsMenuCustomId,
   parseModelsMenuCustomId,
   renderProviderMenu,
   renderProviderModels,
   sortModelsForMenu,
+  vendorChoices,
 } from "../src/commands/models-menu.js";
 
 const models = Array.from({ length: 40 }, (_, i) => ({
@@ -44,33 +47,59 @@ test("provider menu offers providers and keeps custom model available", () => {
   const [providerRow] = menu.components;
   assert.equal(providerRow.components[0].options.length, 2);
   assert.equal(providerRow.components[0].options[0].data.value, "opencode-go");
-  assert.match(menu.content, /\*\*Model:\*\*/);
+  assert.match(menu.content, /### Current model: `opencode-go\/deepseek-v4\.1-flash`/);
 });
 
-test("a provider page shows custom model first and pages at fifteen", () => {
+test("a provider page shows custom model first, vendors and paging", () => {
   const expiresAt = Date.now() + 60_000;
   const menu = renderProviderModels({
     provider: "openrouter",
     models,
     page: 1,
     expiresAt,
-    model: "openrouter/model-0",
+    model: "openrouter/anthropic/claude-sonnet",
     thinkingLevel: "high",
   });
-  const [modelRow, buttons] = menu.components;
+  const [navRow, modelRow, thinkingRow2, sep, pageRow] = menu.components;
+  assert.equal(navRow.components[0].data.label, "← Back to providers");
+  assert.equal(navRow.components[1].data.disabled, true);
   assert.equal(modelRow.components[0].options[0].data.value, "__custom__");
   assert.equal(modelRow.components[0].options.length, MODELS_PER_PAGE + 1);
-  assert.equal(buttons.components.length, 3);
-  assert.match(menu.content, /page 2\/3/);
-  const next = buttons.components[1];
-  const parsed = parseModelsMenuCustomId(next.data.custom_id);
+  assert.equal(thinkingRow2.components[0].data.placeholder, "Reasoning: High");
+  assert.equal(sep.data.type, 14);
+  assert.equal(pageRow.components[1].data.label, "Page 2 / 3");
+  const parsed = parseModelsMenuCustomId(pageRow.components[2].data.custom_id);
   assert.equal(parsed.base, "model_page");
-  assert.deepEqual(parsed.args, ["openrouter", "2"]);
   assert.equal(parsed.expiresAt, expiresAt);
+  assert.deepEqual(parsed.args, ["openrouter", "-", "2"]);
   const rendered = modelRow.components[0].options.slice(1).map((o) => o.data.value);
-  assert.deepEqual(rendered, sortModelsForMenu(models).slice(15, 30).map((m) => m.value), "page 2 renders indexes 15 to 29");
-  const [, thinkingRow] = [null, menu.components[2]];
-  assert.match(thinkingRow.components[0].data.placeholder, /Reasoning: High/, "the saved level is shown on provider pages");
+  assert.deepEqual(rendered, sortModelsForMenu(models).slice(15, 30).map((m) => m.value));
+});
+
+test("vendors are derived from model ids and filter the list", () => {
+  const mixed = [
+    { label: "Claude Sonnet", value: "openrouter/anthropic/claude-sonnet", contextWindow: 200000 },
+    { label: "GPT-6", value: "openrouter/openai/gpt-6", contextWindow: 400000 },
+    { label: "GPT-6 mini", value: "openrouter/openai/gpt-6-mini", contextWindow: 400000 },
+    { label: "Bare model", value: "openrouter/bare-model" },
+  ];
+  assert.deepEqual(vendorChoices(mixed, "openrouter"), [
+    { name: "openai", count: 2 },
+    { name: "anthropic", count: 1 },
+  ]);
+  assert.equal(filterByVendor(mixed, "openrouter", "openai").length, 2);
+  assert.equal(filterByVendor(mixed, "openrouter", "-").length, 4);
+  const menu = renderProviderModels({ provider: "openrouter", models: mixed, expiresAt: Date.now() + 60_000, model: "openrouter/openai/gpt-6", vendor: "openai" });
+  const vendorRow = menu.components[1];
+  assert.equal(vendorRow.components[0].data.placeholder, "Vendor: openai");
+  assert.equal(vendorRow.components[0].options[0].data.value, "-");
+});
+
+test("context sizes read like a person wrote them", () => {
+  assert.equal(formatContext(1_000_000), "1mil");
+  assert.equal(formatContext(1_048_576), "1.0mil");
+  assert.equal(formatContext(262_144), "262k");
+  assert.equal(formatContext(0), null);
 });
 
 test("discoverable providers are deduplicated by endpoint", async () => {

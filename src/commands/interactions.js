@@ -69,6 +69,8 @@ import {
   CUSTOM_MODEL_MODAL_ID,
   MODEL_BACK_ID,
   MODEL_PAGE_ID,
+  VENDOR_SELECT_ID,
+  ALL_VENDORS,
   MODELS_MENU_EXPIRED,
   MODELS_MENU_TTL_MS,
   MODEL_SELECT_ID,
@@ -78,8 +80,10 @@ import {
   modelsMenuExpired,
   parseModelsMenuCustomId,
   renderModelsMenu,
+  filterByVendor,
   renderProviderModels,
   sortModelsForMenu,
+  vendorChoices,
   thinkingLevelLabel,
 } from "./models-menu.js";
 
@@ -116,11 +120,14 @@ async function providerChoices(apiUrl) {
   for (const model of catalogOptions(catalog)) {
     bump(model.value.split("/")[0], model);
   }
-  for (const provider of DISCOVERABLE_PROVIDERS) {
+  const discoverable = [...DISCOVERABLE_PROVIDERS];
+  const discovered = await Promise.all(discoverable.map((provider) => discoverProviderModels(apiUrl, provider).catch(() => null)));
+  discoverable.forEach((provider, index) => {
     if (!counts.has(provider)) counts.set(provider, new Map());
-  }
+    for (const model of discovered[index] || []) bump(provider, { label: model.label, value: model.value, contextWindow: model.contextWindow });
+  });
   return [...counts.entries()]
-    .map(([name, models]) => ({ name, count: models.size || (DISCOVERABLE_PROVIDERS.has(name) ? null : 0) }))
+    .map(([name, models]) => ({ name, count: models.size }))
     .sort((a, b) => ((b.count || 0) - (a.count || 0)) || a.name.localeCompare(b.name));
 }
 
@@ -156,12 +163,12 @@ async function modelsMenuFor(uid, expiresAt, notice) {
   }
 }
 
-async function providerModelsMenuFor(uid, provider, page, expiresAt, notice) {
+async function providerModelsMenuFor(uid, provider, page, expiresAt, notice, vendor = ALL_VENDORS) {
   const apiUrl = apiUrlFor(uid);
   try {
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
     const models = await modelsForProvider(apiUrl, provider);
-    return renderProviderModels({ provider, models, page, expiresAt, model, thinkingLevel, notice });
+    return renderProviderModels({ provider, models, page, vendor, expiresAt, model, thinkingLevel, notice });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching models for \`${provider}\`: ${err.message}`].filter(Boolean).join("\n"), components: [] };
   }
@@ -1893,6 +1900,24 @@ export function registerInteractions(client) {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isStringSelectMenu()) return;
+    const { base, args, expiresAt } = parseModelsMenuCustomId(interaction.customId);
+    if (base !== VENDOR_SELECT_ID) return;
+    if (modelsMenuExpired(expiresAt)) {
+      await interaction.update({ content: MODELS_MENU_EXPIRED, components: [] });
+      return;
+    }
+    await interaction.deferUpdate();
+    const provider = args[0];
+    const vendor = interaction.values[0];
+    try {
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, 0, expiresAt, "", vendor));
+    } catch (err) {
+      await interaction.editReply({ content: `⚠️ Could not filter by vendor: ${err.message}`, components: [] }).catch(() => {});
+    }
+  });
+
+  client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isButton()) return;
     const { base, args, expiresAt } = parseModelsMenuCustomId(interaction.customId);
     if (base !== MODEL_PAGE_ID && base !== MODEL_BACK_ID) return;
@@ -1906,8 +1931,8 @@ export function registerInteractions(client) {
         await interaction.editReply(await modelsMenuFor(interaction.user.id, expiresAt));
         return;
       }
-      const [provider, page] = args;
-      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, Number(page) || 0, expiresAt));
+      const [provider, vendor, page] = args;
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, Number(page) || 0, expiresAt, "", vendor || ALL_VENDORS));
     } catch (err) {
       await interaction.editReply({ content: `⚠️ Could not update the model menu: ${err.message}`, components: [] }).catch(() => {});
     }
