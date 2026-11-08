@@ -483,6 +483,8 @@ const CONTEXT_LIMITS = {
   "openai/gpt-4.1": 1000000,
   "google/gemini-2.0-flash": 1000000,
   "google/gemini-2.5-pro": 1000000,
+  "mistral/mistral-large-4": 1048576,
+  "mistral/mistral-medium-3.5": 262144,
   "opencode/big-pickle": 200000,
   "opencode/deepseek-v4-flash-free": 200000,
   "opencode/mimo-v2.5-free": 200000,
@@ -492,7 +494,7 @@ const CONTEXT_LIMITS = {
 };
 const DEFAULT_CONTEXT_LIMIT = Number(process.env.PI_CONTEXT_LIMIT) || 128000;
 
-function contextLimitFor(model) {
+export function contextLimitFor(model) {
   if (!model) return DEFAULT_CONTEXT_LIMIT;
   if (CONTEXT_LIMITS[model]) return CONTEXT_LIMITS[model];
   const [prov] = model.split("/");
@@ -501,7 +503,7 @@ function contextLimitFor(model) {
   if (prov === "anthropic") return 200000;
   if (prov === "opencode" || prov === "opencode-go") return 200000;
   if (prov === "nvidia") return 131072;
-  if (prov === "mistral") return 1048576;
+  if (prov === "mistral") return 262144;
   return DEFAULT_CONTEXT_LIMIT;
 }
 
