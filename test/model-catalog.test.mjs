@@ -82,3 +82,42 @@ test("builtin model list survives with no catalog at all", () => {
   const options = modelsMenuOptions([]);
   assert.equal(options.length, MODEL_LIST.length);
 });
+
+test("discovery parses an opencode-style models payload", async () => {
+  const { parseModelList, discoveryCommand, discoverProviderModels, discoveredModel, clearDiscoveryCache } = await import("../src/model-catalog.js");
+  clearDiscoveryCache();
+  const cmd = discoveryCommand("opencode-go");
+  assert.match(cmd.command, /opencode\.ai\/inference\/go\/v1\/models/);
+  assert.match(cmd.command, /\$OPENCODE_API_KEY/);
+  const models = parseModelList("opencode-go", {
+    object: "list",
+    data: [
+      { id: "deepseek-v4.1-flash", type: "chat", limit: { context: 1000000, output: 384000 } },
+      { id: "text-embedding", type: "embedding" },
+    ],
+  });
+  assert.equal(models.length, 1);
+  assert.equal(models[0].contextWindow, 1000000);
+
+  const runner = async () => ({ stdout: JSON.stringify({ data: [{ id: "deepseek-v4.1-flash", limit: { context: 1000000 } }] }) });
+  await discoverProviderModels("http://sandbox.test:4097", "opencode-go", { force: true, runner });
+  assert.equal(discoveredModel("http://sandbox.test:4097", "opencode-go", "opencode-go/deepseek-v4.1-flash").contextWindow, 1000000);
+
+  const groq = parseModelList("groq", { data: [{ id: "llama3-8b-8192", context_window: 8192 }] });
+  assert.equal(groq[0].contextWindow, 8192, "context_window is read like the other spellings");
+
+  let calls = 0;
+  const failing = async () => {
+    calls += 1;
+    return { exitCode: 22, stdout: "" };
+  };
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(await discoverProviderModels("http://sandbox.test:4097", "deepseek", { force: true, runner: failing }), null);
+    assert.equal(await discoverProviderModels("http://sandbox.test:4097", "deepseek", { runner: failing }), null);
+    assert.equal(calls, 1, "a non-zero exit fails, and the failure is cached instead of retried every turn");
+  } finally {
+    console.error = originalError;
+  }
+});

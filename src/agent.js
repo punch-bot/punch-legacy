@@ -3,7 +3,7 @@ import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
 import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
 import { supervisorAuth } from "./core/config.js";
-import { catalogModel, loadCatalog } from "./model-catalog.js";
+import { catalogModel, discoveredModel, discoverProviderModels, loadCatalog } from "./model-catalog.js";
 
 const DEFAULT_SERVER = (process.env.PI_SERVER_URL || "").replace(/\/$/, "");
 const DEFAULT_API_URL = (() => {
@@ -499,6 +499,8 @@ export function contextLimitFor(model, apiUrl = null) {
   if (!model) return DEFAULT_CONTEXT_LIMIT;
   const reported = apiUrl ? catalogModel(apiUrl, model) : null;
   if (reported?.contextWindow) return reported.contextWindow;
+  const live = apiUrl ? discoveredModel(apiUrl, String(model).split("/")[0], model) : null;
+  if (live?.contextWindow) return live.contextWindow;
   if (CONTEXT_LIMITS[model]) return CONTEXT_LIMITS[model];
   const [prov] = model.split("/");
   const prefixHit = Object.entries(CONTEXT_LIMITS).find(([k]) => model.startsWith(k) || k.startsWith(model));
@@ -679,6 +681,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       const cost = Number(msg.info?.cost) || 0;
       const catalogUrl = apiUrlFor(userId);
       await loadCatalog(catalogUrl).catch(() => null);
+      void discoverProviderModels(catalogUrl, activeProvider).catch(() => null);
       const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`, catalogUrl);
       const tokenUsage = msg.info?.tokens || null;
       return {
