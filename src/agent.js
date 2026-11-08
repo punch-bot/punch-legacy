@@ -501,6 +501,7 @@ function contextLimitFor(model) {
   if (prov === "anthropic") return 200000;
   if (prov === "opencode" || prov === "opencode-go") return 200000;
   if (prov === "nvidia") return 131072;
+  if (prov === "mistral") return 1048576;
   return DEFAULT_CONTEXT_LIMIT;
 }
 

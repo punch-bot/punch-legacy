@@ -42,6 +42,8 @@ export const MODEL_LIST = [
   { label: "Poolside Laguna XS", value: "poolside/poolside/laguna-xs-2.1", emoji: "🏊" },
   { label: "NIM GLM-5.3 (z-ai)", value: "nvidia/z-ai/glm-5.3", emoji: "💚" },
   { label: "NIM Nemotron 3 Ultra", value: "nvidia/nvidia/nemotron-3-ultra-550b-a55b", emoji: "💚" },
+  { label: "Mistral Large 4 (le chonk)", value: "mistral/mistral-large-4", emoji: "🐈" },
+  { label: "Mistral Medium 3.5", value: "mistral/mistral-medium-3.5", emoji: "🐈" },
   { label: "Custom model...", value: "__custom__", emoji: "✏️" },
 ];
 
@@ -56,7 +58,7 @@ export const THINKING_LEVEL_LIST = [
   { label: "Max", value: "max", description: "Only some models" },
 ];
 
-export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia"];
+export const PROVIDER_NAMES = ["anthropic", "openai", "openrouter", "google", "deepseek", "groq", "together", "poolside", "opencode", "opencode-go", "nvidia", "mistral"];
 
 export function supervisorAuth(url) {
   const password = supervisorPasswordForUrl(url) ?? (process.env.PI_SERVER_PASSWORD || "");
