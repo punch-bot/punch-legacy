@@ -53,7 +53,7 @@ import {
   extractAttachments,
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
-import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2 } from "./embeds-questions.js";
+import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2, editV2, peekV2Card } from "./embeds-questions.js";
 import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
@@ -380,9 +380,15 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       // later cards send as new messages.
       for (let i = 0; i < v2.length; i++) {
         const spec = v2[i];
-        if (i === 0 && opts.cv2EditMessageId) {
+        // Prefer the id handed over by the click handler; fall back to the
+        // newest card this user has in this channel so an answered card still
+        // continues in place when the interaction state was lost.
+        const editId = i === 0
+          ? (opts.cv2EditMessageId || peekV2Card(message.channelId, uid))
+          : null;
+        if (editId) {
           try {
-            const card = await message.channel.messages.fetch(opts.cv2EditMessageId);
+            const card = await message.channel.messages.fetch(editId);
             if (card && await editV2(card, spec, uid)) continue;
           } catch (err) {
             console.error("[cv2] inline edit failed, falling back to new message:", err.message);

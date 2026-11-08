@@ -9,7 +9,7 @@ import {
 } from "discord.js";
 import { registry } from "../core/registry.js";
 import { enqueueChat } from "../chat/queue.js";
-import { buildV2AnsweredComponents } from "../chat/embeds-questions.js";
+import { buildV2AnsweredComponents, markV2CardAnswered } from "../chat/embeds-questions.js";
 
 // Answered cards keep their content: V2 questions re-render their spec without
 // button rows plus an answer note, since wiping components would delete the
@@ -21,6 +21,7 @@ async function settleAnswerInteraction(interaction, state, note) {
   }
   const components = buildV2AnsweredComponents(state.specItems, state.accent, note);
   await interaction.update({ components }).catch(() => {});
+  markV2CardAnswered(interaction.channelId, state.fromUserId, interaction.message.id);
 }
 
 async function handleQuestionInteraction(interaction) {
