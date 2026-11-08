@@ -37,7 +37,7 @@ import {
 } from "../agent.js";
 
 import { MODEL_LIST, PROVIDER_NAMES, isBotOwner, supervisorAuth } from "../core/config.js";
-import { catalogOptions, discoverProviderModels, discoverableProviders, loadCatalog } from "../model-catalog.js";
+import { catalogModel, catalogOptions, discoverProviderModels, discoverableProviders, loadCatalog } from "../model-catalog.js";
 import { registry } from "../core/registry.js";
 import { createDoctorRepairToken, progressBar } from "../core/discord.js";
 import { validateAutoCompressThreshold } from "../context-compression.js";
@@ -164,12 +164,24 @@ async function modelsMenuFor(uid, expiresAt, notice) {
   }
 }
 
+function describeCurrentModel(apiUrl, provider, models, model) {
+  const match = models.find((m) => m.value === model);
+  const staticEntry = MODEL_LIST.find((m) => m.value === model);
+  const catalogEntry = catalogModel(apiUrl, model);
+  return {
+    modelLabel: match?.label || staticEntry?.label || catalogEntry?.label || null,
+    modelDescription: match?.description || catalogEntry?.description || null,
+    modelContextWindow: match?.contextWindow || catalogEntry?.contextWindow || null,
+  };
+}
+
 async function providerModelsMenuFor(uid, provider, page, expiresAt, notice, vendor = ALL_VENDORS) {
   const apiUrl = apiUrlFor(uid);
   try {
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
     const models = await modelsForProvider(apiUrl, provider);
-    return renderProviderModels({ provider, models, page, vendor, expiresAt, model, thinkingLevel, notice });
+    const meta = describeCurrentModel(apiUrl, provider, models, model);
+    return renderProviderModels({ provider, models, page, vendor, expiresAt, model, thinkingLevel, notice, ...meta });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching models for \`${provider}\`: ${err.message}`].filter(Boolean).join("\n"), components: [] };
   }

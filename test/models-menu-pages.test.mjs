@@ -59,15 +59,20 @@ test("a provider page shows custom model first, vendors and paging", () => {
     page: 1,
     expiresAt,
     model: "openrouter/anthropic/claude-sonnet",
+    modelLabel: "Claude Sonnet",
+    modelContextWindow: 200000,
+    modelDescription: "Long-context reasoning model.",
     thinkingLevel: "high",
   });
   const [navRow, modelRow, thinkingRow2, pageRow] = menu.components;
+  assert.match(menu.content, /### Current model: Claude Sonnet/, "the current model shows its label, not the raw id");
+  assert.doesNotMatch(menu.content, /\d+ models · expires/, "the count moved to the page indicator");
   assert.equal(navRow.components[0].data.label, "← Back to providers");
   assert.equal(navRow.components[1].data.disabled, true);
   assert.equal(modelRow.components[0].options[0].data.value, "__custom__");
   assert.equal(modelRow.components[0].options.length, MODELS_PER_PAGE + 1);
   assert.equal(thinkingRow2.components[0].data.placeholder, "Reasoning: High");
-  assert.equal(pageRow.components[1].data.label, "Page 2 / 3");
+  assert.equal(pageRow.components[1].data.label, "Page 2 / 3 · 40 models");
   const parsed = parseModelsMenuCustomId(pageRow.components[2].data.custom_id);
   assert.equal(parsed.base, "model_page");
   assert.equal(parsed.expiresAt, expiresAt);

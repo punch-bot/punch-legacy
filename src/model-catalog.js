@@ -18,6 +18,7 @@ function normalizeModel(name, provider, model) {
     contextWindow,
     maxTokens: Number(model?.maxTokens ?? model?.max_tokens ?? model?.limit?.output ?? 0) || 0,
     reasoning: Boolean(model?.reasoning ?? model?.capabilities?.reasoning?.supported),
+    description: String(model?.description || "").replace(/\s+/g, " ").trim().slice(0, 240),
     input: Array.isArray(model?.input) ? model.input : ["text"],
     remote: Boolean(provider?.baseUrl),
   };

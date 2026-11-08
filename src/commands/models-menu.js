@@ -131,11 +131,14 @@ function thinkingRow(level, expiresAt) {
   );
 }
 
-function currentBlock({ model, label, provider, contextWindow }) {
+function currentBlock({ model, label, provider, contextWindow, description }) {
+  const head = label && label !== model ? label : `\`${model}\``;
+  const meta = [provider || "unknown provider", contextWindow ? `${formatContext(contextWindow)} context` : null].filter(Boolean).join(" · ");
   return [
-    `### Current model: ${label || `\`${model}\``}`,
-    `-# ${provider || "unknown provider"}${contextWindow ? ` · ${formatContext(contextWindow)} context` : ""}`,
-  ].join("\n");
+    `### Current model: ${head}`,
+    `-# ${meta}`,
+    description ? description : null,
+  ].filter(Boolean).join("\n");
 }
 
 export function modelsMenuOptions(extraModels = [], log = console.log) {
@@ -211,6 +214,9 @@ export function renderProviderModels({
   vendor = ALL_VENDORS,
   expiresAt,
   model,
+  modelLabel,
+  modelDescription,
+  modelContextWindow,
   thinkingLevel,
   notice = "",
   now = Date.now(),
@@ -222,16 +228,16 @@ export function renderProviderModels({
   const scoped = filterByVendor(models, provider, vendor);
   const sorted = sortModelsForMenu(scoped);
   const { page: safePage, pages, slice } = modelPage(sorted, page);
-  const current = models.find((m) => m.value === model);
   const content = [
     notice,
     currentBlock({
       model,
-      label: current?.label,
-      provider: current ? String(current.value).split("/")[0] : provider,
-      contextWindow: current?.contextWindow,
+      label: modelLabel,
+      provider: String(model || "").split("/")[0],
+      contextWindow: modelContextWindow,
+      description: modelDescription,
     }),
-    `-# ${provider}${vendor !== ALL_VENDORS ? ` / ${vendor}` : ""} · ${sorted.length} model${sorted.length === 1 ? "" : "s"} · expires <t:${Math.floor(expiresAt / 1000)}:R>.`,
+    `-# ${vendor !== ALL_VENDORS ? `${provider} / ${vendor} · ` : ""}expires <t:${Math.floor(expiresAt / 1000)}:R>.`,
   ].filter(Boolean).join("\n");
 
   const rows = [
@@ -284,7 +290,7 @@ export function renderProviderModels({
       .setDisabled(safePage <= 0),
     new ButtonBuilder()
       .setCustomId(modelsMenuCustomId(MODEL_PAGE_ID, expiresAt, provider, vendor, String(safePage)))
-      .setLabel(`Page ${safePage + 1} / ${pages}`)
+      .setLabel(`Page ${safePage + 1} / ${pages} · ${sorted.length} model${sorted.length === 1 ? "" : "s"}`.slice(0, 80))
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(true),
     new ButtonBuilder()
