@@ -80,3 +80,74 @@ export function catalogOptions(catalog) {
 export function clearCatalogCache() {
   cache.clear();
 }
+
+const PROVIDER_MODELS = {
+  "opencode-go": { url: "https://opencode.ai/inference/go/v1/models", key: "OPENCODE_API_KEY" },
+  openrouter: { url: "https://openrouter.ai/api/v1/models", key: "OPENROUTER_API_KEY" },
+  nvidia: { url: "https://integrate.api.nvidia.com/v1/models", key: "NVIDIA_API_KEY" },
+  nim: { url: "https://integrate.api.nvidia.com/v1/models", key: "NVIDIA_API_KEY" },
+  deepseek: { url: "https://api.deepseek.com/models", key: "DEEPSEEK_API_KEY" },
+  groq: { url: "https://api.groq.com/openai/v1/models", key: "GROQ_API_KEY" },
+  together: { url: "https://api.together.xyz/v1/models", key: "TOGETHER_API_KEY" },
+  openai: { url: "https://api.openai.com/v1/models", key: "OPENAI_API_KEY" },
+  poolside: { url: "https://inference.poolside.ai/v1/models", key: "POOLSIDE_API_KEY" },
+  mistral: { url: "https://api.mistral.ai/v1/models", key: "MISTRAL_API_KEY" },
+};
+
+const DISCOVERY_TTL_MS = 30 * 60_000;
+const discovery = new Map();
+
+export function discoveryCommand(provider) {
+  const spec = PROVIDER_MODELS[provider];
+  if (!spec) return null;
+  return {
+    command: `curl -sf --max-time 20 ${spec.url} -H "Authorization: Bearer $${spec.key}"`,
+    timeout: 30_000,
+  };
+}
+
+export async function runSandboxCommand(apiUrl, command, timeout = 30_000) {
+  const res = await fetch(`${apiUrl}/tasks/exec`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: supervisorAuth(apiUrl) },
+    body: JSON.stringify({ command, timeout }),
+    signal: AbortSignal.timeout(timeout + 5_000),
+  });
+  if (!res.ok) throw new Error(`exec ${res.status}`);
+  return res.json();
+}
+
+export function parseModelList(provider, payload) {
+  const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.models) ? payload.models : [];
+  return rows.filter((row) => row?.type !== "embedding").map((row) => normalizeModel(provider, {}, row)).filter(Boolean);
+}
+
+export async function discoverProviderModels(apiUrl, provider, { force = false, runner = runSandboxCommand } = {}) {
+  if (!apiUrl || !provider) return null;
+  const spec = discoveryCommand(provider);
+  if (!spec) return null;
+  const cacheKey = `${apiUrl}:${provider}`;
+  const cached = discovery.get(cacheKey);
+  if (!force && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.models;
+  try {
+    const out = await runner(apiUrl, spec.command, spec.timeout);
+    const models = parseModelList(provider, JSON.parse(out.stdout || "{}"));
+    if (!models.length) return cached?.models ?? null;
+    discovery.set(cacheKey, { at: Date.now(), models });
+    return models;
+  } catch (err) {
+    console.error(`[catalog] discovery failed for ${provider}: ${err.message}`);
+    return cached?.models ?? null;
+  }
+}
+
+export function discoveredModel(apiUrl, provider, modelId) {
+  const models = discovery.get(`${apiUrl}:${provider}`)?.models;
+  if (!models || !modelId) return null;
+  const bare = String(modelId).includes("/") ? String(modelId).slice(String(modelId).indexOf("/") + 1) : String(modelId);
+  return models.find((m) => m.id === bare || m.value === modelId) || null;
+}
+
+export function clearDiscoveryCache() {
+  discovery.clear();
+}

@@ -82,3 +82,32 @@ test("builtin model list survives with no catalog at all", () => {
   const options = modelsMenuOptions([]);
   assert.equal(options.length, MODEL_LIST.length);
 });
+
+test("discovery parses an opencode-style models payload", async () => {
+  const { parseModelList, discoveryCommand, discoverProviderModels, discoveredModel, clearDiscoveryCache } = await import("../src/model-catalog.js");
+  clearDiscoveryCache();
+  const cmd = discoveryCommand("opencode-go");
+  assert.match(cmd.command, /opencode\.ai\/inference\/go\/v1\/models/);
+  assert.match(cmd.command, /\$OPENCODE_API_KEY/);
+  const models = parseModelList("opencode-go", {
+    object: "list",
+    data: [
+      { id: "deepseek-v4.1-flash", type: "chat", limit: { context: 1000000, output: 384000 } },
+      { id: "text-embedding", type: "embedding" },
+    ],
+  });
+  assert.equal(models.length, 1);
+  assert.equal(models[0].contextWindow, 1000000);
+
+  const runner = async () => ({ stdout: JSON.stringify({ data: [{ id: "deepseek-v4.1-flash", limit: { context: 1000000 } }] }) });
+  await discoverProviderModels("http://sandbox.test:4097", "opencode-go", { force: true, runner });
+  assert.equal(discoveredModel("http://sandbox.test:4097", "opencode-go", "opencode-go/deepseek-v4.1-flash").contextWindow, 1000000);
+});
+
+test("unsupported providers and failed discovery stay quiet", async () => {
+  const { discoverProviderModels, discoveryCommand, clearDiscoveryCache } = await import("../src/model-catalog.js");
+  clearDiscoveryCache();
+  assert.equal(discoveryCommand("anthropicish-not-known"), null);
+  const runner = async () => ({ stdout: "not json" });
+  assert.equal(await discoverProviderModels("http://sandbox.test:4097", "groq", { force: true, runner }), null);
+});
