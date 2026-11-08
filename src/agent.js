@@ -681,7 +681,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
       const cost = Number(msg.info?.cost) || 0;
       const catalogUrl = apiUrlFor(userId);
       await loadCatalog(catalogUrl).catch(() => null);
-      await discoverProviderModels(catalogUrl, activeProvider).catch(() => null);
+      void discoverProviderModels(catalogUrl, activeProvider).catch(() => null);
       const usage = extractContextUsage(msg.info, `${activeProvider}/${activeModel}`, catalogUrl);
       const tokenUsage = msg.info?.tokens || null;
       return {

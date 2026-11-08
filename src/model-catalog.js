@@ -8,7 +8,7 @@ function normalizeModel(name, provider, model) {
   if (!id) return null;
   const fullId = `${name}/${id}`;
   const contextWindow = Number(
-    model?.contextWindow ?? model?.context_length ?? model?.context ?? model?.limit?.context ?? 0,
+    model?.contextWindow ?? model?.context_length ?? model?.context_window ?? model?.context ?? model?.limit?.context ?? 0,
   ) || 0;
   return {
     provider: name,
@@ -131,12 +131,14 @@ export async function discoverProviderModels(apiUrl, provider, { force = false, 
   if (!force && cached && Date.now() - cached.at < DISCOVERY_TTL_MS) return cached.models;
   try {
     const out = await runner(apiUrl, spec.command, spec.timeout);
+    if (out?.exitCode !== undefined && out.exitCode !== 0) throw new Error(`exec exit ${out.exitCode}`);
     const models = parseModelList(provider, JSON.parse(out.stdout || "{}"));
-    if (!models.length) return cached?.models ?? null;
+    if (!models.length) throw new Error("no models in response");
     discovery.set(cacheKey, { at: Date.now(), models });
     return models;
   } catch (err) {
     console.error(`[catalog] discovery failed for ${provider}: ${err.message}`);
+    discovery.set(cacheKey, { at: Date.now(), models: cached?.models ?? [] });
     return cached?.models ?? null;
   }
 }
