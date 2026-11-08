@@ -53,7 +53,7 @@ import {
   extractAttachments,
 } from "./attachments.js";
 import { persistMemoryTags } from "./memory-tags.js";
-import { extractEmbeds, extractQuestions, sendQuestion } from "./embeds-questions.js";
+import { extractEmbeds, extractQuestions, sendQuestion, extractV2, sendV2 } from "./embeds-questions.js";
 import { escapeStrayMarkdown, notesFooter } from "../discord-markdown.js";
 import { formatReplyNewlines } from "../reply-format.js";
 import { progressSettingsFor } from "./context.js";
@@ -310,7 +310,9 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     }
 
     const { clean: textAfterEmbeds, embeds, errors: embedErrors } = extractEmbeds(out);
-    const { clean: textAfterQuestions, questions } = extractQuestions(textAfterEmbeds);
+    const { clean: textAfterV2, v2, errors: v2Errors } = extractV2(textAfterEmbeds);
+    const { clean: textAfterQuestions, questions } = extractQuestions(textAfterV2);
+    const embedAllErrors = [...embedErrors, ...v2Errors];
     out = formatReplyNewlines(textAfterQuestions || "");
 
     let capturedMemory = { notesAdded: 0, factsAdded: 0, facts: [] };
@@ -342,21 +344,22 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
     if (agentAttachments.length) notes.push(`parsed ${agentAttachments.length} attachment(s)`);
     if (skippedAttach.length) notes.push(`skipped ${skippedAttach.length} file(s) over ${Math.round(MAX_ATTACHMENT_BYTES / 1048576)}MB`);
     if (oversizeNote(filesToSend)) notes.push(oversizeNote(filesToSend));
-    if (embedErrors.length) notes.push(embedErrors.join("; "));
+    if (embedAllErrors.length) notes.push(embedAllErrors.join("; "));
     if (notes.length) out += (out ? "\n\n" : "") + notesFooter(notes);
 
     const sendable = filesToSend.filter((f) => !f.oversize);
     if (sendable.length > 1) console.log(`[attach-debug] WARNING: ${sendable.length} files in sendable: ${sendable.map((f) => `${f.name}(${f.attachment?.length})`).join(", ")}`);
     const hasText = Boolean(out.trim());
     const hasNotes = notes.length > 0;
+    const hasV2 = v2.length > 0;
     const reactionOnly =
       !hasText && !hasNotes && sendable.length === 0 &&
-      reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0;
+      reactEmojis.length > 0 && embeds.length === 0 && questions.length === 0 && !hasV2;
 
     const label = labelLineFor(uid);
     const activityStatus = res.activity?.status || "completed";
 
-    const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0;
+    const hasResult = out.trim() || sendable.length > 0 || embeds.length > 0 || questions.length > 0 || hasV2;
     if (hasResult) {
       if (progressRenderer) {
         const [primary = "", ...overflow] = chunk(out, 1_650);
@@ -369,6 +372,12 @@ async function handleChat(message, text, contextMessages = [], existingThinking 
       }
       for (const q of questions) {
         await sendQuestion(message.channel, q, uid);
+      }
+      // Components V2 messages must be standalone (no content/embeds), sent
+      // after the settled text so the layout reads as its own block. This
+      // holds for both plain and progress-settled turns.
+      for (const spec of v2) {
+        await sendV2(message.channel, spec, uid, sendable);
       }
     }
     if (!hasResult || !progressRenderer) {
