@@ -40,16 +40,19 @@ async function fireMemoryAudit(routine) {
   console.log(`[routines] firing memory audit ${routine.id} uid=${uid}`);
   const res = await withUserRunLock(uid, async () => {
     let contextId = null;
-    if (store.getMemoryStatus().available) {
+    if (!store.getMemoryStatus().available) throw new Error("Memory audit cannot run while the memory store is unavailable.");
+    const retainedContext = routine.agentRequest?.auditContextId;
+    if (!retainedContext) {
       try { store.compactMemory({ userId: uid }); } catch (error) {
         console.warn(`[routines] memory audit ${routine.id} compaction failed: ${error.message}`);
       }
-      contextId = beginMemoryAudit(uid);
     }
+    contextId = beginMemoryAudit(uid, retainedContext);
+    if (routine.agentRequest) saveRoutineRequest(routine, { auditContextId: contextId });
     try {
       return await runRoutineAgent(routine, `[user:${uid}] (memory audit):\n${memoryAuditBlock(contextId)}`, null, uid);
     } finally {
-      if (contextId) endMemoryAudit(contextId);
+      if (contextId && !routine.agentRequest) endMemoryAudit(contextId);
     }
   });
   state.recordActivity({

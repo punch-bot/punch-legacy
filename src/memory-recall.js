@@ -45,9 +45,14 @@ export function recallForSandbox(identity, body) {
   return { text };
 }
 
-export function beginMemoryAudit(userId) {
+export function beginMemoryAudit(userId, contextId = null) {
   const now = Date.now();
   for (const [id, audit] of audits) if (audit.expires <= now) audits.delete(id);
+  if (contextId) {
+    const existing = audits.get(contextId);
+    if (!existing || existing.userId !== String(userId)) throw forbidden("Memory audit context expired or was lost; explicitly resume the failed routine to start a new audit.");
+    return contextId;
+  }
   const id = randomUUID();
   audits.set(id, { userId: String(userId), expires: now + AUDIT_TTL_MS, run: newAuditRun() });
   return id;

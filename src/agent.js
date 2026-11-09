@@ -705,7 +705,7 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
         attachments: [],
       };
     } catch (err) {
-      if (attempt === 0 && sessionId && /session not found/i.test(err.message)) {
+      if (attempt === 0 && sid && /session not found/i.test(err.message)) {
         console.log(`[pi] session ${sid} not found, creating new one`);
         sid = await createSession(userId);
         onSession?.(sid);

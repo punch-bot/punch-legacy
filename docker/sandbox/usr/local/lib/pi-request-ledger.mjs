@@ -25,7 +25,7 @@ export class PromptRequestLedger {
     this.#db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = FULL;
-      PRAGMA busy_timeout = 5000;
+      PRAGMA busy_timeout = 0;
       CREATE TABLE IF NOT EXISTS requests (
         id TEXT PRIMARY KEY,
         fingerprint TEXT NOT NULL,
