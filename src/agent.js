@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { getUserSettings } from "./memory.js";
 import { sanitizeProgressText } from "./progress-ui.js";
 import { doctorTokenFor, USERS_FILE } from "./sandbox-manager.js";
@@ -338,6 +339,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
   const url = `${srv}${path}`;
   const postAC = new AbortController();
   const sseAC = new AbortController();
+  const requestBody = JSON.stringify({ ...body, requestId: randomUUID() });
 
   if (signal) {
     if (signal.aborted) {
@@ -347,6 +349,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
       signal.addEventListener("abort", () => {
         postAC.abort();
         sseAC.abort();
+        void abortSession(sid, userId);
       }, { once: true });
     }
   }
@@ -430,7 +433,7 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
         res = await fetch(url, {
           method: "POST",
           headers: headers(url),
-          body: JSON.stringify(body ?? {}),
+          body: requestBody,
           signal: postAC.signal,
         });
       } catch (err) {
