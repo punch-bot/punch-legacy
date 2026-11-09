@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { endMemoryAudit } from "./memory-recall.js";
 import * as chrono from "chrono-node";
 import cronParser from "cron-parser";
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getTimeZoneOffsetMinutes, localDateParts, normalizeTimeZone, zonedWallTimeToUtc } from "./timezone.js";
@@ -99,6 +100,7 @@ for (const routine of routines) {
     routine.state = "failed";
     routine.enabled = false;
     routine.lastError = "Interrupted by bot restart; paused to avoid duplicate execution.";
+    clearRoutineRequest(routine);
     history.push({ id: newId(), routineId: routine.id, userId: routine.userId, status: "failed", attempt: routine.attempts || 1, startedAt: routine.startedAt || Date.now(), finishedAt: Date.now(), error: routine.lastError, recovered: true });
   }
 }
@@ -297,6 +299,11 @@ export function removeRoutine(id, userId) {
 export function setRoutineEnabled(id, userId, enabled) {
   const routine = routines.find((entry) => entry.id === id && entry.userId === userId);
   if (!routine) return null;
+  const restarting = Boolean(enabled) && (!routine.enabled || routine.state === "failed");
+  if (restarting) {
+    clearRoutineRequest(routine);
+    routine.attempts = 0;
+  }
   routine.enabled = Boolean(enabled);
   routine.state = routine.enabled ? "queued" : routine.state;
   routine.lastError = routine.enabled ? null : routine.lastError;
@@ -319,7 +326,19 @@ function appendHistory(entry) {
   saveHistory();
 }
 
+function clearRoutineRequest(routine) {
+  if (routine.agentRequest?.auditContextId) endMemoryAudit(routine.agentRequest.auditContextId);
+  delete routine.agentRequest;
+}
+
+export function saveRoutineRequest(routine, value) {
+  if (getRoutine(routine.id) !== routine || !routine.agentRequest) throw new Error("routine occurrence is no longer active");
+  Object.assign(routine.agentRequest, value);
+  saveRoutines();
+}
+
 function markStarted(routine) {
+  routine.agentRequest ||= { id: randomUUID(), sessionId: null, body: null };
   routine.state = "running";
   routine.attempts += 1;
   routine.startedAt = Date.now();
@@ -329,6 +348,7 @@ function markStarted(routine) {
 }
 
 function completeRoutine(routine, execution) {
+  clearRoutineRequest(routine);
   const finishedAt = Date.now();
   execution.status = "succeeded";
   execution.finishedAt = finishedAt;
@@ -355,6 +375,7 @@ function failRoutine(routine, execution, error) {
   appendHistory(execution);
   routine.lastError = message;
   if (routine.attempts >= MAX_ATTEMPTS) {
+    clearRoutineRequest(routine);
     routine.state = "failed";
     routine.enabled = false;
   } else {

@@ -19,12 +19,18 @@ import {
 } from "../chat/embeds-questions.js";
 import { withUserRunLock, labelLineFor } from "../chat/queue.js";
 import { beginMemoryAudit, endMemoryAudit } from "../memory-recall.js";
-import { MEMORY_AUDIT_TYPE, syncMemoryAudits } from "../routines.js";
+import { MEMORY_AUDIT_TYPE, syncMemoryAudits, saveRoutineRequest } from "../routines.js";
 import { loadUsers } from "../sandbox-manager.js";
 import { memoryAuditBlock } from "../prompt-blocks.js";
 
 function syncMemoryAuditRoutines() {
   syncMemoryAudits(loadUsers().map((user) => ({ userId: user.userId, timezone: store.getUserSettings(user.userId).timeZone })));
+}
+
+function runRoutineAgent(routine, prompt, sessionId, uid) {
+  const saved = routine.agentRequest;
+  const request = saved ? { ...saved, save: value => saveRoutineRequest(routine, value) } : null;
+  return runAgent(prompt, sessionId, null, null, uid, [], null, request);
 }
 
 async function fireMemoryAudit(routine) {
@@ -34,16 +40,19 @@ async function fireMemoryAudit(routine) {
   console.log(`[routines] firing memory audit ${routine.id} uid=${uid}`);
   const res = await withUserRunLock(uid, async () => {
     let contextId = null;
-    if (store.getMemoryStatus().available) {
+    if (!store.getMemoryStatus().available) throw new Error("Memory audit cannot run while the memory store is unavailable.");
+    const retainedContext = routine.agentRequest?.auditContextId;
+    if (!retainedContext) {
       try { store.compactMemory({ userId: uid }); } catch (error) {
         console.warn(`[routines] memory audit ${routine.id} compaction failed: ${error.message}`);
       }
-      contextId = beginMemoryAudit(uid);
     }
+    contextId = beginMemoryAudit(uid, retainedContext);
+    if (routine.agentRequest) saveRoutineRequest(routine, { auditContextId: contextId });
     try {
-      return await runAgent(`[user:${uid}] (memory audit):\n${memoryAuditBlock(contextId)}`, null, null, null, uid);
+      return await runRoutineAgent(routine, `[user:${uid}] (memory audit):\n${memoryAuditBlock(contextId)}`, null, uid);
     } finally {
-      if (contextId) endMemoryAudit(contextId);
+      if (contextId && !routine.agentRequest) endMemoryAudit(contextId);
     }
   });
   state.recordActivity({
@@ -81,7 +90,7 @@ async function fireRoutine(routine) {
 
     try {
       const res = await withUserRunLock(uid, () =>
-        runAgent(prompt, existingSession, null, null, uid),
+        runRoutineAgent(routine, prompt, existingSession, uid),
       );
       state.setHeartbeatSession(uid, res.sessionId);
 
@@ -203,7 +212,7 @@ async function fireRoutine(routine) {
   console.log(`[routines] firing llm routine ${routine.id} uid=${uid} cid=${cid}`);
   const sessionId = routine.isolatedSession ? null : store.getSession(cid);
   const res = await withUserRunLock(uid, () =>
-    runAgent(prompt, sessionId, null, null, uid),
+    runRoutineAgent(routine, prompt, sessionId, uid),
   );
   if (!routine.isolatedSession) store.setSession(cid, res.sessionId);
 

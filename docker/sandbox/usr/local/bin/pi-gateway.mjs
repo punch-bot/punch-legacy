@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { isTurnSettledEvent } from "/usr/local/lib/pi-turn-completion.mjs";
+import { PromptRequestLedger } from "/usr/local/lib/pi-request-ledger.mjs";
 import { syncPiSkillSettings } from "/usr/local/lib/skills-manager.mjs";
 import {
   mergePiSettings,
@@ -192,6 +193,7 @@ function enqueueTurn(work) {
   return previous.catch(() => {}).then(work).finally(release);
 }
 const sessions = new Map();
+const promptRequests = new PromptRequestLedger(`${SESSION_MAP_FILE}.requests.sqlite`);
 const turnProgress = new Map();
 let activeLogicalId = null;
 
@@ -998,13 +1000,18 @@ const server = createServer(async (req, res) => {
         const userText = textPart?.text || "";
         const system = body.system || "";
         const model = body.model;
-
+        const requestId = body.requestId;
+        if (requestId !== undefined && (typeof requestId !== "string" || !/^[a-zA-Z0-9._:-]{1,160}$/.test(requestId))) {
+          json(res, 400, { error: "invalid prompt request ID" });
+          return;
+        }
+        const fingerprint = createHash("sha256").update(JSON.stringify({ sid, action, userText, system, model, thinkingLevel: body.thinkingLevel })).digest("hex");
         const ac = new AbortController();
-        const onClose = () => ac.abort();
-        req.on("close", onClose);
+        const onClose = () => { if (!res.writableEnded && !requestId) ac.abort(); };
+        res.on("close", onClose);
 
         try {
-          await enqueueTurn(async () => {
+          const work = () => enqueueTurn(async () => {
             const session = await ensureSession(sid);
             beginTurnProgress(sid);
             try {
@@ -1030,8 +1037,7 @@ const server = createServer(async (req, res) => {
               session.messages.push(assistant);
               trimToolStubs(session);
 
-              if (action === "prompt_async") json(res, 200, { ok: true });
-              else json(res, 200, assistant);
+              return assistant;
             } catch (e) {
               finishTurnProgress(
                 sid,
@@ -1042,19 +1048,32 @@ const server = createServer(async (req, res) => {
               turnProgress.delete(sid);
             }
           });
+          const assistant = requestId
+            ? await promptRequests.run(JSON.stringify([sid, requestId]), fingerprint, work)
+            : await work();
+          if (!res.destroyed) json(res, 200, action === "prompt_async" ? { ok: true } : assistant);
         } catch (e) {
-          if (e.name === "AbortError" || ac.signal.aborted) {
-            void recoverStuckPi("client disconnect");
+          if (res.destroyed) return;
+          if (e.statusCode === 409) {
+            json(res, 409, { error: e.message });
+          } else if (e.name === "AbortError" || ac.signal.aborted) {
+            if (!e.replayed && !e.recoveryHandled) {
+              e.recoveryHandled = true;
+              void recoverStuckPi("client disconnect");
+            }
             json(res, 499, { error: "aborted" });
           } else if (/hard cap|force-killed|timed out/i.test(e.message || "")) {
-            void recoverStuckPi(e.message);
+            if (!e.replayed && !e.recoveryHandled) {
+              e.recoveryHandled = true;
+              void recoverStuckPi(e.message);
+            }
             json(res, 504, { error: e.message });
           } else {
             log("message error:", e.message);
             json(res, 500, { error: e.message });
           }
         } finally {
-          req.off("close", onClose);
+          res.off("close", onClose);
         }
         return;
       }
