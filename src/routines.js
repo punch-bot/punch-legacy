@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as chrono from "chrono-node";
 import cronParser from "cron-parser";
 import { DEFAULT_TIME_ZONE, formatInTimeZone, getTimeZoneOffsetMinutes, localDateParts, normalizeTimeZone, zonedWallTimeToUtc } from "./timezone.js";
@@ -319,7 +319,14 @@ function appendHistory(entry) {
   saveHistory();
 }
 
+export function saveRoutineRequest(routine, value) {
+  if (getRoutine(routine.id) !== routine || !routine.agentRequest) throw new Error("routine occurrence is no longer active");
+  Object.assign(routine.agentRequest, value);
+  saveRoutines();
+}
+
 function markStarted(routine) {
+  routine.agentRequest ||= { id: randomUUID(), sessionId: null, body: null };
   routine.state = "running";
   routine.attempts += 1;
   routine.startedAt = Date.now();
@@ -329,6 +336,7 @@ function markStarted(routine) {
 }
 
 function completeRoutine(routine, execution) {
+  delete routine.agentRequest;
   const finishedAt = Date.now();
   execution.status = "succeeded";
   execution.finishedAt = finishedAt;

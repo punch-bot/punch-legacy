@@ -11,9 +11,11 @@ The sandbox gateway keeps a SQLite request ledger next to its session map (`<ses
 - Reusing an ID for different inputs returns HTTP 409.
 - Failed requests return the recorded failure without replaying the prompt.
 - A request recorded as running before a gateway crash fails closed with HTTP 409 after restart. Its execution cannot safely be inferred, so it is never automatically resubmitted. A genuinely new user turn gets a new ID.
-- Completed records are retained for seven days, capped at approximately 512 recent results. Interrupted running records are kept to prevent unsafe replay.
+- Completed and failed records are retained for seven days without a count-based eviction cap. Interrupted running records are kept to prevent unsafe replay.
+- Result updates are retried three times on storage errors. If storage remains unavailable, completed results and failures stay replayable in memory and persistence is retried on the next lookup. After a process crash without a successful durable result update, the original running marker still fails closed; completion cannot be recovered from lost memory.
+- Routine occurrences persist their request ID, session and original request body before submission. Scheduler retries reuse that snapshot; completing the occurrence clears it so the next scheduled occurrence gets a fresh ID.
 
-An identified request is not cancelled merely because one HTTP response socket closes. Explicit cancellation still aborts the client request and calls the session abort endpoint. Older callers without request IDs retain disconnect cancellation; that listener is attached to the response socket rather than the already-read request stream.
+An identified request is not cancelled merely because one HTTP response socket closes. The existing stop command owns explicit cancellation and calls the session abort endpoint once; the transport abort listener does not issue a second gateway abort. Older callers without request IDs retain disconnect cancellation; that listener is attached to the response socket rather than the already-read request stream.
 
 ## Deployment
 

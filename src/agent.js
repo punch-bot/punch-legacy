@@ -333,13 +333,13 @@ export function classifyIdleWatchdogEvent(event, lastFingerprint = "") {
 
 const TOOL_STALE_MS = (Number(process.env.PI_TOOL_STALE_TIMEOUT) || 1800) * 1000;
 
-async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null) {
+async function postMessageWithIdle(sid, path, body, onProgress, signal = null, baseUrl, userId = null, requestId = randomUUID()) {
   if (!baseUrl) throw new Error("No sandbox server assigned for this user");
   const srv = baseUrl;
   const url = `${srv}${path}`;
   const postAC = new AbortController();
   const sseAC = new AbortController();
-  const requestBody = JSON.stringify({ ...body, requestId: randomUUID() });
+  const requestBody = JSON.stringify({ ...body, requestId });
 
   if (signal) {
     if (signal.aborted) {
@@ -349,7 +349,6 @@ async function postMessageWithIdle(sid, path, body, onProgress, signal = null, b
       signal.addEventListener("abort", () => {
         postAC.abort();
         sseAC.abort();
-        void abortSession(sid, userId);
       }, { once: true });
     }
   }
@@ -621,11 +620,11 @@ async function fetchActiveModel(userId, signal = null) {
   return active;
 }
 
-export async function runAgent(message, sessionId = null, onProgress = null, signal = null, userId = null, attachments = [], onSession = null) {
+export async function runAgent(message, sessionId = null, onProgress = null, signal = null, userId = null, attachments = [], onSession = null, request = null) {
   const srv = serverFor(userId);
   if (!srv) throw new Error("No sandbox assigned. Ask an admin to create one with /sandbox, or wait for your turn.");
   const dir = userDir(userId);
-  let sid = sessionId || (await createSession(userId));
+  let sid = request?.sessionId || sessionId || (await createSession(userId));
   onSession?.(sid);
   const q = `?directory=${encodeURIComponent(dir)}`;
 
@@ -661,19 +660,22 @@ export async function runAgent(message, sessionId = null, onProgress = null, sig
     try {
       const parts = [{ type: "text", text: message }];
 
+      const body = request?.body || {
+        model: { providerID: activeProvider, modelID: activeModel },
+        thinkingLevel,
+        system: sysPrompt,
+        parts,
+      };
+      request?.save?.({ sessionId: sid, body });
       const msg = await postMessageWithIdle(
         sid,
         `/session/${sid}/message${q}`,
-        {
-          model: { providerID: activeProvider, modelID: activeModel },
-          thinkingLevel,
-          system: sysPrompt,
-          parts,
-        },
+        body,
         onProgress,
         signal,
         srv,
         userId,
+        request?.id,
       );
 
       let out = formatAgentError(msg.info) || partsToOutput(msg.parts);
