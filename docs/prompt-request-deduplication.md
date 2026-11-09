@@ -23,4 +23,4 @@ Both sides must be deployed: the bot needs to send stable IDs and the sandbox im
 
 Temporary fault-injection checks exercised concurrent duplicates, changed payloads, cached failures, interrupted requests, and completed-response replay after reopening the database. A real local HTTP server executing the patched gateway route was disconnected after accepting a prompt; its retry and a retry after reopening the ledger both returned the original result, with exactly one prompt invocation. Syntax checks and `git diff --check` passed.
 
-The existing suite was attempted with available dependencies: 34 checks passed and six test files could not load because `discord-markdown-parser` is not installed. Full dependency installation is still required to finish the suite. No existing tests or checker configuration were changed.
+After installing the locked dependencies, all 72 existing tests passed. `npm run typecheck`, `npm run lint`, syntax checks for the gateway and ledger, and `git diff --check` also passed. No existing tests or checker configuration were changed.
