@@ -18,6 +18,7 @@ export const CUSTOM_MODEL_MODAL_ID = "custom_model";
 export const MODELS_MENU_EXPIRED = "⌛ This menu expired. Run `/models` again to change your model or reasoning level.";
 export const MODELS_PER_PAGE = 15;
 export const ALL_VENDORS = "-";
+export const MENU_PLACE_TTL_MS = 12 * 60 * 60_000;
 
 const PROVIDER_PRIORITY = [
   "claude",
@@ -80,6 +81,45 @@ export function modelPage(models, page, pageSize = MODELS_PER_PAGE) {
     pages: total,
     slice: models.slice(safePage * pageSize, safePage * pageSize + pageSize),
   };
+}
+
+export function pageOfModel(models, value, pageSize = MODELS_PER_PAGE) {
+  const index = models.findIndex((model) => model.value === value);
+  return index === -1 ? 0 : Math.floor(index / pageSize);
+}
+
+// Where the user last stood in the menu, so `/models` can reopen there instead of
+// making them pick a provider, a vendor and a page all over again.
+export function rememberMenuPlace(store, uid, place, now = Date.now()) {
+  if (!uid) return null;
+  const provider = place?.provider ? String(place.provider) : null;
+  if (!provider) {
+    store.delete(uid);
+    return null;
+  }
+  const page = Number(place?.page);
+  const next = {
+    provider,
+    vendor: place?.vendor ? String(place.vendor) : ALL_VENDORS,
+    page: Number.isFinite(page) && page > 0 ? Math.floor(page) : 0,
+    at: now,
+  };
+  store.set(uid, next);
+  return next;
+}
+
+export function forgetMenuPlace(store, uid) {
+  store.delete(uid);
+}
+
+export function recalledMenuPlace(store, uid, now = Date.now()) {
+  const place = store.get(uid);
+  if (!place?.provider) return null;
+  if (now - place.at > MENU_PLACE_TTL_MS) {
+    store.delete(uid);
+    return null;
+  }
+  return place;
 }
 
 export function vendorOf(value, provider) {

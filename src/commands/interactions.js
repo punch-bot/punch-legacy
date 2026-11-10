@@ -85,7 +85,14 @@ import {
   sortModelsForMenu,
   vendorChoices,
   thinkingLevelLabel,
+  pageOfModel,
+  rememberMenuPlace,
+  forgetMenuPlace,
+  recalledMenuPlace,
 } from "./models-menu.js";
+
+// uid -> { provider, vendor, page, at }, so reopening `/models` skips the walk back.
+const modelsMenuPlaces = new Map();
 
 async function modelsSupervisor(uid, path, body) {
   const auth = supervisorAuth(apiUrlFor(uid));
@@ -162,6 +169,22 @@ async function modelsMenuFor(uid, expiresAt, notice) {
     const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
     const providers = await providerChoices(apiUrl);
     const currentProvider = String(model || "").split("/")[0];
+    const place = recalledMenuPlace(modelsMenuPlaces, uid);
+    const known = (name) => Boolean(name) && providers.some((p) => p.name === name);
+    // Reopen where they left off; first run lands on the current model's own page.
+    const provider = known(place?.provider) ? place.provider : (known(currentProvider) ? currentProvider : null);
+    if (provider) {
+      const remembered = place?.provider === provider;
+      const menu = await providerModelsMenuFor(
+        uid,
+        provider,
+        remembered ? place.page : undefined,
+        expiresAt,
+        notice,
+        remembered ? place.vendor : undefined,
+      );
+      if (menu?.components?.length) return menu;
+    }
     const meta = currentProvider ? describeCurrentModel(apiUrl, currentProvider, await modelsForProvider(apiUrl, currentProvider), model) : {};
     return renderModelsMenu({
       model,
@@ -197,7 +220,13 @@ async function providerModelsMenuFor(uid, provider, page, expiresAt, notice, ven
       currentProvider ? modelsForProvider(apiUrl, currentProvider) : Promise.resolve([]),
     ]);
     const meta = describeCurrentModel(apiUrl, currentProvider, currentModels, model);
-    return renderProviderModels({ provider, models, page, vendor, expiresAt, model, thinkingLevel, notice, ...meta });
+    // A remembered vendor can go away when a provider renames its models; never land on an empty page.
+    const usableVendor = vendor !== ALL_VENDORS && filterByVendor(models, provider, vendor).length ? vendor : ALL_VENDORS;
+    // No explicit page means "open where my model is" rather than page one.
+    const landing = page == null
+      ? pageOfModel(sortModelsForMenu(filterByVendor(models, provider, usableVendor)), model)
+      : page;
+    return renderProviderModels({ provider, models, page: landing, vendor: usableVendor, expiresAt, model, thinkingLevel, notice, ...meta });
   } catch (err) {
     return { content: [notice, `⚠️ Error fetching models for \`${provider}\`: ${err.message}`].filter(Boolean).join("\n"), components: [] };
   }
@@ -868,19 +897,8 @@ export function registerInteractions(client) {
       if (!apiUrlFor(uid)) { await interaction.reply({ content: "No sandbox assigned.", flags: MessageFlags.Ephemeral }); return; }
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
-        const { model, thinkingLevel } = await modelsSupervisor(uid, "/model");
         const expiresAt = Date.now() + MODELS_MENU_TTL_MS;
-        const providers = await providerChoices(apiUrlFor(uid));
-        const currentProvider = String(model || "").split("/")[0];
-        const meta = currentProvider ? describeCurrentModel(apiUrlFor(uid), currentProvider, await modelsForProvider(apiUrlFor(uid), currentProvider), model) : {};
-        await interaction.editReply(renderModelsMenu({
-          model,
-          thinkingLevel,
-          expiresAt,
-          providers,
-          currentLabel: meta.modelLabel,
-          currentContextWindow: meta.modelContextWindow,
-        }));
+        await interaction.editReply(await modelsMenuFor(uid, expiresAt));
         setTimeout(() => {
           interaction.editReply({ content: MODELS_MENU_EXPIRED, components: [] }).catch(() => {});
         }, MODELS_MENU_TTL_MS).unref();
@@ -1931,8 +1949,9 @@ export function registerInteractions(client) {
     }
     await interaction.deferUpdate();
     const provider = interaction.values[0];
+    rememberMenuPlace(modelsMenuPlaces, interaction.user.id, { provider, vendor: ALL_VENDORS, page: 0 });
     try {
-      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, 0, expiresAt));
+      await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, undefined, expiresAt));
     } catch (err) {
       await interaction.editReply({ content: `⚠️ Could not load models for \`${provider}\`: ${err.message}`, components: [] }).catch(() => {});
     }
@@ -1949,6 +1968,7 @@ export function registerInteractions(client) {
     await interaction.deferUpdate();
     const provider = args[0];
     const vendor = interaction.values[0];
+    rememberMenuPlace(modelsMenuPlaces, interaction.user.id, { provider, vendor, page: 0 });
     try {
       await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, 0, expiresAt, "", vendor));
     } catch (err) {
@@ -1967,10 +1987,12 @@ export function registerInteractions(client) {
     await interaction.deferUpdate();
     try {
       if (base === MODEL_BACK_ID) {
+        forgetMenuPlace(modelsMenuPlaces, interaction.user.id);
         await interaction.editReply(await modelsMenuFor(interaction.user.id, expiresAt));
         return;
       }
       const [provider, vendor, page] = args;
+      rememberMenuPlace(modelsMenuPlaces, interaction.user.id, { provider, vendor: vendor || ALL_VENDORS, page: Number(page) || 0 });
       await interaction.editReply(await providerModelsMenuFor(interaction.user.id, provider, Number(page) || 0, expiresAt, "", vendor || ALL_VENDORS));
     } catch (err) {
       await interaction.editReply({ content: `⚠️ Could not update the model menu: ${err.message}`, components: [] }).catch(() => {});
@@ -2044,6 +2066,7 @@ export function registerInteractions(client) {
     const uid = interaction.user.id;
     await interaction.deferUpdate();
     const notice = await setModelNotice(uid, model);
+    forgetMenuPlace(modelsMenuPlaces, uid);
     await interaction.editReply(await modelsMenuFor(uid, expiresAt, notice));
   });
 
