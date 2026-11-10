@@ -2,7 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  ALL_VENDORS,
+  MENU_PLACE_TTL_MS,
   MODELS_PER_PAGE,
+  forgetMenuPlace,
+  pageOfModel,
+  recalledMenuPlace,
+  rememberMenuPlace,
   filterByVendor,
   formatContext,
   modelPage,
@@ -130,4 +136,36 @@ test("paging clamps past the ends and never returns an empty slice", () => {
   assert.equal(modelPage(models, 99).page, 2);
   assert.equal(modelPage(models, -5).page, 0);
   assert.equal(modelPage([], 0).pages, 1);
+});
+
+test("rerunning /models reopens on the provider and page you left", () => {
+  const store = new Map();
+  const now = Date.now();
+  assert.equal(recalledMenuPlace(store, "u1", now), null, "a fresh user has nowhere to reopen");
+
+  rememberMenuPlace(store, "u1", { provider: "opencode-go", vendor: "deepseek", page: 3 }, now);
+  assert.deepEqual(recalledMenuPlace(store, "u1", now), { provider: "opencode-go", vendor: "deepseek", page: 3, at: now });
+
+  rememberMenuPlace(store, "u1", { provider: "opencode-go" }, now);
+  const cleared = recalledMenuPlace(store, "u1", now);
+  assert.equal(cleared.vendor, ALL_VENDORS, "a provider pick resets the vendor filter");
+  assert.equal(cleared.page, 0, "and starts at the first page");
+
+  rememberMenuPlace(store, "u1", { provider: null, page: 2 }, now);
+  assert.equal(recalledMenuPlace(store, "u1", now), null, "backing out to the provider list forgets the place");
+
+  rememberMenuPlace(store, "u1", { provider: "mistral", page: 1 }, now);
+  assert.equal(recalledMenuPlace(store, "u1", now + MENU_PLACE_TTL_MS + 1), null, "a stale place expires");
+  assert.equal(store.size, 0, "and is dropped, not just ignored");
+
+  rememberMenuPlace(store, "u1", { provider: "mistral" }, now);
+  forgetMenuPlace(store, "u1");
+  assert.equal(recalledMenuPlace(store, "u1", now), null);
+});
+
+test("a provider page can open on the page holding the current model", () => {
+  const sorted = sortModelsForMenu(models);
+  assert.equal(pageOfModel(sorted, sorted[MODELS_PER_PAGE + 2].value), 1);
+  assert.equal(pageOfModel(sorted, "openrouter/not-here"), 0, "an unknown model falls back to the first page");
+  assert.equal(pageOfModel(sorted, sorted[0].value), 0);
 });
